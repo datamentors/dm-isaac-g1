@@ -3,6 +3,33 @@
 Provides integration with Unitree's Isaac Sim environments for
 testing the fine-tuned GROOT model in simulation.
 
+GR00T N1.6 Action Chunking Strategy
+------------------------------------
+GR00T 1.6 uses Flow Matching with a 32-layer DiT to predict action chunks.
+Key parameters:
+
+- action_horizon: Number of steps to predict (8-16 recommended, configurable)
+- execute_steps: How many of the predicted steps to execute before re-planning
+
+Control Strategies:
+1. Receding Horizon (MPC-style, recommended):
+   - action_horizon=16, execute_steps=1
+   - Re-plan every step for maximum robustness
+   - Best for dynamic environments and disturbance rejection
+
+2. Partial Execution:
+   - action_horizon=16, execute_steps=8
+   - Execute half, then re-plan
+   - Balance between efficiency and robustness
+
+3. Open-Loop (fast but less robust):
+   - action_horizon=8, execute_steps=8
+   - Execute full trajectory before re-planning
+   - Use only in controlled, predictable environments
+
+WARNING: Single-step prediction (action_horizon=1) causes jittering and
+significantly degrades performance. Always use action_horizon >= 8.
+
 Supported environments from unitree_sim_isaaclab:
 - Isaac-PickPlace-Cylinder-G129-Inspire-Joint
 - Isaac-PickPlace-RedBlock-G129-Inspire-Joint
@@ -109,6 +136,8 @@ class IsaacSimRunner:
         self,
         task: str = "Complete the manipulation task",
         max_steps: int = 500,
+        action_horizon: int = 16,
+        execute_steps: int = 1,
         render: bool = False,
         record: bool = False,
     ) -> EpisodeResult:
@@ -120,6 +149,8 @@ class IsaacSimRunner:
         Args:
             task: Task description for language conditioning.
             max_steps: Maximum steps per episode.
+            action_horizon: Number of steps GROOT predicts (8-16 recommended).
+            execute_steps: Steps to execute before re-planning (1=receding horizon).
             render: Whether to render the simulation.
             record: Whether to record video.
 
@@ -138,6 +169,8 @@ class IsaacSimRunner:
             env=self.current_env,
             task=task,
             max_steps=max_steps,
+            action_horizon=action_horizon,
+            execute_steps=execute_steps,
             render=render,
             record=record,
         )
@@ -168,6 +201,8 @@ class IsaacSimRunner:
         env: IsaacEnv,
         task: str,
         max_steps: int,
+        action_horizon: int,
+        execute_steps: int,
         render: bool,
         record: bool,
     ) -> str:
@@ -177,6 +212,8 @@ class IsaacSimRunner:
             env: Environment to use.
             task: Task description.
             max_steps: Maximum steps.
+            action_horizon: Steps GROOT predicts.
+            execute_steps: Steps to execute before re-planning.
             render: Whether to render.
             record: Whether to record.
 
@@ -184,7 +221,12 @@ class IsaacSimRunner:
             Python script as string.
         """
         return f'''#!/usr/bin/env python3
-"""Auto-generated episode runner for GROOT inference testing."""
+"""Auto-generated episode runner for GROOT inference testing.
+
+Action Chunking Configuration:
+- action_horizon: {action_horizon} (steps predicted by GROOT)
+- execute_steps: {execute_steps} (steps executed before re-planning)
+"""
 import json
 import numpy as np
 import requests
@@ -195,10 +237,16 @@ GROOT_PORT = {self.config.groot_server_port}
 ENV_NAME = "{env.value}"
 TASK = "{task}"
 MAX_STEPS = {max_steps}
+ACTION_HORIZON = {action_horizon}
+EXECUTE_STEPS = {execute_steps}
 
 def get_action(observation, image=None):
-    """Get action from GROOT server."""
-    payload = {{"observation": observation.tolist()}}
+    """Get action trajectory from GROOT server."""
+    payload = {{
+        "observation": observation.tolist(),
+        "action_horizon": ACTION_HORIZON,
+        "execute_steps": EXECUTE_STEPS,
+    }}
     if image is not None:
         import base64
         payload["image"] = base64.b64encode(image.tobytes()).decode()
@@ -211,7 +259,9 @@ def get_action(observation, image=None):
         timeout=5.0,
     )
     response.raise_for_status()
-    return np.array(response.json()["action"])
+    result = response.json()
+    actions = np.array(result["action"])
+    return actions
 
 def run_episode():
     """Run episode and return results."""
@@ -230,8 +280,9 @@ def run_episode():
 
         total_reward = 0.0
         success = False
+        step = 0
 
-        for step in range(MAX_STEPS):
+        while step < MAX_STEPS:
             # Get observation state (assuming it's in obs dict)
             if isinstance(obs, dict):
                 state = obs.get("policy", obs.get("observation", np.zeros(53)))
@@ -243,15 +294,27 @@ def run_episode():
             if isinstance(obs, dict) and "image" in obs:
                 image = obs["image"]
 
-            # Get action from GROOT
-            action = get_action(state, image)
+            # Get action trajectory from GROOT
+            actions = get_action(state, image)
 
-            # Step environment
-            obs, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
+            # Handle single action vs action sequence
+            if actions.ndim == 1:
+                actions = actions.reshape(1, -1)
+
+            # Execute each action in the returned sequence
+            for action in actions:
+                if step >= MAX_STEPS:
+                    break
+
+                obs, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
+                step += 1
+
+                if terminated:
+                    success = info.get("success", reward > 0)
+                    break
 
             if terminated:
-                success = info.get("success", reward > 0)
                 break
 
         env.close()
@@ -261,7 +324,9 @@ def run_episode():
         result = {{
             "success": bool(success),
             "total_reward": float(total_reward),
-            "steps": step + 1,
+            "steps": step,
+            "action_horizon": ACTION_HORIZON,
+            "execute_steps": EXECUTE_STEPS,
         }}
         print("RESULT:" + json.dumps(result))
 

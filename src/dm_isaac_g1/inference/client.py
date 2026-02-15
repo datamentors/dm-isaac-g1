@@ -2,6 +2,23 @@
 
 Supports both synchronous and asynchronous communication with the
 GROOT inference server running on the Spark server (192.168.1.237).
+
+GR00T N1.6 Action Chunking:
+---------------------------
+GR00T 1.6 uses Flow Matching with a 32-layer Diffusion Transformer (DiT) to
+predict action chunks (typically 8-16 steps). Key characteristics:
+
+- Action horizon is configurable at inference time (8-16 steps recommended)
+- Single-step inference (action_horizon=1) causes jittering and poor performance
+- Actions are state-relative for smoother, more accurate motion
+- The flow matching approach reconstructs continuous actions from noise
+
+For closed-loop control, use receding horizon (MPC-style):
+1. Get observation from environment
+2. Request N-step trajectory from GROOT
+3. Execute first M steps (M <= N, typically M=1 or M=N//2)
+4. Get new observation
+5. Repeat until task complete
 """
 
 import base64
@@ -73,24 +90,42 @@ class GrootClient:
         observation: np.ndarray,
         image: Optional[np.ndarray] = None,
         task: Optional[str] = None,
+        action_horizon: int = 16,
+        execute_steps: int = 1,
         return_full_trajectory: bool = False,
     ) -> Union[np.ndarray, dict]:
         """Get action from the GROOT model.
+
+        GR00T 1.6 predicts action chunks (typically 8-16 steps). This method
+        allows configuring the action horizon at runtime for optimal performance.
 
         Args:
             observation: Robot state observation (53 DOF for G1+Inspire).
             image: Optional RGB image from robot camera (H, W, 3).
             task: Optional task description for language-conditioned control.
-            return_full_trajectory: If True, return full action trajectory.
+            action_horizon: Number of steps to predict (8-16 recommended).
+                           Single-step (1) causes jittering - avoid for production.
+            execute_steps: Number of steps to return for execution (1 to action_horizon).
+                          For receding horizon control, use 1. For open-loop, use full horizon.
+            return_full_trajectory: If True, return full predicted trajectory.
 
         Returns:
             Action array (53 DOF) or dict with trajectory if requested.
+            If execute_steps > 1, returns array of shape (execute_steps, 53).
 
         Raises:
             httpx.HTTPError: If request fails.
+            ValueError: If execute_steps > action_horizon.
         """
+        if execute_steps > action_horizon:
+            raise ValueError(
+                f"execute_steps ({execute_steps}) cannot exceed action_horizon ({action_horizon})"
+            )
+
         payload = {
             "observation": observation.tolist(),
+            "action_horizon": action_horizon,
+            "execute_steps": execute_steps,
         }
 
         if image is not None:
@@ -118,6 +153,7 @@ class GrootClient:
             return {
                 "action": np.array(result["action"]),
                 "trajectory": np.array(result.get("trajectory", [])),
+                "action_horizon": result.get("action_horizon", action_horizon),
             }
 
         return np.array(result["action"])
@@ -211,6 +247,8 @@ class GrootClientAsync:
         observation: np.ndarray,
         image: Optional[np.ndarray] = None,
         task: Optional[str] = None,
+        action_horizon: int = 16,
+        execute_steps: int = 1,
     ) -> np.ndarray:
         """Get action from the GROOT model asynchronously.
 
@@ -218,12 +256,21 @@ class GrootClientAsync:
             observation: Robot state observation.
             image: Optional RGB image.
             task: Optional task description.
+            action_horizon: Number of steps to predict (8-16 recommended).
+            execute_steps: Number of steps to return for execution.
 
         Returns:
-            Action array.
+            Action array. Shape (53,) if execute_steps=1, else (execute_steps, 53).
         """
+        if execute_steps > action_horizon:
+            raise ValueError(
+                f"execute_steps ({execute_steps}) cannot exceed action_horizon ({action_horizon})"
+            )
+
         payload = {
             "observation": observation.tolist(),
+            "action_horizon": action_horizon,
+            "execute_steps": execute_steps,
         }
 
         if image is not None:
