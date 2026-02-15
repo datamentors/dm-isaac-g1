@@ -1,0 +1,100 @@
+# Isaac Sim Scene Configuration
+
+scene:
+  name: "g1_workspace"
+
+  # Environment settings
+  environment:
+    ground_plane: true
+    gravity: [0.0, 0.0, -9.81]
+    physics_dt: 0.005  # 200 Hz physics
+    rendering_dt: 0.0167  # 60 Hz rendering
+
+  # Lighting
+  lighting:
+    dome_light:
+      intensity: 1000
+      color: [1.0, 1.0, 1.0]
+    distant_light:
+      intensity: 500
+      angle: [45, -45]
+
+  # Robot spawn configuration
+  robot:
+    spawn_position: [0.0, 0.0, 0.95]
+    spawn_orientation: [0.0, 0.0, 0.0, 1.0]  # quaternion (x, y, z, w)
+
+  # Objects for manipulation tasks
+  objects:
+    table:
+      enabled: true
+      position: [0.6, 0.0, 0.4]
+      size: [0.8, 0.6, 0.02]
+
+    target_sphere:
+      enabled: true
+      radius: 0.05
+      color: [1.0, 0.0, 0.0]  # red
+
+    manipulation_objects:
+      - type: "cube"
+        size: 0.05
+        mass: 0.1
+        position: [0.5, 0.1, 0.45]
+
+      - type: "cylinder"
+        radius: 0.03
+        height: 0.1
+        mass: 0.1
+        position: [0.5, -0.1, 0.45]
+
+  # Camera configuration
+  cameras:
+    main:
+      position: [2.0, 2.0, 1.5]
+      target: [0.0, 0.0, 1.0]
+      fov: 60
+
+    robot_head:
+      attached_to: "head_link"
+      offset: [0.1, 0.0, 0.0]
+      resolution: [640, 480]
+
+    wrist:
+      attached_to: "right_wrist_link"
+      offset: [0.05, 0.0, 0.0]
+      resolution: [320, 240]
+
+  # Simulation parameters
+  simulation:
+    use_gpu: true
+    use_fabric: true
+    enable_scene_query_support: true
+
+# Phase-specific scene configurations
+phase_configs:
+  phase1_inference:
+    objects:
+      table: true
+      manipulation_objects: true
+    cameras: ["main", "robot_head"]
+
+  phase2_rl:
+    num_envs: 4096
+    env_spacing: 2.5
+    objects:
+      target_sphere: true
+    cameras: ["main"]
+
+  phase3_finetuning:
+    num_envs: 256
+    objects:
+      table: true
+      manipulation_objects: true
+    cameras: ["main", "robot_head", "wrist"]
+
+  phase4_navigation:
+    env_size: [20.0, 20.0]
+    obstacles: true
+    waypoints: true
+    cameras: ["main", "robot_head"]

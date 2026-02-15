@@ -1,0 +1,167 @@
+# G1 Robot Configuration
+# Based on Unitree G1 EDU specifications with Inspire Robotics Hands
+
+robot:
+  name: "unitree_g1"
+  model: "g1_edu"
+
+  # USD asset paths
+  usd_path: "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/g1.usd"
+  local_usd: "assets/g1_29dof_rev_1_0.usd"
+
+  # USD Variants - Control robot configuration
+  variants:
+    physics: "PhysX"
+    sensor: "None"  # Options: None, Lidar, Camera
+
+    # Hand configurations for Inspire Robotics hands
+    # Options: None, Inspire
+    left_hand: "None"      # Set to "Inspire" for dual-hand manipulation
+    right_hand: "Inspire"  # Inspire hand for grasping
+
+  # Degrees of freedom configuration
+  dof:
+    total: 29
+    legs: 12        # 6 per leg (hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll)
+    arms: 10        # 5 per arm (shoulder_pitch, shoulder_roll, shoulder_yaw, elbow, wrist_*)
+    torso: 4
+    head: 3
+    inspire_hand: 12  # Per hand: 6 fingers with 2 joints each
+
+  # Joint limits (radians)
+  joint_limits:
+    hip_pitch: [-1.57, 1.57]
+    hip_roll: [-0.52, 0.52]
+    hip_yaw: [-1.05, 1.05]
+    knee: [0.0, 2.62]
+    ankle_pitch: [-0.87, 0.87]
+    ankle_roll: [-0.26, 0.26]
+    shoulder_pitch: [-3.14, 3.14]
+    shoulder_roll: [-1.57, 1.57]
+    shoulder_yaw: [-1.57, 1.57]
+    elbow: [0.0, 2.62]
+    wrist: [-1.57, 1.57]
+
+  # Joint names for right arm
+  right_arm_joints:
+    - "right_shoulder_pitch_joint"
+    - "right_shoulder_roll_joint"
+    - "right_shoulder_yaw_joint"
+    - "right_elbow_joint"
+    - "right_wrist_roll_joint"
+    - "right_wrist_pitch_joint"
+    - "right_wrist_yaw_joint"
+
+  # Inspire hand joints (right hand)
+  right_hand_joints:
+    - "R_index_proximal_joint"
+    - "R_index_intermediate_joint"
+    - "R_middle_proximal_joint"
+    - "R_middle_intermediate_joint"
+    - "R_ring_proximal_joint"
+    - "R_ring_intermediate_joint"
+    - "R_pinky_proximal_joint"
+    - "R_pinky_intermediate_joint"
+    - "R_thumb_proximal_yaw_joint"
+    - "R_thumb_proximal_pitch_joint"
+    - "R_thumb_intermediate_joint"
+    - "R_thumb_distal_joint"
+
+  # Left arm joints (for dual-arm tasks)
+  left_arm_joints:
+    - "left_shoulder_pitch_joint"
+    - "left_shoulder_roll_joint"
+    - "left_shoulder_yaw_joint"
+    - "left_elbow_joint"
+    - "left_wrist_roll_joint"
+    - "left_wrist_pitch_joint"
+    - "left_wrist_yaw_joint"
+
+  # Inspire hand joints (left hand - when enabled)
+  left_hand_joints:
+    - "L_index_proximal_joint"
+    - "L_index_intermediate_joint"
+    - "L_middle_proximal_joint"
+    - "L_middle_intermediate_joint"
+    - "L_ring_proximal_joint"
+    - "L_ring_intermediate_joint"
+    - "L_pinky_proximal_joint"
+    - "L_pinky_intermediate_joint"
+    - "L_thumb_proximal_yaw_joint"
+    - "L_thumb_proximal_pitch_joint"
+    - "L_thumb_intermediate_joint"
+    - "L_thumb_distal_joint"
+
+  # Control configuration
+  control:
+    # Position control gains
+    kp_legs: 100.0
+    kd_legs: 10.0
+    kp_arms: 400.0      # Higher for precise arm control
+    kd_arms: 40.0
+    kp_hands: 200.0     # Inspire hand gains
+    kd_hands: 20.0
+
+    # Control frequency
+    control_freq: 50  # Hz
+
+    # Action scaling
+    action_scale:
+      legs: 0.5
+      arms: 2.5        # Larger scale for arm movements
+      hands: 1.0       # Full range for grip
+
+    # Effort and velocity limits
+    arm_effort_limit: 200.0
+    arm_velocity_limit: 8.0
+    hand_effort_limit: 50.0
+    hand_velocity_limit: 10.0
+
+  # Physical properties
+  physics:
+    mass: 35.0  # kg (without hands)
+    height: 1.27  # m (standing)
+
+  # Initial pose (non-zero to avoid collision)
+  default_pose:
+    standing: true
+    right_shoulder_pitch_joint: 0.4
+    right_shoulder_roll_joint: 0.2
+    right_elbow_joint: 0.5
+
+# Workspace configuration for arm reaching
+workspace:
+  right_arm:
+    radius_min: 0.18  # m
+    radius_max: 0.40  # m
+    azimuth: [-0.3, 1.2]  # radians
+    elevation: [-0.4, 0.6]  # radians
+  left_arm:
+    radius_min: 0.18
+    radius_max: 0.40
+    azimuth: [-1.2, 0.3]
+    elevation: [-0.4, 0.6]
+
+# Grasp configuration for Inspire hands
+grasp:
+  grasp_distance: 0.06        # Distance threshold to start grasping (m)
+  grip_close_threshold: 0.3   # Grip action value threshold
+  lift_success_height: 0.04   # Height to consider lift successful (m)
+
+# Hand presets for common grasps
+hand_presets:
+  open:
+    description: "Fully open hand"
+    grip_value: -1.0
+
+  power_grasp:
+    description: "Power grasp for large objects"
+    grip_value: 1.0
+
+  precision_grasp:
+    description: "Precision grasp for small objects"
+    grip_value: 0.7
+
+  pinch:
+    description: "Pinch grasp with thumb and index"
+    grip_value: 0.8

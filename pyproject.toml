@@ -1,0 +1,95 @@
+[project]
+name = "dm-isaac-g1"
+version = "0.2.0"
+description = "G1 Robot Training Suite: Fine-tuning, Inference, IL, and RL for Unitree G1 EDU 2 with Inspire Hands"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+license = {text = "MIT"}
+
+dependencies = [
+    # Core
+    "numpy>=1.26.0,<2.0.0",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+
+    # ML/DL
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+
+    # Data
+    "pyarrow>=15.0.0",
+    "huggingface-hub>=0.21.0",
+
+    # Network
+    "httpx>=0.27.0",
+    "paramiko>=3.4.0",
+
+    # Visualization
+    "tensorboard>=2.16.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "pre-commit>=3.6.0",
+]
+wandb = [
+    "wandb>=0.16.0",
+]
+full = [
+    "opencv-python-headless>=4.9.0",
+    "pillow>=10.0.0",
+    "scipy>=1.12.0",
+    "gymnasium>=0.29.0",
+    "wandb>=0.16.0",
+]
+isaac = [
+    # Isaac Lab dependencies - installed via Isaac Lab's installation script
+    # "isaacsim>=4.0.0",
+    # "isaaclab>=1.0.0",
+]
+
+[project.scripts]
+dm-g1 = "dm_isaac_g1.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dm_isaac_g1"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dm_isaac_g1"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
