@@ -1,121 +1,89 @@
-# Workstation Environment (Blackwell)
-# For GROOT fine-tuning and Isaac Sim/Lab simulation
-# Based on actual installed dependencies from ENVIRONMENT_SETUP_LEARNINGS.md
+# Workstation Environment Dockerfile
+# Unified environment for GROOT training and Isaac Sim/Lab simulation
+# Base: NVIDIA Isaac Sim with UV for dependency management
 
-[project]
-name = "dm-workstation-env"
-version = "0.1.0"
-description = "Unified environment for GROOT training and Isaac Sim/Lab simulation"
-requires-python = ">=3.10,<3.12"
-license = {text = "MIT"}
+ARG ISAAC_SIM_VERSION=4.5.0
+FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
-dependencies = [
-    # ==========================================
-    # Core dependencies (from dm-isaac-g1)
-    # ==========================================
-    "numpy>=1.26.0,<2.0.0",
-    "pyyaml>=6.0.1",
-    "python-dotenv>=1.0.0",
-    "click>=8.1.0",
-    "rich>=13.0.0",
-    "tqdm>=4.66.0",
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_SYSTEM_PYTHON=1
+ENV UV_LINK_MODE=copy
 
-    # ==========================================
-    # ML/DL Framework
-    # ==========================================
-    "torch>=2.2.0",
-    "torchvision>=0.17.0",
-    "transformers>=4.40.0",
-    "accelerate>=0.28.0",
-    "safetensors>=0.4.0",
 
-    # ==========================================
-    # Data Processing
-    # ==========================================
-    "pyarrow>=15.0.0",
-    "huggingface-hub>=0.21.0",
-    "h5py>=3.10.0",
-    "pillow>=10.0.0",
-    "opencv-python-headless>=4.9.0",
-    "scipy>=1.12.0",
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    curl \
+    wget \
+    vim \
+    htop \
+    tmux \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-    # ==========================================
-    # RL & Simulation (from ENVIRONMENT_SETUP_LEARNINGS.md)
-    # ==========================================
-    "gymnasium",
-    "flatdict",
+    
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
-    # ==========================================
-    # Network / Communication
-    # ==========================================
-    "httpx>=0.27.0",
-    "paramiko>=3.4.0",
-    "pyzmq>=25.0.0",
-    "msgpack>=1.0.0",
-    "aiohttp",
-    "aiortc",
+# Build CycloneDDS from source (required for unitree_sdk2py)
+WORKDIR /opt
+RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x && \
+    cd cyclonedds && \
+    mkdir -p build install && \
+    cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds/install && \
+    cmake --build . --target install -j$(nproc)
+ENV CYCLONEDDS_HOME=/opt/cyclonedds/install
+ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 
-    # ==========================================
-    # Visualization / Logging
-    # ==========================================
-    "tensorboard>=2.16.0",
-    "wandb>=0.16.0",
+# Install unitree_sdk2py from source
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
+WORKDIR /opt/unitree_sdk2_python
 
-    # ==========================================
-    # GROOT Fine-tuning (Isaac-GR00T deps)
-    # ==========================================
-    "einops>=0.7.0",
-    "timm>=0.9.0",
-    "diffusers>=0.27.0",
-    "peft>=0.10.0",
-    "onnxruntime>=1.22.0",
-    "logging_mp>=0.1.5",
 
-    # ==========================================
-    # IK / Motion Planning (from ENVIRONMENT_SETUP_LEARNINGS.md)
-    # ==========================================
-    "pin>=2.7.0",
-    "qpsolvers[open_source_solvers]>=4.0.0",
-]
+#RUN pip install -e .
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "ruff>=0.3.0",
-    "mypy>=1.9.0",
-    "ipython>=8.0.0",
-    "jupyter>=1.0.0",
-]
+RUN /isaac-sim/python.sh -m pip install .
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.0.0",
-    "ruff>=0.3.0",
-    "ipython>=8.0.0",
-]
+# Create workspace directory
+WORKDIR /workspace
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
+# Copy environment config
+COPY pyproject.toml /workspace/env/
 
-[tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+# Install dependencies with UV
+# Note: We install to the Isaac Sim Python environment
+WORKDIR /workspace/env
 
-# ==========================================
-# Note: Additional packages installed from source
-# ==========================================
-# CycloneDDS: Built from source (releases/0.10.x)
-#   export CYCLONEDDS_HOME=/workspace/cyclonedds/install
-#
-# unitree_sdk2py: Installed from GitHub
-#   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
-#   pip install -e .
-#
-# Isaac Lab: Uses Isaac Sim's embedded Python
-#   /isaac-sim/python.sh -m pip install ...
+
+#RUN uv pip install --system -r pyproject.toml || pip install -e .
+
+RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
+
+
+
+# Set PYTHONPATH for dm-isaac-g1 (will be mounted)
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
+
+# Expose ports
+EXPOSE 47995-48012 
+ # Isaac Sim streaming
+EXPOSE 49000-49007 
+ # Isaac Sim services
+EXPOSE 6006        
+ # TensorBoard
+EXPOSE 5555        
+ # GROOT ZMQ
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
+
+
+
