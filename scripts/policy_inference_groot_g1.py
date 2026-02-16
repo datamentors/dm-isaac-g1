@@ -308,30 +308,19 @@ def main():
     if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
         env_cfg.observations.lower_body_policy = None
 
-    # Add a simple object for pick-and-place scenes if not already present
-    if not hasattr(env_cfg.scene, 'object') or env_cfg.scene.object is None:
+    # Replace object with apple for pick-and-place tasks
+    # This ensures we have a graspable apple-like object regardless of scene default
+    if args_cli.scene in ["locomanipulation_g1", "pickplace_g1_inspire"]:
+        # Position varies by scene - Inspire scene table is at different position
+        if args_cli.scene == "pickplace_g1_inspire":
+            apple_pos = (-0.35, 0.45, 1.05)  # Match original steering wheel position but slightly higher
+        else:
+            apple_pos = (0.0, 0.5, 0.75)  # Default scene position
+
         env_cfg.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(0.0, 0.5, 0.75),  # On table, in front of robot
-                rot=(1, 0, 0, 0),
-            ),
-            spawn=sim_utils.SphereCfg(
-                radius=0.04,  # Apple-sized sphere
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
-                collision_props=sim_utils.CollisionPropertiesCfg(),
-                visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
-                ),
-            ),
-        )
-    elif args_cli.scene == "locomanipulation_g1":
-        # For default scene, replace with apple-like sphere
-        env_cfg.scene.object = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(0.0, 0.5, 0.75),  # On table, in front of robot
+                pos=apple_pos,
                 rot=(1, 0, 0, 0),
             ),
             spawn=sim_utils.SphereCfg(
@@ -341,6 +330,24 @@ def main():
                 collision_props=sim_utils.CollisionPropertiesCfg(),
                 visual_material=sim_utils.PreviewSurfaceCfg(
                     diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
+                ),
+            ),
+        )
+    elif not hasattr(env_cfg.scene, 'object') or env_cfg.scene.object is None:
+        # Fallback for other scenes without objects
+        env_cfg.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=(0.0, 0.5, 0.75),
+                rot=(1, 0, 0, 0),
+            ),
+            spawn=sim_utils.SphereCfg(
+                radius=0.04,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.8, 0.1, 0.1),
                 ),
             ),
         )
