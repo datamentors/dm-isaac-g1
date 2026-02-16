@@ -69,9 +69,46 @@ export GR00T_STATS=/workspace/checkpoints/groot-g1-inspire-9datasets/statistics.
     --action_scale 0.1
 ```
 
-### 3. View in VNC
+### 3. Visualize the Simulation
 
-Connect to `192.168.1.205:5901` with a VNC client to see the simulation.
+There are several ways to view Isaac Sim:
+
+**Option A: Isaac Sim WebRTC Streaming (Recommended)**
+```bash
+# Run inference WITHOUT --headless flag
+/isaac-sim/python.sh /workspace/IsaacLab/scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --language "pick up the red block" \
+    --enable_cameras
+
+# Then open in browser:
+# http://192.168.1.205:48010/streaming/webrtc-client
+```
+
+**Option B: VNC with TurboVNC**
+```bash
+# Inside container, start TurboVNC server
+/opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24
+
+# Set DISPLAY for Isaac Sim
+export DISPLAY=:1
+
+# Run inference
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py ...
+
+# Connect VNC client to 192.168.1.205:5901
+```
+
+**Option C: X11 Forwarding (if on local network)**
+```bash
+# On host machine
+xhost +local:
+
+# In container with DISPLAY already set
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py ...
+```
+
+**Important**: Do NOT use `--headless` flag if you want to see the simulation.
 
 ## Inference Script Parameters
 

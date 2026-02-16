@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        ISAAC_SIM_VERSION: "4.5.0"
+        ISAAC_SIM_VERSION: "5.1.0"
     image: dm-workstation:latest
     container_name: dm-workstation
     runtime: nvidia

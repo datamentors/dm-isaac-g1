@@ -2,7 +2,7 @@
 # Unified environment for GROOT training and Isaac Sim/Lab simulation
 # Base: NVIDIA Isaac Sim with UV for dependency management
 
-ARG ISAAC_SIM_VERSION=4.5.0
+ARG ISAAC_SIM_VERSION=5.1.0
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
 # Set environment variables
@@ -60,10 +60,14 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
 
 # Expose ports
-EXPOSE 47995-48012  # Isaac Sim streaming
-EXPOSE 49000-49007  # Isaac Sim services
-EXPOSE 6006         # TensorBoard
-EXPOSE 5555         # GROOT ZMQ
+# Isaac Sim streaming
+EXPOSE 47995-48012
+# Isaac Sim services
+EXPOSE 49000-49007
+# TensorBoard
+EXPOSE 6006
+# GROOT ZMQ
+EXPOSE 5555
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

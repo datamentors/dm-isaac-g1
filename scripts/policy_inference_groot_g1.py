@@ -30,6 +30,8 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -77,6 +79,17 @@ parser.add_argument(
     nargs=4,
     default=(0.5, -0.5, 0.5, -0.5),
     help="Camera rotation quaternion (w x y z) in the parent frame.",
+)
+parser.add_argument(
+    "--debug_dir",
+    type=str,
+    default="/tmp/groot_debug",
+    help="Directory to save debug images and observations.",
+)
+parser.add_argument(
+    "--save_debug_frames",
+    action="store_true",
+    help="Save camera frames and observation data for debugging.",
 )
 
 # Isaac Sim app launcher args
@@ -575,6 +588,59 @@ def main():
     action_step_idx = 0
     first_action_logged = False
     trajectory_start_pos = None  # Joint positions when trajectory started (for relative actions)
+    debug_frame_count = 0  # Counter for debug frames
+
+    # Create debug directory if saving frames
+    if args_cli.save_debug_frames:
+        debug_dir = Path(args_cli.debug_dir)
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[DEBUG] Saving debug frames to: {debug_dir}", flush=True)
+
+    def save_debug_data(rgb_np, observation, action_dict, frame_idx, step):
+        """Save camera image and observation data for debugging."""
+        try:
+            import cv2
+        except ImportError:
+            print("[WARN] cv2 not available, using PIL for image saving", flush=True)
+            from PIL import Image
+            img = Image.fromarray(rgb_np[0])  # First env
+            img.save(debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}.png")
+        else:
+            # OpenCV expects BGR, our images are RGB
+            bgr_img = cv2.cvtColor(rgb_np[0], cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}.png"), bgr_img)
+
+        # Save observation and action data as JSON
+        obs_data = {
+            "step": step,
+            "frame_idx": frame_idx,
+            "timestamp": datetime.now().isoformat(),
+            "language": args_cli.language,
+            "camera_shape": list(rgb_np.shape),
+            "camera_min_max": [int(rgb_np.min()), int(rgb_np.max())],
+        }
+
+        # Add state data
+        if "state" in observation:
+            for k, v in observation["state"].items():
+                arr = np.asarray(v)
+                obs_data[f"state_{k}_shape"] = list(arr.shape)
+                obs_data[f"state_{k}_sample"] = arr[0, 0, :10].tolist() if arr.ndim >= 3 else arr.flatten()[:10].tolist()
+
+        # Add action data if available
+        if action_dict:
+            for k, v in action_dict.items():
+                arr = np.asarray(v)
+                obs_data[f"action_{k}_shape"] = list(arr.shape)
+                if arr.ndim >= 3:
+                    obs_data[f"action_{k}_step0"] = arr[0, 0, :10].tolist()
+                else:
+                    obs_data[f"action_{k}_sample"] = arr.flatten()[:10].tolist()
+
+        with open(debug_dir / f"obs_{frame_idx:04d}_step_{step:06d}.json", "w") as f:
+            json.dump(obs_data, f, indent=2)
+
+        print(f"[DEBUG] Saved frame {frame_idx} (step {step}) to {debug_dir}", flush=True)
 
     with torch.inference_mode():
         while simulation_app.is_running():
@@ -624,6 +690,12 @@ def main():
                         la = np.asarray(action_dict["action.left_arm"])
                         print(f"[DEBUG] action.left_arm[0] (first timestep): {la[0, 0, :]}", flush=True)
                     sys.stdout.flush()
+
+                # Save debug frames (every inference call, first 10 frames, then every 10th)
+                if args_cli.save_debug_frames:
+                    if debug_frame_count < 10 or debug_frame_count % 10 == 0:
+                        save_debug_data(rgb_np, observation, action_dict, debug_frame_count, step_count)
+                    debug_frame_count += 1
 
             # Build action vector using predicted trajectory
             # Based on embodiment config (rep=ABSOLUTE, type=NON_EEF):
