@@ -155,6 +155,7 @@ def build_flat_observation(
     video_horizon: int = 1,
     state_horizon: int = 1,
     action_joint_ids: list = None,
+    joint_to_53dof_mapping: dict = None,
 ) -> dict:
     """
     Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
@@ -172,6 +173,7 @@ def build_flat_observation(
         video_horizon: Temporal horizon for video (usually 1)
         state_horizon: Temporal horizon for state (usually 1)
         action_joint_ids: Joint indices for action space (for new_embodiment)
+        joint_to_53dof_mapping: Dict mapping 53 DOF indices to robot joint indices (for padding)
 
     Returns:
         Flat observation dictionary
@@ -190,12 +192,26 @@ def build_flat_observation(
         # new_embodiment format: concatenated state vector
         # Use nested dict format {"state": {"observation.state": (B, T, D)}}
         state_dim = state_dims["observation.state"]
-        if action_joint_ids is not None and len(action_joint_ids) >= state_dim:
+
+        # Build 53 DOF state vector with proper joint mapping
+        if joint_to_53dof_mapping is not None:
+            # Use the mapping to construct 53 DOF state
+            vals = np.zeros((batch_size, state_dim), dtype=np.float32)
+            for dof_idx, robot_joint_idx in joint_to_53dof_mapping.items():
+                if robot_joint_idx is not None and robot_joint_idx < joint_pos.shape[1]:
+                    vals[:, dof_idx] = joint_pos[:, robot_joint_idx]
+                # else: leave as zero (for missing hand joints)
+        elif action_joint_ids is not None and len(action_joint_ids) >= state_dim:
             # Use action joint ordering for state
             vals = joint_pos[:, action_joint_ids[:state_dim]]
         else:
-            # Use first N joints
-            vals = joint_pos[:, :state_dim]
+            # Pad robot joints to expected state_dim with zeros
+            robot_joints = joint_pos.shape[1]
+            if robot_joints < state_dim:
+                vals = np.zeros((batch_size, state_dim), dtype=np.float32)
+                vals[:, :robot_joints] = joint_pos
+            else:
+                vals = joint_pos[:, :state_dim]
 
         vals = vals[:, None, :]  # Add time dimension (B, 1, D)
         if state_horizon > 1:
@@ -392,6 +408,39 @@ def main():
     state_dims = {k: len(v["min"]) for k, v in stats[embodiment_key]["state"].items()}
     print(f"[INFO] State dimensions: {state_dims}", flush=True)
 
+    # Build 53 DOF mapping: maps each position in 53 DOF state to robot joint index
+    # 53 DOF layout: left_leg(0-5), right_leg(6-11), waist(12-14), left_arm(15-21),
+    #                right_arm(22-28), left_inspire_hand(29-40), right_inspire_hand(41-52)
+    joint_to_53dof_mapping = {}
+    dof_offset = 0
+
+    # Map body parts to their 53 DOF index ranges
+    body_part_ranges = [
+        ("left_leg", 0, 6),
+        ("right_leg", 6, 12),
+        ("waist", 12, 15),
+        ("left_arm", 15, 22),
+        ("right_arm", 22, 29),
+        ("left_hand", 29, 41),  # Inspire hands - may be missing in Isaac Sim
+        ("right_hand", 41, 53),
+    ]
+
+    for part_name, start_idx, end_idx in body_part_ranges:
+        robot_joint_ids = group_joint_ids.get(part_name, [])
+        for i, dof_idx in enumerate(range(start_idx, end_idx)):
+            if i < len(robot_joint_ids):
+                joint_to_53dof_mapping[dof_idx] = robot_joint_ids[i]
+            else:
+                joint_to_53dof_mapping[dof_idx] = None  # Will be padded with zeros
+
+    # Count mapped vs missing joints
+    mapped_count = sum(1 for v in joint_to_53dof_mapping.values() if v is not None)
+    missing_count = sum(1 for v in joint_to_53dof_mapping.values() if v is None)
+    print(f"[INFO] 53 DOF mapping: {mapped_count} joints mapped, {missing_count} padded with zeros", flush=True)
+    if missing_count > 0:
+        missing_indices = [k for k, v in joint_to_53dof_mapping.items() if v is None]
+        print(f"[INFO] Missing joint indices (padded): {missing_indices}", flush=True)
+
     # Run inference loop
     print(f"[INFO] Starting inference with language command: '{args_cli.language}'", flush=True)
     print(f"[INFO] Action steps per inference: {args_cli.num_action_steps} (of 30 predicted)", flush=True)
@@ -430,6 +479,7 @@ def main():
                     video_horizon=video_horizon,
                     state_horizon=state_horizon,
                     action_joint_ids=action_joint_ids,
+                    joint_to_53dof_mapping=joint_to_53dof_mapping,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
