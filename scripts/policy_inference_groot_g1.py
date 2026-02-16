@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(-0.15, 0.55, 1.4),  # Above table center (table at 0,0.55,0), lower to see more
+    default=(-0.1, 0.55, 1.8),  # Higher up, centered above table for top-down view
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.924, 0.383, 0.0, 0.0),  # Slight forward tilt (~45deg) to see table surface
+    default=(0.707, 0.707, 0.0, 0.0),  # 90deg pitch for top-down view
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
