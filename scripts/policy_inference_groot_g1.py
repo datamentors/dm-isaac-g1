@@ -70,7 +70,7 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.0, 0.5, 2.2),  # Directly above robot workspace area (robot is at ~(0,0,1))
+    default=(-0.2, 0.45, 1.6),  # Above table area (table at y=0.55, object at -0.35,0.45,1.0)
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
