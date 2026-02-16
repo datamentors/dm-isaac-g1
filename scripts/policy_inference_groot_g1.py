@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.35, 0.0, 0.35),  # Forward and above torso - looking at hands/workspace
+    default=(0.25, 0.0, 0.55),  # Higher up, slightly forward - more overhead view like training data
     help="Camera position offset (x y z) relative to parent link.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.383, 0.924, 0.0, 0.0),  # ~70deg pitch down to see hands and table
+    default=(0.259, 0.966, 0.0, 0.0),  # ~75deg pitch down - nearly top-down to match training view
     help="Camera rotation quaternion (w x y z) in ROS convention.",
 )
 parser.add_argument(
