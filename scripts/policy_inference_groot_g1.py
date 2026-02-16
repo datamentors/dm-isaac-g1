@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(-0.2, 0.55, 1.85),  # Above table, adapted from GR1T2 scenes
+    default=(-0.3, 0.2, 1.6),  # Lower and more forward to see table surface better
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(-0.17246, 0.98502, 0.0, 0.0),  # From GR1T2 scene - looking down at table
+    default=(0.383, 0.924, 0.0, 0.0),  # ~70deg pitch down to see table surface
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
