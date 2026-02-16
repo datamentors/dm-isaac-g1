@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(-0.3, 0.4, 1.8),  # Above and slightly behind/left of workspace
+    default=(0.0, 0.5, 2.2),  # Directly above robot workspace area (robot is at ~(0,0,1))
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.5, 0.5, 0.5, 0.5),  # ROS: rotate to look down -Z with Y pointing forward
+    default=(0.5, 0.5, 0.5, 0.5),  # ROS: looking straight down
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
