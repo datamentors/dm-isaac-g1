@@ -63,21 +63,21 @@ parser.add_argument("--max_episode_steps", type=int, default=1000,
 parser.add_argument(
     "--camera_parent",
     type=str,
-    default="{ENV_REGEX_NS}/Robot/torso_link",  # Mount on robot torso - front-facing ego view
-    help="Camera parent link (default: torso_link for ego view).",
+    default="{ENV_REGEX_NS}",  # Mount in world space for external overhead view
+    help="Camera parent link (default: env root for overhead view).",
 )
 parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.3, 0.0, 0.4),  # Forward from torso center, elevated to look down
-    help="Camera position offset (x y z) in parent frame.",
+    default=(-0.3, 0.4, 1.8),  # Above and slightly behind/left of workspace
+    help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.653, -0.271, 0.653, -0.271),  # ROS: rotated to look forward and down ~45deg
+    default=(0.5, 0.5, 0.5, 0.5),  # ROS: rotate to look down -Z with Y pointing forward
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
