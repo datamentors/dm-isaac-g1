@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(-0.1, 0.55, 1.8),  # Higher up, centered above table for top-down view
+    default=(-0.2, 0.55, 1.85),  # Above table, adapted from GR1T2 scenes
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.707, 0.707, 0.0, 0.0),  # 90deg pitch for top-down view
+    default=(-0.17246, 0.98502, 0.0, 0.0),  # From GR1T2 scene - looking down at table
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
@@ -372,14 +372,14 @@ def main():
         offset=TiledCameraCfg.OffsetCfg(
             pos=tuple(args_cli.camera_pos),
             rot=tuple(args_cli.camera_rot),
-            convention="world",  # Using world convention: -Z forward, Y up
+            convention="ros",  # ROS convention: X forward, Y left, Z up
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0,
+            focal_length=18.15,  # From GR1T2 scene
             focus_distance=400.0,
             horizontal_aperture=20.955,
-            clipping_range=(0.1, 20.0)
+            clipping_range=(0.1, 5.0)  # Extended for scene visibility
         ),
         width=args_cli.video_w,
         height=args_cli.video_h,
