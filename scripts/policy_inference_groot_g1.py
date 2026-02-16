@@ -52,8 +52,8 @@ parser.add_argument("--scene", type=str, default="locomanipulation_g1",
                     help=f"Scene/environment to use. Available: {', '.join(AVAILABLE_SCENES.keys())}")
 parser.add_argument("--api_token", type=str, default=None, help="Optional API token for the inference server.")
 parser.add_argument("--language", type=str, default="pick up the object", help="Language command for the task.")
-parser.add_argument("--video_h", type=int, default=64, help="Camera image height.")
-parser.add_argument("--video_w", type=int, default=64, help="Camera image width.")
+parser.add_argument("--video_h", type=int, default=480, help="Camera image height.")
+parser.add_argument("--video_w", type=int, default=640, help="Camera image width.")
 parser.add_argument("--num_action_steps", type=int, default=30,
                     help="Number of action steps to execute per inference call (default: 30, execute full trajectory).")
 parser.add_argument("--action_scale", type=float, default=0.1,
@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.3, 0.0, 0.3),
+    default=(0.5, 0.0, 0.6),  # Forward and up from torso to see workspace
     help="Camera position offset (x y z) in the parent frame.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.5, -0.5, 0.5, -0.5),
+    default=(0.383, 0.0, 0.924, 0.0),  # ~67 degrees down - top-down view of workspace
     help="Camera rotation quaternion (w x y z) in the parent frame.",
 )
 parser.add_argument(
