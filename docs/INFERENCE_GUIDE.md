@@ -78,12 +78,51 @@ Connect to `192.168.1.205:5901` with a VNC client to see the simulation.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--server` | required | GROOT server endpoint (host:port) |
+| `--scene` | locomanipulation_g1 | Scene/environment to use (see below) |
 | `--language` | "pick up the object" | Task instruction |
 | `--num_action_steps` | 30 | Steps to execute per inference |
-| `--action_scale` | 0.1 | Scale factor for actions |
+| `--action_scale` | 1.0 | Scale factor for actions (use 1.0 for absolute) |
 | `--video_h` | 64 | Camera image height |
 | `--video_w` | 64 | Camera image width |
 | `--max_episode_steps` | 1000 | Max steps before reset |
+
+## Available Scenes
+
+Use the `--scene` argument to select different simulation environments:
+
+| Scene | Description | Best For |
+|-------|-------------|----------|
+| `locomanipulation_g1` | G1 robot with table and object (default) | Pick-and-place tasks |
+| `fixed_base_ik_g1` | G1 upper body with fixed base, IK control | Manipulation without locomotion |
+| `pickplace_g1_inspire` | G1 with Inspire hands, packing table scene | Dexterous manipulation |
+| `locomotion_g1_flat` | G1 on flat terrain | Walking/locomotion only |
+| `locomotion_g1_rough` | G1 on rough terrain | Locomotion over obstacles |
+
+### Example: Different Scenes
+
+```bash
+# Default pick-and-place scene
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene locomanipulation_g1 \
+    --language "pick up the red ball"
+
+# G1 with Inspire hands (dexterous manipulation)
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene pickplace_g1_inspire \
+    --language "grasp the object"
+
+# Fixed base for upper body manipulation only
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene fixed_base_ik_g1 \
+    --language "reach for the apple"
+```
+
+## Action Configuration
+
+**Important**: Based on the embodiment config (`rep=ABSOLUTE`, `type=NON_EEF`), all actions are **absolute joint position targets**, not deltas. Use `--action_scale 1.0` for direct joint targets.
 
 ## Observation Format
 

@@ -33,9 +33,21 @@ import sys
 
 from isaaclab.app import AppLauncher
 
+# Available scenes for G1 robot
+AVAILABLE_SCENES = {
+    "locomanipulation_g1": "isaaclab_tasks.manager_based.locomanipulation.pick_place.locomanipulation_g1_env_cfg.LocomanipulationG1EnvCfg",
+    "fixed_base_ik_g1": "isaaclab_tasks.manager_based.locomanipulation.pick_place.fixed_base_upper_body_ik_g1_env_cfg.FixedBaseUpperBodyIKG1EnvCfg",
+    "pickplace_g1_inspire": "isaaclab_tasks.manager_based.manipulation.pick_place.pickplace_unitree_g1_inspire_hand_env_cfg.PickPlaceUnitreeG1InspireHandEnvCfg",
+    "locomotion_g1_flat": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg.G1FlatEnvCfg",
+    "locomotion_g1_rough": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg.G1RoughEnvCfg",
+}
+
 # CLI arguments
 parser = argparse.ArgumentParser(description="G1 Robot with GR00T N1.6 Policy Inference")
 parser.add_argument("--server", type=str, required=True, help="ZMQ server endpoint, e.g. 192.168.1.237:5555")
+parser.add_argument("--scene", type=str, default="locomanipulation_g1",
+                    choices=list(AVAILABLE_SCENES.keys()),
+                    help=f"Scene/environment to use. Available: {', '.join(AVAILABLE_SCENES.keys())}")
 parser.add_argument("--api_token", type=str, default=None, help="Optional API token for the inference server.")
 parser.add_argument("--language", type=str, default="pick up the object", help="Language command for the task.")
 parser.add_argument("--video_h", type=int, default=64, help="Camera image height.")
@@ -81,6 +93,8 @@ simulation_app = app_launcher.app
 import numpy as np
 import torch
 
+from importlib import import_module
+
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
 from isaaclab.sensors import TiledCameraCfg
@@ -88,9 +102,20 @@ from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg
 import isaaclab.sim as sim_utils
 
-from isaaclab_tasks.manager_based.locomanipulation.pick_place.locomanipulation_g1_env_cfg import (
-    LocomanipulationG1EnvCfg,
-)
+
+def load_env_cfg_class(scene_name: str):
+    """Dynamically load environment config class based on scene name."""
+    if scene_name not in AVAILABLE_SCENES:
+        raise ValueError(f"Unknown scene: {scene_name}. Available: {list(AVAILABLE_SCENES.keys())}")
+
+    module_path = AVAILABLE_SCENES[scene_name]
+    module_name, class_name = module_path.rsplit(".", 1)
+
+    try:
+        module = import_module(module_name)
+        return getattr(module, class_name)
+    except (ImportError, AttributeError) as e:
+        raise RuntimeError(f"Failed to load scene '{scene_name}': {e}")
 
 try:
     from gr00t.policy.server_client import PolicyClient
@@ -251,32 +276,62 @@ def main():
             return parent.rstrip("/")
         return f"{{ENV_REGEX_NS}}/Robot/{parent}".rstrip("/")
 
-    # Setup environment configuration
-    env_cfg = LocomanipulationG1EnvCfg()
+    # Load environment configuration dynamically based on --scene argument
+    print(f"[INFO] Loading scene: {args_cli.scene}", flush=True)
+    EnvCfgClass = load_env_cfg_class(args_cli.scene)
+    env_cfg = EnvCfgClass()
     env_cfg.scene.num_envs = 1
-    env_cfg.curriculum = None
-    env_cfg.actions = G1Gr00tActionsCfg()
-    env_cfg.scene.robot.spawn.articulation_props.fix_root_link = True
-    env_cfg.observations.lower_body_policy = None
 
-    # Replace the steering wheel with a sphere (apple-like object)
-    # Position it on the table in front of the robot
-    env_cfg.scene.object = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.0, 0.5, 0.75),  # On table, in front of robot
-            rot=(1, 0, 0, 0),
-        ),
-        spawn=sim_utils.SphereCfg(
-            radius=0.04,  # Apple-sized sphere (~8cm diameter)
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.15),  # ~150g like an apple
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
+    # Apply common configuration overrides
+    if hasattr(env_cfg, 'curriculum'):
+        env_cfg.curriculum = None
+    env_cfg.actions = G1Gr00tActionsCfg()
+
+    # Fix root link for manipulation tasks (robot doesn't walk)
+    if hasattr(env_cfg.scene, 'robot') and hasattr(env_cfg.scene.robot, 'spawn'):
+        if hasattr(env_cfg.scene.robot.spawn, 'articulation_props'):
+            env_cfg.scene.robot.spawn.articulation_props.fix_root_link = True
+
+    # Disable lower body policy if present
+    if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
+        env_cfg.observations.lower_body_policy = None
+
+    # Add a simple object for pick-and-place scenes if not already present
+    if not hasattr(env_cfg.scene, 'object') or env_cfg.scene.object is None:
+        env_cfg.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=(0.0, 0.5, 0.75),  # On table, in front of robot
+                rot=(1, 0, 0, 0),
             ),
-        ),
-    )
+            spawn=sim_utils.SphereCfg(
+                radius=0.04,  # Apple-sized sphere
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
+                ),
+            ),
+        )
+    elif args_cli.scene == "locomanipulation_g1":
+        # For default scene, replace with apple-like sphere
+        env_cfg.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=(0.0, 0.5, 0.75),  # On table, in front of robot
+                rot=(1, 0, 0, 0),
+            ),
+            spawn=sim_utils.SphereCfg(
+                radius=0.04,  # Apple-sized sphere (~8cm diameter)
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),  # ~150g like an apple
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
+                ),
+            ),
+        )
 
     # Camera configuration
     camera_parent = _resolve_camera_parent(args_cli.camera_parent)
