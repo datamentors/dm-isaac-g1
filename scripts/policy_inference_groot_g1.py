@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.25, 0.0, 0.35),  # Forward from chest, slightly elevated to see hands and table
+    default=(0.4, 0.0, 0.25),  # Further forward to see hands/table, lowered slightly
     help="Camera position offset (x y z) in parent frame.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.966, 0.0, 0.259, 0.0),  # ~30 degrees pitch down to see hands and workspace
+    default=(0.906, 0.0, 0.423, 0.0),  # ~50 degrees pitch down to capture hands and workspace
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
