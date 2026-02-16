@@ -63,21 +63,21 @@ parser.add_argument("--max_episode_steps", type=int, default=1000,
 parser.add_argument(
     "--camera_parent",
     type=str,
-    default="{ENV_REGEX_NS}/Robot/head_link",  # Mount on head for better ego view
-    help="Camera parent link (default: head_link for ego view).",
+    default="{ENV_REGEX_NS}/Robot/torso_link",  # Mount on torso
+    help="Camera parent link (default: torso_link).",
 )
 parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.15, 0.0, 0.05),  # Slight forward offset from head
+    default=(0.35, 0.0, 0.45),  # Forward and high up from torso center to see workspace
     help="Camera position offset (x y z) in the parent frame.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.924, 0.0, 0.383, 0.0),  # ~45 degrees down to see hands and table
+    default=(0.707, 0.0, 0.707, 0.0),  # 90 degrees pitch down - directly looking at table
     help="Camera rotation quaternion (w x y z) in the parent frame.",
 )
 parser.add_argument(
