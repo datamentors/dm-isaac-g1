@@ -70,14 +70,14 @@ parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(-0.5, 0.5, 1.5),  # Move back and higher to see table+robot hands
+    default=(-0.35, 0.4, 1.35),  # Centered over apple/table, lowered slightly
     help="Camera position (x y z) in world space.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.259, 0.966, 0.0, 0.0),  # ~75deg pitch down - more overhead
+    default=(0.174, 0.985, 0.0, 0.0),  # ~80deg pitch down - nearly top-down
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
