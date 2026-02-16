@@ -127,6 +127,7 @@ except Exception as exc:
 
 
 # Joint patterns for G1 action space
+# Supports both DEX3 (left_hand_*) and Inspire (L_*, R_*) naming conventions
 ACTION_JOINT_PATTERNS = [
     # waist (3 DOF)
     "waist_yaw_joint",
@@ -148,13 +149,20 @@ ACTION_JOINT_PATTERNS = [
     "right_wrist_yaw_joint",
     "right_wrist_roll_joint",
     "right_wrist_pitch_joint",
-    # hands (match all finger joints)
-    "left_.*_index_.*",
-    "left_.*_middle_.*",
-    "left_.*_thumb_.*",
-    "right_.*_index_.*",
-    "right_.*_middle_.*",
-    "right_.*_thumb_.*",
+    # hands - DEX3 naming (left_hand_*, right_hand_*)
+    "left_hand_.*",
+    "right_hand_.*",
+    # hands - Inspire naming (L_*, R_*)
+    "L_index_.*",
+    "L_middle_.*",
+    "L_ring_.*",
+    "L_pinky_.*",
+    "L_thumb_.*",
+    "R_index_.*",
+    "R_middle_.*",
+    "R_ring_.*",
+    "R_pinky_.*",
+    "R_thumb_.*",
 ]
 
 
@@ -407,9 +415,17 @@ def main():
         print(f"  {k}: {v} -> {group_joint_names.get(k, [])}", flush=True)
 
     # Hands: all finger joints per side
+    # Support both DEX3 (left_hand_*) and Inspire (L_*, R_*) naming
     hand_names = robot.data.joint_names
-    left_hand_names = [n for n in hand_names if n.startswith("left_") and any(f in n for f in ["index", "middle", "thumb"])]
-    right_hand_names = [n for n in hand_names if n.startswith("right_") and any(f in n for f in ["index", "middle", "thumb"])]
+    # DEX3 style: left_hand_index_0_joint, etc.
+    left_hand_dex3 = [n for n in hand_names if n.startswith("left_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
+    right_hand_dex3 = [n for n in hand_names if n.startswith("right_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
+    # Inspire style: L_index_proximal_joint, etc.
+    left_hand_inspire = [n for n in hand_names if n.startswith("L_") and any(f in n for f in ["index", "middle", "ring", "pinky", "thumb"])]
+    right_hand_inspire = [n for n in hand_names if n.startswith("R_") and any(f in n for f in ["index", "middle", "ring", "pinky", "thumb"])]
+    # Use whichever is available
+    left_hand_names = left_hand_dex3 if left_hand_dex3 else left_hand_inspire
+    right_hand_names = right_hand_dex3 if right_hand_dex3 else right_hand_inspire
     group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_names)
     group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_names)
 
