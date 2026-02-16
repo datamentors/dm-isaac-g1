@@ -3,10 +3,10 @@ version: "3.8"
 services:
   dm-workstation:
     build:
-      context: .
+      context: .clear
       dockerfile: Dockerfile
       args:
-        ISAAC_SIM_VERSION: "4.2.0"
+        ISAAC_SIM_VERSION: "4.5.0"
     image: dm-workstation:latest
     container_name: dm-workstation
     runtime: nvidia
