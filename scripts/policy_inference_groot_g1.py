@@ -293,7 +293,11 @@ def main():
     # Apply common configuration overrides
     if hasattr(env_cfg, 'curriculum'):
         env_cfg.curriculum = None
-    env_cfg.actions = G1Gr00tActionsCfg()
+
+    # Use scene's native action config for Inspire hands scene (it has proper joint patterns)
+    # Only override for DEX3 scenes
+    if args_cli.scene != "pickplace_g1_inspire":
+        env_cfg.actions = G1Gr00tActionsCfg()
 
     # Fix root link for manipulation tasks (robot doesn't walk)
     if hasattr(env_cfg.scene, 'robot') and hasattr(env_cfg.scene.robot, 'spawn'):
