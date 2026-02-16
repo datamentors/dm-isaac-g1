@@ -227,9 +227,11 @@ Action Chunking Configuration:
 - action_horizon: {action_horizon} (steps predicted by GROOT)
 - execute_steps: {execute_steps} (steps executed before re-planning)
 """
+import io
 import json
 import numpy as np
-import requests
+import zmq
+import msgpack
 
 # Configuration
 GROOT_HOST = "{self.config.groot_server_host}"
@@ -240,28 +242,99 @@ MAX_STEPS = {max_steps}
 ACTION_HORIZON = {action_horizon}
 EXECUTE_STEPS = {execute_steps}
 
-def get_action(observation, image=None):
-    """Get action trajectory from GROOT server."""
-    payload = {{
-        "observation": observation.tolist(),
-        "action_horizon": ACTION_HORIZON,
-        "execute_steps": EXECUTE_STEPS,
-    }}
-    if image is not None:
-        import base64
-        payload["image"] = base64.b64encode(image.tobytes()).decode()
-        payload["image_shape"] = list(image.shape)
-    payload["task"] = TASK
+# MsgSerializer for ZeroMQ communication
+class MsgSerializer:
+    @staticmethod
+    def encode_ndarray(arr):
+        output = io.BytesIO()
+        np.save(output, arr, allow_pickle=False)
+        return {{"__ndarray_class__": True, "as_npy": output.getvalue()}}
 
-    response = requests.post(
-        f"http://{{GROOT_HOST}}:{{GROOT_PORT}}/inference",
-        json=payload,
-        timeout=5.0,
-    )
-    response.raise_for_status()
-    result = response.json()
-    actions = np.array(result["action"])
-    return actions
+    @staticmethod
+    def decode_ndarray(obj):
+        return np.load(io.BytesIO(obj["as_npy"]), allow_pickle=False)
+
+    @staticmethod
+    def encode_custom(obj):
+        if isinstance(obj, np.ndarray):
+            return MsgSerializer.encode_ndarray(obj)
+        return obj
+
+    @staticmethod
+    def decode_custom(obj):
+        if isinstance(obj, dict) and "__ndarray_class__" in obj:
+            return MsgSerializer.decode_ndarray(obj)
+        return obj
+
+    @staticmethod
+    def to_bytes(data):
+        return msgpack.packb(data, default=MsgSerializer.encode_custom)
+
+    @staticmethod
+    def from_bytes(data):
+        return msgpack.unpackb(data, object_hook=MsgSerializer.decode_custom)
+
+# Global ZMQ client
+_zmq_context = zmq.Context()
+_zmq_socket = None
+
+def get_action(observation, image=None):
+    """Get action trajectory from GROOT server via ZeroMQ."""
+    global _zmq_socket
+
+    if _zmq_socket is None:
+        _zmq_socket = _zmq_context.socket(zmq.REQ)
+        _zmq_socket.setsockopt(zmq.RCVTIMEO, 60000)
+        _zmq_socket.setsockopt(zmq.SNDTIMEO, 30000)
+        _zmq_socket.setsockopt(zmq.LINGER, 0)
+        _zmq_socket.connect(f"tcp://{{GROOT_HOST}}:{{GROOT_PORT}}")
+
+    # Build observation dict for new_embodiment config
+    # Expects: video['cam_left_high'], state['observation.state'], language['task']
+    obs_dict = {{
+        "state": {{}},
+        "language": {{"task": [[TASK]]}},
+    }}
+
+    # 53 DOF observation as single state vector
+    if observation.ndim == 1:
+        observation = observation.reshape(1, 1, -1)
+    obs_dict["state"]["observation.state"] = observation.astype(np.float32)
+
+    # Image is required for GROOT VLA model
+    if image is not None:
+        if image.dtype != np.uint8:
+            image = (image * 255).astype(np.uint8)
+        if image.ndim == 3:
+            image = image.reshape(1, 1, *image.shape)
+        obs_dict["video"] = {{"cam_left_high": image}}
+    else:
+        # Create dummy image if not provided (model requires video input)
+        dummy_image = np.zeros((1, 1, 256, 256, 3), dtype=np.uint8)
+        obs_dict["video"] = {{"cam_left_high": dummy_image}}
+
+    request = {{
+        "endpoint": "get_action",
+        "data": {{"observation": obs_dict, "options": None}},
+    }}
+
+    _zmq_socket.send(MsgSerializer.to_bytes(request))
+    response = MsgSerializer.from_bytes(_zmq_socket.recv())
+
+    if isinstance(response, (list, tuple)):
+        response = response[0]
+
+    # Extract action from new_embodiment response format
+    # Response: {{'action': array of shape (batch, horizon, dof)}}
+    if isinstance(response, dict) and "action" in response:
+        full_action = response["action"]
+        if isinstance(full_action, np.ndarray):
+            if full_action.ndim == 3:
+                full_action = full_action[0]  # Remove batch dim
+            return full_action[:EXECUTE_STEPS] if full_action.ndim > 1 else full_action
+
+    # Fallback for other response formats
+    return response
 
 def run_episode():
     """Run episode and return results."""

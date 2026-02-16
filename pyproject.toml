@@ -25,6 +25,8 @@ dependencies = [
     # Network
     "httpx>=0.27.0",
     "paramiko>=3.4.0",
+    "pyzmq>=25.0.0",
+    "msgpack>=1.0.0",
 
     # Visualization
     "tensorboard>=2.16.0",

@@ -19,22 +19,70 @@ For closed-loop control, use receding horizon (MPC-style):
 3. Execute first M steps (M <= N, typically M=1 or M=N//2)
 4. Get new observation
 5. Repeat until task complete
+
+Protocol:
+---------
+The GROOT server uses ZeroMQ REQ/REP pattern with msgpack serialization.
+The message format is:
+- Request: {'endpoint': 'get_action', 'data': {'observation': ..., 'options': ...}}
+- Response: dict with action arrays keyed by body part (left_arm, right_arm, etc.)
 """
 
-import base64
+import io
 from typing import Optional, Union
 
-import httpx
+import msgpack
 import numpy as np
+import zmq
 
 from dm_isaac_g1.core.config import Config
 
 
-class GrootClient:
-    """Synchronous client for GROOT inference.
+class MsgSerializer:
+    """Serializer compatible with GR00T server's msgpack protocol."""
 
-    Connects to the GROOT server to get action predictions from
-    the fine-tuned model.
+    @staticmethod
+    def encode_ndarray(arr: np.ndarray) -> dict:
+        """Encode numpy array to bytes using npy format."""
+        output = io.BytesIO()
+        np.save(output, arr, allow_pickle=False)
+        return {"__ndarray_class__": True, "as_npy": output.getvalue()}
+
+    @staticmethod
+    def decode_ndarray(obj: dict) -> np.ndarray:
+        """Decode numpy array from bytes."""
+        return np.load(io.BytesIO(obj["as_npy"]), allow_pickle=False)
+
+    @staticmethod
+    def encode_custom(obj):
+        """Custom encoder for msgpack."""
+        if isinstance(obj, np.ndarray):
+            return MsgSerializer.encode_ndarray(obj)
+        return obj
+
+    @staticmethod
+    def decode_custom(obj):
+        """Custom decoder for msgpack."""
+        if isinstance(obj, dict) and "__ndarray_class__" in obj:
+            return MsgSerializer.decode_ndarray(obj)
+        return obj
+
+    @staticmethod
+    def to_bytes(data) -> bytes:
+        """Serialize data to msgpack bytes."""
+        return msgpack.packb(data, default=MsgSerializer.encode_custom)
+
+    @staticmethod
+    def from_bytes(data: bytes):
+        """Deserialize data from msgpack bytes."""
+        return msgpack.unpackb(data, object_hook=MsgSerializer.decode_custom)
+
+
+class GrootClient:
+    """Synchronous ZeroMQ client for GROOT inference.
+
+    Connects to the GROOT server using ZeroMQ REQ/REP pattern
+    to get action predictions from the fine-tuned model.
 
     Example:
         ```python
@@ -69,9 +117,18 @@ class GrootClient:
 
         self.host = host or config.groot_server_host
         self.port = port or config.groot_server_port
-        self.base_url = f"http://{self.host}:{self.port}"
-        self.timeout = timeout
-        self._client = httpx.Client(timeout=timeout)
+        self.timeout_ms = int(timeout * 1000)
+        self._context = zmq.Context()
+        self._socket: Optional[zmq.Socket] = None
+
+    def _connect(self):
+        """Establish ZeroMQ connection."""
+        if self._socket is None:
+            self._socket = self._context.socket(zmq.REQ)
+            self._socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+            self._socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+            self._socket.setsockopt(zmq.LINGER, 0)
+            self._socket.connect(f"tcp://{self.host}:{self.port}")
 
     def health_check(self) -> bool:
         """Check if the GROOT server is healthy.
@@ -80,9 +137,20 @@ class GrootClient:
             True if server is responsive, False otherwise.
         """
         try:
-            response = self._client.get(f"{self.base_url}/health")
-            return response.status_code == 200
-        except httpx.RequestError:
+            # Use a separate socket with short timeout for health check
+            test_socket = self._context.socket(zmq.REQ)
+            test_socket.setsockopt(zmq.RCVTIMEO, 3000)  # 3 second timeout
+            test_socket.setsockopt(zmq.SNDTIMEO, 3000)
+            test_socket.setsockopt(zmq.LINGER, 0)
+            test_socket.connect(f"tcp://{self.host}:{self.port}")
+
+            # Send ping request
+            request = {"endpoint": "ping"}
+            test_socket.send(MsgSerializer.to_bytes(request))
+            test_socket.recv()  # Wait for any response
+            test_socket.close()
+            return True
+        except zmq.ZMQError:
             return False
 
     def get_action(
@@ -114,7 +182,7 @@ class GrootClient:
             If execute_steps > 1, returns array of shape (execute_steps, 53).
 
         Raises:
-            httpx.HTTPError: If request fails.
+            zmq.ZMQError: If request fails.
             ValueError: If execute_steps > action_horizon.
         """
         if execute_steps > action_horizon:
@@ -122,41 +190,101 @@ class GrootClient:
                 f"execute_steps ({execute_steps}) cannot exceed action_horizon ({action_horizon})"
             )
 
-        payload = {
-            "observation": observation.tolist(),
-            "action_horizon": action_horizon,
-            "execute_steps": execute_steps,
+        self._connect()
+
+        # Build observation dict for GROOT server
+        # The new_embodiment config expects:
+        # - video: {'cam_left_high': image}
+        # - state: {'observation.state': state_vector}
+        # - language: {'task': [[task_string]]}
+        obs_dict = {
+            "state": {},
+            "language": {"task": [[task]]} if task else {"task": [["Complete the task"]]},
         }
 
+        # Prepare 53 DOF observation as single state vector
+        # G1+Inspire: legs(12) + waist(3) + arms(14) + hands(24) = 53
+        if observation.ndim == 1:
+            observation = observation.reshape(1, 1, -1)
+        elif observation.ndim == 2:
+            observation = observation.reshape(1, observation.shape[0], observation.shape[1])
+
+        # The new_embodiment config expects 'observation.state' as a single tensor
+        obs_dict["state"]["observation.state"] = observation.astype(np.float32)
+
+        # Add image if provided (required for GROOT VLA model)
         if image is not None:
-            # Encode image as base64 for transmission
             if image.dtype != np.uint8:
                 image = (image * 255).astype(np.uint8)
-            payload["image"] = base64.b64encode(image.tobytes()).decode("utf-8")
-            payload["image_shape"] = list(image.shape)
+            # Reshape to (batch, seq, H, W, C) for GROOT
+            if image.ndim == 3:
+                image = image.reshape(1, 1, *image.shape)
+            # Use the camera key expected by the new_embodiment config
+            obs_dict["video"] = {"cam_left_high": image}
 
-        if task:
-            payload["task"] = task
+        # Build request
+        request = {
+            "endpoint": "get_action",
+            "data": {
+                "observation": obs_dict,
+                "options": None,
+            },
+        }
 
-        if return_full_trajectory:
-            payload["return_trajectory"] = True
+        # Send request and get response
+        self._socket.send(MsgSerializer.to_bytes(request))
+        response = MsgSerializer.from_bytes(self._socket.recv())
 
-        response = self._client.post(
-            f"{self.base_url}/inference",
-            json=payload,
-        )
-        response.raise_for_status()
+        # Handle error response
+        if isinstance(response, dict) and "error" in response:
+            raise RuntimeError(f"GROOT server error: {response['error']}")
 
-        result = response.json()
+        # Extract actions from response
+        # new_embodiment response format: {'action': array of shape (batch, horizon, dof)}
+        if isinstance(response, (list, tuple)):
+            response = response[0]
 
-        if return_full_trajectory:
-            return {
-                "action": np.array(result["action"]),
-                "trajectory": np.array(result.get("trajectory", [])),
-                "action_horizon": result.get("action_horizon", action_horizon),
-            }
+        # Extract the action tensor
+        if isinstance(response, dict) and "action" in response:
+            full_action = response["action"]
+            if isinstance(full_action, np.ndarray):
+                # Remove batch dimension: (1, horizon, dof) -> (horizon, dof)
+                if full_action.ndim == 3:
+                    full_action = full_action[0]
 
-        return np.array(result["action"])
+                # Return requested number of steps
+                if execute_steps == 1:
+                    action = full_action[0] if full_action.ndim > 1 else full_action
+                else:
+                    action = full_action[:execute_steps]
+
+                if return_full_trajectory:
+                    return {
+                        "action": action,
+                        "trajectory": full_action,
+                        "action_horizon": full_action.shape[0] if full_action.ndim > 1 else 1,
+                    }
+
+                return action
+
+        # Fallback for other response formats (e.g., gr1 embodiment with body parts)
+        action_parts = []
+        for part in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
+            if part in response:
+                arr = response[part]
+                if isinstance(arr, np.ndarray):
+                    if arr.ndim == 3:
+                        arr = arr[0]  # Remove batch dim
+                    action_parts.append(arr)
+
+        if action_parts:
+            full_action = np.concatenate(action_parts, axis=-1)
+            if execute_steps == 1:
+                return full_action[0] if full_action.ndim > 1 else full_action
+            return full_action[:execute_steps]
+
+        # Return raw response if nothing else works
+        return response
 
     def get_policy_info(self) -> dict:
         """Get information about the loaded policy.
@@ -164,29 +292,17 @@ class GrootClient:
         Returns:
             Dictionary with model info (name, embodiment, DOF, etc.).
         """
-        response = self._client.get(f"{self.base_url}/policy/info")
-        response.raise_for_status()
-        return response.json()
-
-    def load_model(self, model_path: str) -> dict:
-        """Request server to load a different model.
-
-        Args:
-            model_path: Path or HuggingFace repo ID for model.
-
-        Returns:
-            Response from server.
-        """
-        response = self._client.post(
-            f"{self.base_url}/model/load",
-            json={"model_path": model_path},
-        )
-        response.raise_for_status()
-        return response.json()
+        self._connect()
+        request = {"endpoint": "get_policy_info"}
+        self._socket.send(MsgSerializer.to_bytes(request))
+        return MsgSerializer.from_bytes(self._socket.recv())
 
     def close(self):
-        """Close the HTTP client."""
-        self._client.close()
+        """Close the ZeroMQ client."""
+        if self._socket:
+            self._socket.close()
+            self._socket = None
+        self._context.term()
 
     def __enter__(self):
         return self
@@ -199,7 +315,7 @@ class GrootClientAsync:
     """Asynchronous client for GROOT inference.
 
     Use this for high-frequency control loops or when integrating
-    with async frameworks.
+    with async frameworks. Uses ZeroMQ with asyncio integration.
 
     Example:
         ```python
@@ -230,17 +346,20 @@ class GrootClientAsync:
 
         self.host = host or config.groot_server_host
         self.port = port or config.groot_server_port
-        self.base_url = f"http://{self.host}:{self.port}"
-        self.timeout = timeout
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self.timeout_ms = int(timeout * 1000)
+        # Use sync client internally since zmq async requires zmq.asyncio
+        self._sync_client = GrootClient(
+            host=self.host,
+            port=self.port,
+            timeout=timeout,
+            config=config,
+        )
 
     async def health_check(self) -> bool:
         """Check if the GROOT server is healthy."""
-        try:
-            response = await self._client.get(f"{self.base_url}/health")
-            return response.status_code == 200
-        except httpx.RequestError:
-            return False
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_client.health_check)
 
     async def get_action(
         self,
@@ -262,38 +381,22 @@ class GrootClientAsync:
         Returns:
             Action array. Shape (53,) if execute_steps=1, else (execute_steps, 53).
         """
-        if execute_steps > action_horizon:
-            raise ValueError(
-                f"execute_steps ({execute_steps}) cannot exceed action_horizon ({action_horizon})"
-            )
-
-        payload = {
-            "observation": observation.tolist(),
-            "action_horizon": action_horizon,
-            "execute_steps": execute_steps,
-        }
-
-        if image is not None:
-            if image.dtype != np.uint8:
-                image = (image * 255).astype(np.uint8)
-            payload["image"] = base64.b64encode(image.tobytes()).decode("utf-8")
-            payload["image_shape"] = list(image.shape)
-
-        if task:
-            payload["task"] = task
-
-        response = await self._client.post(
-            f"{self.base_url}/inference",
-            json=payload,
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._sync_client.get_action(
+                observation=observation,
+                image=image,
+                task=task,
+                action_horizon=action_horizon,
+                execute_steps=execute_steps,
+            ),
         )
-        response.raise_for_status()
-
-        result = response.json()
-        return np.array(result["action"])
 
     async def close(self):
-        """Close the async HTTP client."""
-        await self._client.aclose()
+        """Close the async client."""
+        self._sync_client.close()
 
     async def __aenter__(self):
         return self

@@ -380,19 +380,77 @@ flowchart TD
 
 ## Environment Variables
 
+See `.env` file for credentials and sensitive configuration. Key variables:
+
+| Variable | Description |
+|----------|-------------|
+| `WORKSTATION_HOST` | Blackwell workstation IP (192.168.1.205) |
+| `GROOT_SERVER_HOST` | DGX Spark server IP (192.168.1.237) |
+| `GROOT_SERVER_PORT` | GROOT ZMQ port (5555) |
+| `GROOT_MODEL_PATH` | Model path or HuggingFace ID |
+| `HF_TOKEN` | HuggingFace access token |
+
+## VNC Access for Visualization
+
+The Blackwell workstation has VNC pre-installed for visualizing Isaac Sim and other GUI applications.
+
+### VNC Connection Details
+
+| Setting | Value |
+|---------|-------|
+| Host | 192.168.1.205 |
+| Port | 5901 |
+| Display | :1 |
+| Password | (see .env) |
+
+### Connecting with VNC Viewer
+
+1. **macOS**: Use "Screen Sharing" app or any VNC client
+   ```
+   vnc://192.168.1.205:5901
+   ```
+
+2. **Windows/Linux**: Use TigerVNC, RealVNC, or Remmina
+   ```
+   192.168.1.205:5901
+   ```
+
+### Running Isaac Sim with Visualization
+
 ```bash
-# Workstation (.env)
-WORKSTATION_HOST=192.168.1.205
-WORKSTATION_USER=datamentors
-WORKSTATION_PASSWORD=datamentors
+# SSH to workstation
+ssh datamentors@192.168.1.205
 
-# GROOT Server
-GROOT_SERVER_HOST=192.168.1.237
-GROOT_SERVER_PORT=5555
-SPARK_USER=nvidia
-SPARK_PASSWORD=datamentors
+# Set display for VNC
+export DISPLAY=:1
 
-# Models
-GROOT_MODEL_PATH=nvidia/GR00T-N1.6-3B
-# or nvidia/GR00T-N1.6-G1-PnPAppleToPlate for manipulation
+# Run Isaac Sim with rendering (not headless)
+cd /path/to/IsaacLab
+./isaaclab.sh -p scripts/play.py \
+    --task Isaac-Stack-RgyBlock-G129-Inspire-Joint \
+    --num_envs 1
+
+# Or using unitree_sim_isaaclab directly
+cd /path/to/unitree_sim_isaaclab
+python sim_main.py --device cuda --enable_cameras \
+    --task Isaac-Stack-RgyBlock-G129-Inspire-Joint \
+    --robot_type g129
+```
+
+### VNC Troubleshooting
+
+```bash
+# Check if VNC server is running
+ps aux | grep -E 'vnc|Xvnc' | grep -v grep
+
+# Check display
+echo $DISPLAY
+ls -la /tmp/.X11-unix/
+
+# Start VNC if not running (usually already running)
+vncserver :1 -geometry 1920x1080 -depth 24
+
+# Kill and restart VNC
+vncserver -kill :1
+vncserver :1
 ```
