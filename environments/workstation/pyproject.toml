@@ -1,6 +1,6 @@
 # Workstation Environment (Blackwell)
 # For GROOT fine-tuning and Isaac Sim/Lab simulation
-# Architecture: x86_64 with NVIDIA GPU
+# Based on actual installed dependencies from ENVIRONMENT_SETUP_LEARNINGS.md
 
 [project]
 name = "dm-workstation-env"
@@ -40,10 +40,10 @@ dependencies = [
     "scipy>=1.12.0",
 
     # ==========================================
-    # RL & Simulation
+    # RL & Simulation (from ENVIRONMENT_SETUP_LEARNINGS.md)
     # ==========================================
-    "gymnasium>=0.29.0",
-    "flatdict>=4.0.0",
+    "gymnasium",
+    "flatdict",
 
     # ==========================================
     # Network / Communication
@@ -52,6 +52,8 @@ dependencies = [
     "paramiko>=3.4.0",
     "pyzmq>=25.0.0",
     "msgpack>=1.0.0",
+    "aiohttp",
+    "aiortc",
 
     # ==========================================
     # Visualization / Logging
@@ -66,15 +68,11 @@ dependencies = [
     "timm>=0.9.0",
     "diffusers>=0.27.0",
     "peft>=0.10.0",
+    "onnxruntime>=1.22.0",
+    "logging_mp>=0.1.5",
 
     # ==========================================
-    # Unitree SDK / Robot Control
-    # ==========================================
-    "cyclonedds>=0.10.2",
-    # Note: unitree_sdk2py installed from source
-
-    # ==========================================
-    # IK / Motion Planning
+    # IK / Motion Planning (from ENVIRONMENT_SETUP_LEARNINGS.md)
     # ==========================================
     "pin>=2.7.0",
     "qpsolvers[open_source_solvers]>=4.0.0",
@@ -90,6 +88,10 @@ dev = [
     "jupyter>=1.0.0",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0.0",
@@ -97,8 +99,23 @@ dev-dependencies = [
     "ipython>=8.0.0",
 ]
 
-# Packages to install from source
-# Note: Some packages need special handling
-[tool.uv.sources]
-# unitree_sdk2py must be installed from GitHub
-# cyclonedds must be built from source for DDS support
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+# ==========================================
+# Note: Additional packages installed from source
+# ==========================================
+# CycloneDDS: Built from source (releases/0.10.x)
+#   export CYCLONEDDS_HOME=/workspace/cyclonedds/install
+#
+# unitree_sdk2py: Installed from GitHub
+#   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+#   pip install -e .
+#
+# Isaac Lab: Uses Isaac Sim's embedded Python
+#   /isaac-sim/python.sh -m pip install ...
