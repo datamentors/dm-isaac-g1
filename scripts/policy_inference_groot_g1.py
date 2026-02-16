@@ -63,22 +63,22 @@ parser.add_argument("--max_episode_steps", type=int, default=1000,
 parser.add_argument(
     "--camera_parent",
     type=str,
-    default="{ENV_REGEX_NS}/Robot/torso_link",  # Mount on torso
-    help="Camera parent link (default: torso_link).",
+    default="{ENV_REGEX_NS}",  # Mount in world space (env root)
+    help="Camera parent link (default: env root for overhead view).",
 )
 parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.35, 0.0, 0.45),  # Forward and high up from torso center to see workspace
-    help="Camera position offset (x y z) in the parent frame.",
+    default=(-0.3, 0.45, 1.5),  # Position above the table looking down
+    help="Camera position (x y z) - for fixed camera, this is world position.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.707, 0.0, 0.707, 0.0),  # 90 degrees pitch down - directly looking at table
-    help="Camera rotation quaternion (w x y z) in the parent frame.",
+    default=(0.707, 0.707, 0.0, 0.0),  # Looking straight down (-Z axis)
+    help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
     "--debug_dir",
