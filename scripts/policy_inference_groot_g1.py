@@ -397,6 +397,18 @@ def main():
 
     print(f"[INFO] Environment created with action dim: {env_action_dim}", flush=True)
 
+    # Debug: Print robot and object positions
+    robot_root_pos = robot.data.root_pos_w.detach().cpu().numpy()
+    print(f"[DEBUG] Robot root position (world): {robot_root_pos[0]}", flush=True)
+    if hasattr(env.scene, 'object') and env.scene['object'] is not None:
+        obj = env.scene['object']
+        obj_pos = obj.data.root_pos_w.detach().cpu().numpy()
+        print(f"[DEBUG] Object position (world): {obj_pos[0]}", flush=True)
+    # Camera info
+    print(f"[DEBUG] Camera parent: {args_cli.camera_parent}", flush=True)
+    print(f"[DEBUG] Camera pos offset: {args_cli.camera_pos}", flush=True)
+    print(f"[DEBUG] Camera rot: {args_cli.camera_rot}", flush=True)
+
     # Print all joint names for debugging
     all_joint_names = robot.data.joint_names
     print(f"[DEBUG] All joint names ({len(all_joint_names)}):", flush=True)
