@@ -179,15 +179,16 @@ def build_flat_observation(
     batch_size = camera_rgb.shape[0]
     observation = {}
 
-    # Video: (B, T, H, W, C) with flat key
+    # Video: nested dict format {"video": {"cam_left_high": (B, T, H, W, C)}}
     video_obs = camera_rgb[:, None, ...]  # Add time dimension
     if video_horizon > 1:
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
-    observation["video.ego_view"] = video_obs
+    observation["video"] = {"cam_left_high": video_obs}
 
     # Check if using new_embodiment format (observation.state as single key)
     if "observation.state" in state_dims:
         # new_embodiment format: concatenated state vector
+        # Use nested dict format {"state": {"observation.state": (B, T, D)}}
         state_dim = state_dims["observation.state"]
         if action_joint_ids is not None and len(action_joint_ids) >= state_dim:
             # Use action joint ordering for state
@@ -199,7 +200,7 @@ def build_flat_observation(
         vals = vals[:, None, :]  # Add time dimension (B, 1, D)
         if state_horizon > 1:
             vals = np.repeat(vals, state_horizon, axis=1)
-        observation["state.observation.state"] = vals.astype(np.float32)
+        observation["state"] = {"observation.state": vals.astype(np.float32)}
     else:
         # unitree_g1 format: separate body part keys
         for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
@@ -220,8 +221,8 @@ def build_flat_observation(
                 vals = np.repeat(vals, state_horizon, axis=1)
             observation[f"state.{key}"] = vals.astype(np.float32)
 
-    # Language: list of strings (B,)
-    observation["annotation.human.task_description"] = [language_cmd] * batch_size
+    # Language: nested dict format {"language": {"task": [[cmd], [cmd], ...]}}
+    observation["language"] = {"task": [[language_cmd]] * batch_size}
 
     return observation
 
