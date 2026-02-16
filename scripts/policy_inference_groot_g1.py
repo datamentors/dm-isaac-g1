@@ -154,23 +154,24 @@ def build_flat_observation(
     language_cmd: str,
     video_horizon: int = 1,
     state_horizon: int = 1,
+    action_joint_ids: list = None,
 ) -> dict:
     """
     Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
 
-    The sim wrapper expects flat keys like:
-      observation["video.ego_view"] = np.ndarray (B, T, H, W, C)
-      observation["state.left_arm"] = np.ndarray (B, T, D)
-      observation["annotation.human.task_description"] = ["task"] * B
+    Supports two formats:
+    1. new_embodiment: Uses "observation.state" as concatenated 53-DOF vector
+    2. unitree_g1: Uses "state.left_arm", "state.right_arm", etc.
 
     Args:
         camera_rgb: Camera image (B, H, W, C) uint8
         joint_pos: Joint positions (B, num_joints) float32
         group_joint_ids: Dict mapping group names to joint indices
-        state_dims: Dict mapping group names to expected dimensions
+        state_dims: Dict mapping state keys to expected dimensions
         language_cmd: Language command string
         video_horizon: Temporal horizon for video (usually 1)
         state_horizon: Temporal horizon for state (usually 1)
+        action_joint_ids: Joint indices for action space (for new_embodiment)
 
     Returns:
         Flat observation dictionary
@@ -184,24 +185,40 @@ def build_flat_observation(
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
     observation["video.ego_view"] = video_obs
 
-    # State: flat keys for each body part
-    for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
-        d = state_dims.get(key)
-        if d is None:
-            continue
-        ids = group_joint_ids.get(key, [])
-        if len(ids) >= d:
-            vals = joint_pos[:, ids[:d]]
+    # Check if using new_embodiment format (observation.state as single key)
+    if "observation.state" in state_dims:
+        # new_embodiment format: concatenated state vector
+        state_dim = state_dims["observation.state"]
+        if action_joint_ids is not None and len(action_joint_ids) >= state_dim:
+            # Use action joint ordering for state
+            vals = joint_pos[:, action_joint_ids[:state_dim]]
         else:
-            # Pad if needed
-            vals = np.zeros((batch_size, d), dtype=np.float32)
-            if len(ids) > 0:
-                vals[:, :len(ids)] = joint_pos[:, ids]
+            # Use first N joints
+            vals = joint_pos[:, :state_dim]
 
         vals = vals[:, None, :]  # Add time dimension (B, 1, D)
         if state_horizon > 1:
             vals = np.repeat(vals, state_horizon, axis=1)
-        observation[f"state.{key}"] = vals.astype(np.float32)
+        observation["state.observation.state"] = vals.astype(np.float32)
+    else:
+        # unitree_g1 format: separate body part keys
+        for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
+            d = state_dims.get(key)
+            if d is None:
+                continue
+            ids = group_joint_ids.get(key, [])
+            if len(ids) >= d:
+                vals = joint_pos[:, ids[:d]]
+            else:
+                # Pad if needed
+                vals = np.zeros((batch_size, d), dtype=np.float32)
+                if len(ids) > 0:
+                    vals[:, :len(ids)] = joint_pos[:, ids]
+
+            vals = vals[:, None, :]  # Add time dimension (B, 1, D)
+            if state_horizon > 1:
+                vals = np.repeat(vals, state_horizon, axis=1)
+            observation[f"state.{key}"] = vals.astype(np.float32)
 
     # Language: list of strings (B,)
     observation["annotation.human.task_description"] = [language_cmd] * batch_size
@@ -358,12 +375,20 @@ def main():
     with open(stats_path, "r") as f:
         stats = json.load(f)
 
-    # Find the unitree_g1 embodiment
-    if "unitree_g1" not in stats:
-        available = ", ".join(stats.keys())
-        raise RuntimeError(f"'unitree_g1' not found in statistics. Available: {available}")
+    # Find the embodiment in statistics (try new_embodiment first, then unitree_g1)
+    embodiment_key = None
+    for key in ["new_embodiment", "unitree_g1", "NEW_EMBODIMENT"]:
+        if key in stats:
+            embodiment_key = key
+            break
 
-    state_dims = {k: len(v["min"]) for k, v in stats["unitree_g1"]["state"].items()}
+    if embodiment_key is None:
+        available = ", ".join(stats.keys())
+        raise RuntimeError(f"No known embodiment found in statistics. Available: {available}")
+
+    print(f"[INFO] Using embodiment: {embodiment_key}", flush=True)
+
+    state_dims = {k: len(v["min"]) for k, v in stats[embodiment_key]["state"].items()}
     print(f"[INFO] State dimensions: {state_dims}", flush=True)
 
     # Run inference loop
@@ -403,6 +428,7 @@ def main():
                     language_cmd=args_cli.language,
                     video_horizon=video_horizon,
                     state_horizon=state_horizon,
+                    action_joint_ids=action_joint_ids,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
