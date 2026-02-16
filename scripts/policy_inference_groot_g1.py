@@ -506,8 +506,8 @@ def main():
                     sys.stdout.flush()
 
             # Build action vector using predicted trajectory
-            # For relative actions: target = trajectory_start_pos + delta[t]
-            # The delta at timestep t is the CUMULATIVE change from trajectory start
+            # Based on embodiment config (rep=ABSOLUTE, type=NON_EEF):
+            # Actions are ABSOLUTE joint position targets, not deltas
             current_action_vec = joint_pos[:, action_joint_ids].copy()
 
             def _get_action_at_timestep(key: str, timestep: int) -> np.ndarray | None:
@@ -560,9 +560,11 @@ def main():
                     current_action_vec[:, idxs] = arr
 
             # Apply action groups
+            # Based on embodiment config: rep=ABSOLUTE, type=NON_EEF
+            # ALL actions are absolute joint position targets (not deltas)
             _apply_group("waist", relative=False)
-            _apply_group("left_arm", relative=True)
-            _apply_group("right_arm", relative=True)
+            _apply_group("left_arm", relative=False)  # ABSOLUTE - direct joint targets
+            _apply_group("right_arm", relative=False)  # ABSOLUTE - direct joint targets
             _apply_group("left_hand", relative=False)
             _apply_group("right_hand", relative=False)
 
@@ -570,12 +572,11 @@ def main():
             if step_count < 10:
                 la_names = group_joint_names.get("left_arm", [])
                 la_idxs = [action_name_to_index[n] for n in la_names if n in action_name_to_index]
-                print(f"[DEBUG] Step {step_count}: joint_pos[left_arm] = {joint_pos[0, group_joint_ids['left_arm']]}", flush=True)
+                print(f"[DEBUG] Step {step_count}: current_joint_pos[left_arm] = {joint_pos[0, group_joint_ids['left_arm']]}", flush=True)
                 arr = _get_action_at_timestep("left_arm", action_step_idx)
                 if arr is not None:
-                    print(f"[DEBUG] Step {step_count}: action delta[{action_step_idx}] = {arr[0]}", flush=True)
-                    print(f"[DEBUG] Step {step_count}: trajectory_start = {trajectory_start_pos[0, group_joint_ids['left_arm']]}", flush=True)
-                print(f"[DEBUG] Step {step_count}: target = {current_action_vec[0, la_idxs]}", flush=True)
+                    print(f"[DEBUG] Step {step_count}: ABSOLUTE target[{action_step_idx}] = {arr[0]}", flush=True)
+                print(f"[DEBUG] Step {step_count}: applied_target = {current_action_vec[0, la_idxs]}", flush=True)
 
             # Clip to environment action dimension
             current_action_vec = current_action_vec[:, :env_action_dim]
