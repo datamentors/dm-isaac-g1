@@ -565,8 +565,25 @@ def main():
             # Actions are ABSOLUTE joint position targets, not deltas
             current_action_vec = joint_pos[:, action_joint_ids].copy()
 
+            # Action 53 DOF ranges (same as state)
+            action_53dof_ranges = {
+                "left_leg": (0, 6),
+                "right_leg": (6, 12),
+                "waist": (12, 15),
+                "left_arm": (15, 22),
+                "right_arm": (22, 29),
+                "left_hand": (29, 41),
+                "right_hand": (41, 53),
+            }
+
             def _get_action_at_timestep(key: str, timestep: int) -> np.ndarray | None:
-                """Get action value at specific timestep in trajectory."""
+                """Get action value at specific timestep in trajectory.
+
+                Handles two formats:
+                1. Split format: action.left_arm, action.right_arm, etc.
+                2. Concatenated format: single 'action' key with 53 DOF
+                """
+                # First try split format
                 possible_keys = [f"action.{key}", key]
                 for k in possible_keys:
                     if k in action_buffer:
@@ -575,6 +592,17 @@ def main():
                             return arr[:, timestep, :]
                         elif arr.ndim == 2:
                             return arr
+
+                # Try concatenated 53 DOF format
+                if "action" in action_buffer and key in action_53dof_ranges:
+                    arr = np.asarray(action_buffer["action"])
+                    if arr.ndim == 3 and arr.shape[1] > timestep and arr.shape[2] >= 53:
+                        start, end = action_53dof_ranges[key]
+                        return arr[:, timestep, start:end]
+                    elif arr.ndim == 2 and arr.shape[1] >= 53:
+                        start, end = action_53dof_ranges[key]
+                        return arr[:, start:end]
+
                 return None
 
             def _apply_group(key: str, relative: bool):
