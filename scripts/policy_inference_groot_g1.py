@@ -77,7 +77,7 @@ parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.5, 0.5, 0.5, 0.5),  # ROS: looking straight down
+    default=(0.707, 0.707, 0.0, 0.0),  # World convention: 90deg pitch down to look at floor
     help="Camera rotation quaternion (w x y z).",
 )
 parser.add_argument(
@@ -372,7 +372,7 @@ def main():
         offset=TiledCameraCfg.OffsetCfg(
             pos=tuple(args_cli.camera_pos),
             rot=tuple(args_cli.camera_rot),
-            convention="ros",
+            convention="world",  # Using world convention: -Z forward, Y up
         ),
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
