@@ -1,0 +1,72 @@
+# Spark Environment (ARM64 Inference Server)
+# For GROOT inference on Jetson Orin / ARM64
+# Architecture: ARM64 (aarch64)
+
+[project]
+name = "dm-spark-inference"
+version = "0.1.0"
+description = "GROOT inference environment for ARM64 (Jetson Orin)"
+requires-python = ">=3.10,<3.12"
+license = {text = "MIT"}
+
+dependencies = [
+    # ==========================================
+    # Core dependencies
+    # ==========================================
+    "numpy>=1.26.0,<2.0.0",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.66.0",
+
+    # ==========================================
+    # ML/DL Framework (ARM64 compatible)
+    # Note: PyTorch for ARM64 from NVIDIA JetPack
+    # ==========================================
+    # torch - installed from JetPack wheel
+    # torchvision - installed from JetPack wheel
+    "transformers>=4.40.0",
+    "safetensors>=0.4.0",
+
+    # ==========================================
+    # Data Processing
+    # ==========================================
+    "pillow>=10.0.0",
+    "huggingface-hub>=0.21.0",
+
+    # ==========================================
+    # Network / Communication
+    # ==========================================
+    "pyzmq>=25.0.0",
+    "msgpack>=1.0.0",
+    "httpx>=0.27.0",
+
+    # ==========================================
+    # GROOT Inference Dependencies
+    # ==========================================
+    "einops>=0.7.0",
+    "timm>=0.9.0",
+    "diffusers>=0.27.0",
+
+    # ==========================================
+    # Performance
+    # ==========================================
+    "onnxruntime>=1.17.0",  # Use onnxruntime-gpu for Jetson
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+    "ipython>=8.0.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+]
+
+# ARM64-specific notes:
+# 1. PyTorch must be installed from NVIDIA JetPack wheels
+# 2. onnxruntime-gpu for Jetson requires special installation
+# 3. Some packages may need to be built from source on ARM64

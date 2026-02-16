@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  dm-workstation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ISAAC_SIM_VERSION: "4.2.0"
+    image: dm-workstation:latest
+    container_name: dm-workstation
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:0}
+      - ACCEPT_EULA=Y
+      # GROOT server connection
+      - GROOT_SERVER_HOST=${GROOT_SERVER_HOST:-192.168.1.237}
+      - GROOT_SERVER_PORT=${GROOT_SERVER_PORT:-5555}
+      # HuggingFace
+      - HF_TOKEN=${HF_TOKEN}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      # W&B
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    volumes:
+      # Mount the dm-isaac-g1 repo (live code editing)
+      - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
+      # Mount datasets and checkpoints (persistent storage)
+      - /workspace/datasets:/workspace/datasets
+      - /workspace/checkpoints:/workspace/checkpoints
+      # Mount Isaac Lab (if using local install)
+      - /workspace/IsaacLab:/workspace/IsaacLab
+      # Mount Isaac-GR00T (for fine-tuning)
+      - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
+      # X11 for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # GPU access
+      - /dev/dri:/dev/dri
+    ports:
+      - "47995-48012:47995-48012"  # Isaac Sim streaming
+      - "6006:6006"                 # TensorBoard
+      - "5901:5901"                 # VNC
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

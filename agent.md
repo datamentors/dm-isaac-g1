@@ -4,9 +4,30 @@ This document defines the standard workflows and best practices for working with
 
 ---
 
-## Git Workflow for Workstation Synchronization
+## Single Repository Workflow
 
-**CRITICAL**: All code changes must be committed and synced to the workstation via git.
+**CRITICAL**: Both local (Mac) and workstation use the **same** `dm-isaac-g1` repository.
+
+### Design Principles
+
+1. **Single Source of Truth**: One repo cloned on all machines
+2. **UV for Dependencies**: Fast, reproducible Python environment management
+3. **Docker for Isolation**: Containers mount the repo as a volume
+4. **Git for Sync**: GitHub token enables workstation to pull/push
+
+### Environment Overview
+
+| Machine | IP | Purpose | Environment |
+|---------|-----|---------|-------------|
+| **Local Mac** | - | Development, editing | Local venv with UV |
+| **Blackwell** | 192.168.1.205 | Training + Simulation | `environments/workstation/` |
+| **Spark** | 192.168.1.237 | GROOT Inference | `environments/spark/` |
+
+See [environments/README.md](environments/README.md) for detailed setup instructions.
+
+---
+
+## Git Workflow
 
 ### Workflow Diagram
 
@@ -15,7 +36,7 @@ sequenceDiagram
     participant Local as Local Mac
     participant GitHub as GitHub
     participant WS as Workstation
-    participant Docker as Isaac-Sim Container
+    participant Docker as Docker Container
 
     Note over Local: Make code changes
     Local->>Local: git add && git commit
@@ -26,56 +47,100 @@ sequenceDiagram
     WS->>GitHub: git pull origin main
     GitHub-->>WS: Updated code
 
-    Note over WS: Update container
-    WS->>Docker: docker cp or restart
-    Docker-->>WS: Ready for training
+    Note over Docker: Code auto-available via mount
+    Docker-->>WS: Volume mount sees changes
 ```
 
-### Before Making Changes on Workstation
+### Workstation Git Setup (One-time)
 
-1. **Always pull latest from git first**:
-   ```bash
-   # On workstation (via SSH)
-   cd /home/datamentors/dm-isaac-g1
-   git pull origin main
-   ```
-
-2. **Copy updated code to container if needed**:
-   ```bash
-   docker cp /home/datamentors/dm-isaac-g1 isaac-sim:/workspace/
-   ```
-
-### After Making Local Changes
-
-1. **Commit and push**:
-   ```bash
-   git add -A
-   git commit -m "Description of changes"
-   git push origin main
-   ```
-
-2. **Sync to workstation**:
-   ```bash
-   source .env
-   sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no \
-       "$WORKSTATION_USER@$WORKSTATION_HOST" \
-       "cd /home/datamentors/dm-isaac-g1 && git pull origin main"
-   ```
-
-### Quick Sync Command
+The workstation needs a GitHub token to pull/push:
 
 ```bash
-# One-liner to push and sync
-git push origin main && source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no "$WORKSTATION_USER@$WORKSTATION_HOST" "cd /home/datamentors/dm-isaac-g1 && git pull origin main"
+# 1. Create GitHub Personal Access Token (PAT) with repo scope
+# 2. Add to .env on workstation
+echo "GITHUB_TOKEN=ghp_xxxxx" >> /home/datamentors/dm-isaac-g1/.env
+
+# 3. Configure git credentials
+cd /home/datamentors/dm-isaac-g1
+source .env
+git config --global credential.helper store
+echo "https://oauth2:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+
+# 4. Test
+git pull origin main
+```
+
+### Daily Workflow
+
+**Local → Workstation:**
+```bash
+# On local Mac
+git add -A && git commit -m "Description" && git push origin main
+
+# Sync to workstation
+source .env
+sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 \
+    "cd /home/datamentors/dm-isaac-g1 && git pull origin main"
+```
+
+**Workstation → Local:**
+```bash
+# On workstation (SSH)
+cd /home/datamentors/dm-isaac-g1
+git add -A && git commit -m "Description" && git push origin main
+
+# On local Mac
+git pull origin main
+```
+
+### Quick Sync Commands
+
+```bash
+# Push local and pull on workstation
+git push origin main && source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 "cd /home/datamentors/dm-isaac-g1 && git pull"
+
+# Pull from workstation changes
+source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 "cd /home/datamentors/dm-isaac-g1 && git push" && git pull
 ```
 
 ---
 
-## Environment Access
+## Environment Management with UV
+
+### Local Development (Mac)
+
+```bash
+cd dm-isaac-g1
+
+# Install UV
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create venv and install
+uv sync
+uv pip install -e .
+
+# Run commands
+uv run dm-g1 --help
+```
+
+### Workstation Container
+
+The container mounts the repo, so code changes are immediately available:
+
+```bash
+# Start container (from workstation)
+cd /home/datamentors/dm-isaac-g1/environments/workstation
+docker compose up -d
+
+# Enter container
+docker exec -it dm-workstation bash
+
+# Inside container - repo is at /workspace/dm-isaac-g1
+cd /workspace/dm-isaac-g1
+uv sync  # If needed
+```
 
 ### SSH Connection to Workstation
-
-Always use `sshpass` with credentials from `.env` file for non-interactive SSH access:
 
 ```bash
 source /path/to/dm-isaac-g1/.env
@@ -84,10 +149,10 @@ sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no datamentors@1
 
 ### Docker Container Access
 
-The main work environment is inside the `isaac-sim` Docker container:
+The main work environment is inside the Docker container:
 
 ```bash
-docker exec isaac-sim bash -c 'source /opt/conda/etc/profile.d/conda.sh && conda activate grootenv && your_command'
+docker exec -it dm-workstation bash -c 'cd /workspace/dm-isaac-g1 && your_command'
 ```
 
 ## Directory Structure

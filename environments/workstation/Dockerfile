@@ -1,0 +1,69 @@
+# Workstation Environment Dockerfile
+# Unified environment for GROOT training and Isaac Sim/Lab simulation
+# Base: NVIDIA Isaac Sim with UV for dependency management
+
+ARG ISAAC_SIM_VERSION=4.2.0
+FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_SYSTEM_PYTHON=1
+ENV UV_LINK_MODE=copy
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    curl \
+    wget \
+    vim \
+    htop \
+    tmux \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Build CycloneDDS from source (required for unitree_sdk2py)
+WORKDIR /opt
+RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x && \
+    cd cyclonedds && \
+    mkdir -p build install && \
+    cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds/install && \
+    cmake --build . --target install -j$(nproc)
+ENV CYCLONEDDS_HOME=/opt/cyclonedds/install
+ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
+
+# Install unitree_sdk2py from source
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
+WORKDIR /opt/unitree_sdk2_python
+RUN pip install -e .
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Copy environment config
+COPY pyproject.toml /workspace/env/
+
+# Install dependencies with UV
+# Note: We install to the Isaac Sim Python environment
+WORKDIR /workspace/env
+RUN uv pip install --system -r pyproject.toml || pip install -e .
+
+# Set PYTHONPATH for dm-isaac-g1 (will be mounted)
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
+
+# Expose ports
+EXPOSE 47995-48012  # Isaac Sim streaming
+EXPOSE 49000-49007  # Isaac Sim services
+EXPOSE 6006         # TensorBoard
+EXPOSE 5555         # GROOT ZMQ
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
