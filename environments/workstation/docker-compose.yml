@@ -3,7 +3,7 @@ version: "3.8"
 services:
   dm-workstation:
     build:
-      context: .clear
+      context: .
       dockerfile: Dockerfile
       args:
         ISAAC_SIM_VERSION: "4.5.0"

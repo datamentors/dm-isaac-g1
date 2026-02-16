@@ -2,7 +2,7 @@
 # Unified environment for GROOT training and Isaac Sim/Lab simulation
 # Base: NVIDIA Isaac Sim with UV for dependency management
 
-ARG ISAAC_SIM_VERSION=4.2.0
+ARG ISAAC_SIM_VERSION=4.5.0
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
 # Set environment variables
@@ -43,7 +43,7 @@ ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 # Install unitree_sdk2py from source
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
 WORKDIR /opt/unitree_sdk2_python
-RUN pip install -e .
+RUN /isaac-sim/python.sh -m pip install .
 
 # Create workspace directory
 WORKDIR /workspace
@@ -54,7 +54,7 @@ COPY pyproject.toml /workspace/env/
 # Install dependencies with UV
 # Note: We install to the Isaac Sim Python environment
 WORKDIR /workspace/env
-RUN uv pip install --system -r pyproject.toml || pip install -e .
+RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
