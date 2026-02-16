@@ -433,8 +433,46 @@ def main():
     group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_names)
     group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_names)
 
+    # Build dynamic action joint patterns based on detected hand type
+    # Base patterns for body joints
+    dynamic_action_patterns = [
+        # waist (3 DOF)
+        "waist_yaw_joint",
+        "waist_pitch_joint",
+        "waist_roll_joint",
+        # left arm (7 DOF)
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "left_wrist_yaw_joint",
+        "left_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        # right arm (7 DOF)
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_yaw_joint",
+        "right_wrist_roll_joint",
+        "right_wrist_pitch_joint",
+    ]
+
+    # Add hand patterns based on what's available
+    if left_hand_inspire:
+        # Inspire hands (L_*, R_*)
+        dynamic_action_patterns.extend([
+            "L_index_.*", "L_middle_.*", "L_ring_.*", "L_pinky_.*", "L_thumb_.*",
+            "R_index_.*", "R_middle_.*", "R_ring_.*", "R_pinky_.*", "R_thumb_.*",
+        ])
+    elif left_hand_dex3:
+        # DEX3 hands (left_hand_*, right_hand_*)
+        dynamic_action_patterns.extend([
+            "left_hand_.*", "right_hand_.*",
+        ])
+
     # Action joint mapping
-    action_joint_ids, action_joint_names = robot.find_joints(ACTION_JOINT_PATTERNS, preserve_order=True)
+    action_joint_ids, action_joint_names = robot.find_joints(dynamic_action_patterns, preserve_order=True)
     action_name_to_index = {name: i for i, name in enumerate(action_joint_names)}
 
     print(f"[DEBUG] Action joint mapping (len={len(action_joint_ids)}):", flush=True)
