@@ -387,13 +387,14 @@ def main():
         camera_rot = tuple(args_cli.camera_rot)
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
-        # Default camera on d435_link - G1 body-mounted RealSense D435 camera
-        # Based on unitree_sim_isaaclab camera_configs.py for G1 front camera
-        # This is the main observation camera for the G1 robot
-        camera_parent = "{ENV_REGEX_NS}/Robot/d435_link"
-        camera_pos = (0.0, 0.0, 0.0)  # At camera mount position
-        camera_rot = (0.5, -0.5, 0.5, -0.5)  # From unitree_sim_isaaclab G1 front cam config
-        print(f"[INFO] Using default camera on d435_link (G1 front camera)", flush=True)
+        # Default camera on torso_link - fallback for scenes without dedicated camera links
+        # NOTE: The locomanipulation_g1 scene uses a simple G1 robot without d435_link or head_link.
+        # For scenes with camera support, use --camera_parent d435_link or head_link.
+        # This provides a forward-looking view from the torso (chest level).
+        camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
+        camera_pos = (0.25, 0.0, 0.25)  # 25cm forward, 25cm up (chest/head level)
+        camera_rot = (0.924, 0.0, -0.383, 0.0)  # ~45deg pitch down to see hands and table
+        print(f"[INFO] Using fallback camera on torso_link (scene lacks d435_link/head_link)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
