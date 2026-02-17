@@ -161,9 +161,10 @@ except Exception as exc:
     ) from exc
 
 
-# Joint patterns for G1 action space
-# Supports both DEX3 (left_hand_*) and Inspire (L_*, R_*) naming conventions
-ACTION_JOINT_PATTERNS = [
+# Joint patterns for G1 action space - DEX3 hands only
+# This config is used for non-Inspire scenes (locomanipulation_g1, etc.)
+# Inspire scenes use their native action config with L_*/R_* patterns
+DEX3_ACTION_JOINT_PATTERNS = [
     # waist (3 DOF)
     "waist_yaw_joint",
     "waist_pitch_joint",
@@ -184,29 +185,18 @@ ACTION_JOINT_PATTERNS = [
     "right_wrist_yaw_joint",
     "right_wrist_roll_joint",
     "right_wrist_pitch_joint",
-    # hands - DEX3 naming (left_hand_*, right_hand_*)
+    # hands - DEX3 naming only (left_hand_*, right_hand_*)
     "left_hand_.*",
     "right_hand_.*",
-    # hands - Inspire naming (L_*, R_*)
-    "L_index_.*",
-    "L_middle_.*",
-    "L_ring_.*",
-    "L_pinky_.*",
-    "L_thumb_.*",
-    "R_index_.*",
-    "R_middle_.*",
-    "R_ring_.*",
-    "R_pinky_.*",
-    "R_thumb_.*",
 ]
 
 
 @configclass
 class G1Gr00tActionsCfg:
-    """Action configuration for G1 with GR00T policy."""
+    """Action configuration for G1 with GR00T policy (DEX3 hands)."""
     joint_pos = JointPositionActionCfg(
         asset_name="robot",
-        joint_names=ACTION_JOINT_PATTERNS,
+        joint_names=DEX3_ACTION_JOINT_PATTERNS,
         preserve_order=True,
         scale=1.0,
         offset=0.0,
