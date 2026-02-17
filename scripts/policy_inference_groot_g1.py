@@ -388,12 +388,12 @@ def main():
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
         # Default camera on head_link - egocentric view looking forward and slightly down
-        # Position: slightly forward from head center (eye position), ~30deg pitch down
-        # This simulates human POV looking at hands/workspace
+        # Position: forward from head center, rotation nearly horizontal with slight down pitch (~15deg)
+        # The head_link coordinate frame may face upward, so we rotate to face forward
         camera_parent = "{ENV_REGEX_NS}/Robot/head_link"
-        camera_pos = (0.10, 0.0, 0.0)  # 10cm forward from head center
-        camera_rot = (0.966, 0.0, -0.259, 0.0)  # ~30deg pitch down to see hands ahead
-        print(f"[INFO] Using default camera on head_link (egocentric view)", flush=True)
+        camera_pos = (0.15, 0.0, 0.05)  # 15cm forward, 5cm up from head center
+        camera_rot = (0.991, 0.0, -0.131, 0.0)  # ~15deg pitch down - nearly horizontal forward view
+        print(f"[INFO] Using default camera on head_link (forward egocentric view)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
