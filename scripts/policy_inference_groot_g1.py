@@ -429,10 +429,11 @@ def main():
         # For full-featured scenes (e.g., with Unitree USD downloads), d435_link is available.
 
         # Detect which camera link is likely available based on scene
-        # TODO: Once environment is created, we can check stage for available links
-        # For now, use scene name heuristic
-        scene_has_d435 = args_cli.scene in ["pickplace_g1_inspire"]  # Scenes with full robot USD
-        use_fallback = not scene_has_d435
+        # NOTE: IsaacLab task environments use simplified robot USDs without d435_link.
+        # The d435_link is only available in Unitree's full robot USDs downloaded from HuggingFace.
+        # For all IsaacLab tasks, we use the fallback camera attached to torso_link.
+        scene_has_d435 = False  # IsaacLab tasks don't have d435_link
+        use_fallback = True  # Always use fallback for IsaacLab tasks
 
         try:
             head_cam_cfg = get_head_camera_config(RobotType.G1, use_fallback=use_fallback)
