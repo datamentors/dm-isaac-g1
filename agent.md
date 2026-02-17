@@ -491,3 +491,75 @@ Scripts that exist on the workstation container but should be migrated to this r
 ### Note on Script Migration
 
 See [RESTRUCTURING_PLAN.md](./RESTRUCTURING_PLAN.md) for the full plan to migrate these scripts into a proper Python package structure.
+
+---
+
+## Camera Configuration
+
+### Overview
+
+Camera configurations for the Unitree G1 robot are centralized in `src/dm_isaac_g1/configs/camera_configs.py`. This module provides standardized camera settings based on the official Unitree Isaac Sim/Lab integration.
+
+**Reference Repository**: https://github.com/unitreerobotics/unitree_sim_isaaclab
+
+### Key Concepts
+
+1. **Head Camera (Hand-Agnostic)**: The front camera mounted on the robot's head (`d435_link`) uses the same configuration regardless of which hands (DEX3, Inspire, Gripper) are used. This camera is the primary observation for manipulation tasks.
+
+2. **Wrist Cameras (Hand-Dependent)**: Cameras mounted on each hand have configurations that depend on the hand type, as different hands have different link structures and camera mount positions.
+
+3. **World Camera**: External camera at a fixed position for third-person observation views.
+
+### Supported Camera Links
+
+| Link Name | Robot Part | Available In |
+|-----------|------------|--------------|
+| `d435_link` | Intel RealSense D435 on head | Full Unitree USD |
+| `torso_link` | Torso (fallback) | All G1 scenes |
+| `left_hand_camera_base_link` | DEX3 left wrist | DEX3 hand USD |
+| `right_hand_camera_base_link` | DEX3 right wrist | DEX3 hand USD |
+| `left_wrist_yaw_link` | Inspire/Gripper left wrist | Inspire/Gripper USD |
+| `right_wrist_yaw_link` | Inspire/Gripper right wrist | Inspire/Gripper USD |
+
+### Usage in Inference Script
+
+The `policy_inference_groot_g1.py` script automatically:
+1. Detects available camera links in the scene
+2. Uses the primary head camera config (`d435_link`) if available
+3. Falls back to torso-mounted camera for simpler robot models
+
+```python
+from dm_isaac_g1.configs.camera_configs import (
+    get_head_camera_config,
+    get_wrist_camera_configs,
+    HandType,
+    RobotType,
+)
+
+# Get head camera (hand-agnostic, same for all hand types)
+head_cam = get_head_camera_config(RobotType.G1)
+
+# Get wrist cameras (hand-dependent)
+left_wrist, right_wrist = get_wrist_camera_configs(HandType.INSPIRE)
+```
+
+### Adding Cameras to Scenes
+
+When a scene doesn't have the required camera links, the inference script dynamically adds a camera attached to an available link (e.g., `torso_link`). The camera configuration is based on the standard Unitree settings.
+
+### Scene Camera Availability
+
+| Scene | d435_link | Wrist Cameras | Fallback |
+|-------|-----------|---------------|----------|
+| `locomanipulation_g1` | ❌ | ❌ | torso_link |
+| `pickplace_g1_inspire` | ✅ | ✅ (Inspire) | - |
+| `fixed_base_ik_g1` | ❌ | ❌ | torso_link |
+
+### Camera Position Notes
+
+The head camera faces forward with a slight downward inclination to capture the hands and workspace. This matches the camera view used during training data collection.
+
+- **Primary config (d435_link)**: Position (0, 0, 0), Rotation looking forward-down
+- **Fallback config (torso_link)**: Position (15cm forward, 35cm up), ~30° pitch down
+
+---

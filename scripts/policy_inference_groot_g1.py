@@ -9,6 +9,15 @@ G1 Robot Policy Inference with GR00T N1.6
 This script runs the Unitree G1 robot in Isaac Sim with GR00T policy inference.
 It uses nested dictionary format for observations as required by the GR00T server.
 
+Camera Configuration:
+    Camera settings are loaded from dm_isaac_g1.configs.camera_configs module.
+    The script automatically detects available camera links and uses:
+    - Primary config (d435_link) if available
+    - Fallback config (torso_link) for simpler robot models
+
+    Camera configs are based on official Unitree settings from:
+    https://github.com/unitreerobotics/unitree_sim_isaaclab
+
 Usage:
     # Ensure GROOT server is running with NEW_EMBODIMENT tag
     # On the DGX Spark:
@@ -32,6 +41,12 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# Add project root to path for imports
+_script_dir = Path(__file__).parent.absolute()
+_project_root = _script_dir.parent
+if str(_project_root / "src") not in sys.path:
+    sys.path.insert(0, str(_project_root / "src"))
 
 from isaaclab.app import AppLauncher
 
@@ -136,6 +151,22 @@ from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg
 import isaaclab.sim as sim_utils
+
+# Import camera configurations from dm_isaac_g1
+try:
+    from dm_isaac_g1.configs.camera_configs import (
+        get_head_camera_config,
+        get_wrist_camera_configs,
+        get_all_camera_configs,
+        HandType,
+        RobotType,
+        CameraConfig,
+    )
+    CAMERA_CONFIGS_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] Could not import camera configs: {e}", flush=True)
+    print("[WARN] Using hardcoded fallback camera configuration", flush=True)
+    CAMERA_CONFIGS_AVAILABLE = False
 
 
 def load_env_cfg_class(scene_name: str):
@@ -380,21 +411,49 @@ def main():
         )
 
     # Camera configuration - always add tiled camera for inference
-    # Use specified parent or default to torso_link (commonly available on G1 robots)
+    # Use camera configs from dm_isaac_g1.configs.camera_configs module
+    # These are based on official Unitree settings from unitree_sim_isaaclab
     if args_cli.camera_parent is not None:
+        # User-specified camera parent takes precedence
         camera_parent = _resolve_camera_parent(args_cli.camera_parent)
         camera_pos = tuple(args_cli.camera_pos)
         camera_rot = tuple(args_cli.camera_rot)
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
+    elif CAMERA_CONFIGS_AVAILABLE:
+        # Use camera configs from the module
+        # Head camera is AGNOSTIC to hand type - same config works for all hands
+        # First try primary config (d435_link), fallback to torso_link if not available
+        #
+        # NOTE: The locomanipulation_g1 scene uses a simplified G1 robot without d435_link.
+        # We'll use the fallback config which attaches to torso_link instead.
+        # For full-featured scenes (e.g., with Unitree USD downloads), d435_link is available.
+
+        # Detect which camera link is likely available based on scene
+        # TODO: Once environment is created, we can check stage for available links
+        # For now, use scene name heuristic
+        scene_has_d435 = args_cli.scene in ["pickplace_g1_inspire"]  # Scenes with full robot USD
+        use_fallback = not scene_has_d435
+
+        try:
+            head_cam_cfg = get_head_camera_config(RobotType.G1, use_fallback=use_fallback)
+            camera_parent = head_cam_cfg.prim_path.rsplit("/", 1)[0]  # Remove camera name to get parent
+            camera_pos = head_cam_cfg.position
+            camera_rot = head_cam_cfg.rotation
+            config_type = "fallback" if use_fallback else "primary"
+            print(f"[INFO] Using {config_type} head camera config: parent={head_cam_cfg.parent_link}", flush=True)
+            print(f"[INFO] Camera description: {head_cam_cfg.description}", flush=True)
+        except ValueError as e:
+            print(f"[WARN] Could not get camera config: {e}", flush=True)
+            # Hardcoded fallback - same as G1_HEAD_CAMERA_FALLBACK
+            camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
+            camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
+            camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as d435_link rotation
     else:
-        # Default camera on torso_link - fallback for scenes without dedicated camera links
-        # NOTE: The locomanipulation_g1 scene uses a simple G1 robot without d435_link or head_link.
-        # For scenes with camera support, use --camera_parent d435_link or head_link.
-        # Position camera in FRONT of robot (negative Y in robot frame) looking at the workspace
+        # Hardcoded fallback when configs module not available
         camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-        camera_pos = (0.0, 0.6, 0.3)  # 60cm to the side (Y), 30cm up - offset to view workspace
-        camera_rot = (0.653, -0.271, 0.653, 0.271)  # Face inward and down toward table
-        print(f"[INFO] Using fallback camera on torso_link (side view of workspace)", flush=True)
+        camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
+        camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as d435_link rotation
+        print(f"[INFO] Using hardcoded fallback camera on torso_link", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
