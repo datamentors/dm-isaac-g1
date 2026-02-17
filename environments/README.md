@@ -44,16 +44,21 @@ cd dm-isaac-g1
 
 # 2. Create .env with GitHub token
 cp .env.example .env
-# Edit .env and add GITHUB_TOKEN
+# Edit .env and add GITHUB_TOKEN, HF_TOKEN
 
 # 3. Build and start container
 cd environments/workstation
+docker compose build  # Rebuild to get latest fixes
 docker compose up -d
 
-# 4. Sync venv inside container
-docker exec -it dm-workstation bash
-cd /workspace/dm-isaac-g1
-uv sync
+# 4. Fetch Unitree robot assets
+docker exec dm-workstation bash -c "cd /workspace/unitree_sim_isaaclab && bash fetch_assets.sh"
+
+# 5. Test camera setup (verifies Isaac Sim 5.1.0 workarounds)
+docker exec dm-workstation /isaac-sim/python.sh scripts/test_camera_stable.py --headless
+
+# 6. Check output
+ls /tmp/groot_debug/  # Should contain camera_*.png
 ```
 
 ### Spark Setup
@@ -201,6 +206,18 @@ bash fetch_assets.sh
 
 This downloads the G1 robot USD files to `/workspace/unitree_sim_isaaclab/assets/`.
 
+**Available G1 USD files** (after fetching):
+- `g1-29dof_wholebody_inspire/` - G1 with Inspire hands (for GROOT)
+- `g1-29dof_wholebody_dex3/` - G1 with DEX3 hands
+- `g1-29dof-inspire-base-fix-usd/` - G1 Inspire with base fixes
+
+**Camera Mount Links** (from USD inspection):
+- `d435_link` - Intel RealSense D435 head camera (only in full Unitree USDs)
+- `torso_link` - Fallback for IsaacLab tasks (no d435_link)
+- `left_hand_camera_base_link` / `right_hand_camera_base_link` - Wrist cameras
+
+**Note**: IsaacLab task environments use simplified robot USDs that don't include the `d435_link`. Always use the fallback camera configuration for IsaacLab tasks.
+
 ## Container Persistence
 
 **Important**: Use `docker compose stop/start` instead of `down/up` when possible:
@@ -214,6 +231,81 @@ docker compose down && docker compose up -d
 ```
 
 Packages installed via pip during development are lost when container is recreated with `down/up`.
+
+## Isaac Sim 5.1.0 Known Issues & Workarounds
+
+The Dockerfile applies several workarounds for known Isaac Sim 5.1.0 issues. See:
+- [Official Known Issues](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/known_issues.html)
+- [Unitree Installation Guide](https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/doc/isaacsim5.0_install.md)
+
+### Camera/Synthetic Data Stability
+
+Isaac Sim 5.1.0 has issues with camera capture and synthetic data generation. The following workarounds are applied:
+
+1. **Disable Async Rendering** - Prevents frame skipping with Replicator
+2. **DLSS Quality Mode** - Required for resolutions below 600x600
+3. **Increased rt_subframes** - Ensures materials load before capture
+
+To run scripts with all workarounds:
+```bash
+# Method 1: Use stable wrapper (created in Dockerfile)
+docker exec dm-workstation /usr/local/bin/isaac-python-stable scripts/test_camera_stable.py
+
+# Method 2: Use flags directly
+docker exec dm-workstation /isaac-sim/python.sh \
+  --/exts/isaacsim.core.throttling/enable_async=false \
+  --/rtx/post/dlss/mode=2 \
+  scripts/your_script.py
+```
+
+### Test Camera Setup
+
+A stable camera test script is provided:
+```bash
+docker exec dm-workstation /isaac-sim/python.sh scripts/test_camera_stable.py
+
+# Headless mode (no VNC needed)
+docker exec dm-workstation /isaac-sim/python.sh scripts/test_camera_stable.py --headless
+
+# Custom output directory
+docker exec dm-workstation /isaac-sim/python.sh scripts/test_camera_stable.py \
+  --output-dir /tmp/my_output
+```
+
+The test script outputs images to `/tmp/groot_debug/` by default.
+
+### Camera Segmentation Faults
+
+If you see segfaults in `libomni.syntheticdata.plugin.so`:
+
+1. **Ensure proper initialization order** - SimulationApp → World → Scene → Camera
+2. **Render frames before capture** - At least 30-60 frames to let physics settle
+3. **Use USD camera API** - More stable than sensor.Camera for some workflows
+
+Example stable initialization:
+```python
+from isaacsim import SimulationApp
+simulation_app = SimulationApp({"headless": False, "anti_aliasing": 0})
+
+# Apply workarounds
+import carb.settings
+settings = carb.settings.get_settings()
+settings.set("/exts/isaacsim.core.throttling/enable_async", False)
+settings.set("/rtx/post/dlss/mode", 2)
+
+# Create world BEFORE importing other modules
+from omni.isaac.core import World
+world = World()
+world.scene.add_default_ground_plane()
+
+# Load robot...
+# Create camera...
+
+# Reset and render many frames
+world.reset()
+for _ in range(60):
+    world.step(render=True)
+```
 
 ## Troubleshooting
 
@@ -236,9 +328,31 @@ docker exec dm-workstation bash -c "
 "
 ```
 
+### Camera "Unable to write from unknown dtype" Error
+This error occurs with TiledCameraCfg in Isaac Sim 5.1.0. Solutions:
+```bash
+# Option 1: Use stable test script (recommended)
+docker exec dm-workstation /isaac-sim/python.sh scripts/test_camera_stable.py
+
+# Option 2: Use Replicator API instead of TiledCameraCfg
+# See scripts/test_camera_stable.py for example
+
+# Option 3: Disable async rendering
+docker exec dm-workstation /isaac-sim/python.sh \
+  --/exts/isaacsim.core.throttling/enable_async=false \
+  your_script.py
+```
+
 ### Git Permission Issues
 If git commands fail with permission errors:
 ```bash
 # Fix ownership (run on workstation, not in container)
 sudo chown -R datamentors:datamentors /home/datamentors/dm-isaac-g1/.git
 ```
+
+### Container Keeps Stopping
+If the container stops when running scripts:
+1. Check Docker logs: `docker logs dm-workstation`
+2. Monitor memory: scripts may be OOMing
+3. Use headless mode to reduce GPU memory: `--headless`
+4. Run scripts in tmux to survive disconnects
