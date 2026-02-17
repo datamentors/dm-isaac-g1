@@ -390,11 +390,11 @@ def main():
         # Default camera on torso_link - fallback for scenes without dedicated camera links
         # NOTE: The locomanipulation_g1 scene uses a simple G1 robot without d435_link or head_link.
         # For scenes with camera support, use --camera_parent d435_link or head_link.
-        # Position far enough to escape robot body and look back at hands/workspace.
+        # Position camera in FRONT of robot (negative Y in robot frame) looking at the workspace
         camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-        camera_pos = (0.8, 0.0, 0.5)  # 80cm forward, 50cm up - outside robot body
-        camera_rot = (0.707, 0.0, 0.707, 0.0)  # Face backward (180deg yaw) to look at robot/hands
-        print(f"[INFO] Using fallback camera on torso_link (third-person view)", flush=True)
+        camera_pos = (0.0, 0.6, 0.3)  # 60cm to the side (Y), 30cm up - offset to view workspace
+        camera_rot = (0.653, -0.271, 0.653, 0.271)  # Face inward and down toward table
+        print(f"[INFO] Using fallback camera on torso_link (side view of workspace)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
