@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     libxi6 \
     libglu1-mesa \
+    dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TurboVNC for remote visualization
