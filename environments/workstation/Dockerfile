@@ -66,10 +66,11 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 # Include IsaacLab source paths
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
 
-# CRITICAL: Include IsaacLab's .venv for pink/pinocchio IK libraries
+# CRITICAL: Include IsaacLab's env_isaaclab for pink/pinocchio IK libraries
+# Isaac Sim 5.1.0 uses Python 3.11, so we use env_isaaclab (not .venv which is 3.10)
 # These are pre-installed in IsaacLab's virtual environment with proper cmeel configuration
-ENV ISAACLAB_VENV_SITE="/workspace/IsaacLab/.venv/lib/python3.10/site-packages"
-ENV ISAACLAB_CMEEL_SITE="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib/python3.10/site-packages"
+ENV ISAACLAB_VENV_SITE="/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages"
+ENV ISAACLAB_CMEEL_SITE="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib/python3.11/site-packages"
 ENV PYTHONPATH="${ISAACLAB_VENV_SITE}:${ISAACLAB_CMEEL_SITE}:${PYTHONPATH}"
 
 # Add cmeel.prefix libraries to LD_LIBRARY_PATH (required for hpp-fcl, pinocchio)

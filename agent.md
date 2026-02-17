@@ -174,8 +174,8 @@ source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 
   cd /workspace/dm-isaac-g1
 
   # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
-  VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
-  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+  VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
+  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
   export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
   export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
   export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
@@ -206,8 +206,8 @@ source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 
   cd /workspace/dm-isaac-g1
 
   # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
-  VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
-  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+  VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
+  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
   export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
   export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
   export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
@@ -229,11 +229,11 @@ source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 
 **IMPORTANT**: The pink inverse kinematics library (used for G1 manipulation scenes) requires specific path configuration:
 
 1. **Do NOT install pin-pink via pip** - it conflicts with Isaac Sim's bundled assimp library
-2. **Use IsaacLab's pre-installed version** from `/workspace/IsaacLab/.venv/`
+2. **Use IsaacLab's pre-installed version** from `/workspace/IsaacLab/env_isaaclab/`
 3. **Required environment variables:**
    ```bash
-   VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
-   CMEEL_PATH=$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+   VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
+   CMEEL_PATH=$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
    export PYTHONPATH=$VENV_PATH:$CMEEL_PATH:$PYTHONPATH
    export LD_LIBRARY_PATH=$VENV_PATH/cmeel.prefix/lib:$LD_LIBRARY_PATH
    ```
