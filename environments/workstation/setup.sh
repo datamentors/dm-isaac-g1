@@ -118,48 +118,36 @@ fi
 echo "PYTHONPATH set"
 
 echo ""
-echo "9. Configuring AWS profile..."
-if [ -n "$AWS_PROFILE" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
-    mkdir -p ~/.aws
-    if command -v aws &> /dev/null; then
-        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$AWS_PROFILE"
-        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$AWS_PROFILE"
-        if [ -n "$AWS_SESSION_TOKEN" ]; then
-            aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile "$AWS_PROFILE"
-        fi
-        if [ -n "$AWS_REGION" ]; then
-            aws configure set region "$AWS_REGION" --profile "$AWS_PROFILE"
-        fi
-        if [ -n "$AWS_OUTPUT" ]; then
-            aws configure set output "$AWS_OUTPUT" --profile "$AWS_PROFILE"
-        fi
-        echo "AWS profile '$AWS_PROFILE' configured via AWS CLI"
-    else
-        {
-            echo ""
-            echo "[$AWS_PROFILE]"
-            echo "aws_access_key_id=$AWS_ACCESS_KEY_ID"
-            echo "aws_secret_access_key=$AWS_SECRET_ACCESS_KEY"
-            if [ -n "$AWS_SESSION_TOKEN" ]; then
-                echo "aws_session_token=$AWS_SESSION_TOKEN"
-            fi
-        } >> ~/.aws/credentials
-
-        {
-            echo ""
-            echo "[profile $AWS_PROFILE]"
-            if [ -n "$AWS_REGION" ]; then
-                echo "region=$AWS_REGION"
-            fi
-            if [ -n "$AWS_OUTPUT" ]; then
-                echo "output=$AWS_OUTPUT"
-            fi
-        } >> ~/.aws/config
-        echo "AWS CLI not found; appended profile to ~/.aws/credentials and ~/.aws/config"
+echo "9. Configuring AWS..."
+if command -v aws &> /dev/null; then
+    echo "AWS CLI found: $(aws --version)"
+    if [ -n "$AWS_PROFILE" ]; then
+        echo "AWS_PROFILE is set to: $AWS_PROFILE"
+        echo ""
+        echo "For AWS SSO setup, run:"
+        echo "  aws configure sso --profile $AWS_PROFILE"
+        echo ""
+        echo "Then login with:"
+        echo "  aws sso login --profile $AWS_PROFILE"
     fi
 else
-    echo "AWS_PROFILE or credentials not set - skipping AWS profile setup"
-    echo "To enable, set AWS_PROFILE, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY in .env"
+    echo "AWS CLI not found - will be available inside container after rebuild"
+fi
+
+# 10. ECR Login helper function
+echo ""
+echo "10. Setting up ECR helper..."
+if [ -n "$AWS_ECR_REGISTRY" ] && [ -n "$AWS_REGION" ] && [ -n "$AWS_PROFILE" ]; then
+    echo "ECR configured: $AWS_ECR_REGISTRY"
+    echo ""
+    echo "To push dm-workstation image to ECR:"
+    echo "  1. aws sso login --profile $AWS_PROFILE"
+    echo "  2. aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE | docker login --username AWS --password-stdin $AWS_ECR_REGISTRY"
+    echo "  3. docker tag dm-workstation:latest $AWS_ECR_REGISTRY/$AWS_ECR_REPO:latest"
+    echo "  4. docker push $AWS_ECR_REGISTRY/$AWS_ECR_REPO:latest"
+else
+    echo "AWS_ECR_REGISTRY not set - skipping ECR helper setup"
+    echo "Set AWS_ECR_REGISTRY in .env (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com)"
 fi
 
 echo ""
@@ -171,4 +159,13 @@ echo "Next steps:"
 echo "  1. Edit .env with your configuration"
 echo "  2. Run 'source .env' to load environment"
 echo "  3. Run 'uv run dm-g1 --help' to test CLI"
+echo ""
+echo "For VNC access (after container rebuild):"
+echo "  1. docker exec -it dm-workstation vncserver :1 -geometry 1920x1080"
+echo "  2. Connect VNC client to 192.168.1.205:5901"
+echo ""
+echo "For ECR push (requires AWS credentials in .env):"
+echo "  1. source .env && source /tmp/ecr-login.sh"
+echo "  2. docker tag dm-workstation:latest \$AWS_ECR_REGISTRY/\$AWS_ECR_REPO:latest"
+echo "  3. docker push \$AWS_ECR_REGISTRY/\$AWS_ECR_REPO:latest"
 echo ""
