@@ -387,13 +387,13 @@ def main():
         camera_rot = tuple(args_cli.camera_rot)
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
-        # Default camera on left wrist - egocentric view from left hand camera
-        # Based on unitree_sim_isaaclab camera_configs.py for DEX3 hands
-        # This matches the training data camera placement for manipulation tasks
-        camera_parent = "{ENV_REGEX_NS}/Robot/left_hand_camera_base_link"
-        camera_pos = (-0.04012, 0.07441, 0.15711)  # From unitree_sim_isaaclab DEX3 config
-        camera_rot = (0.00539, 0.86024, 0.0424, 0.50809)  # From unitree_sim_isaaclab DEX3 config
-        print(f"[INFO] Using default camera on left_hand_camera_base_link (DEX3 wrist cam)", flush=True)
+        # Default camera on d435_link - G1 body-mounted RealSense D435 camera
+        # Based on unitree_sim_isaaclab camera_configs.py for G1 front camera
+        # This is the main observation camera for the G1 robot
+        camera_parent = "{ENV_REGEX_NS}/Robot/d435_link"
+        camera_pos = (0.0, 0.0, 0.0)  # At camera mount position
+        camera_rot = (0.5, -0.5, 0.5, -0.5)  # From unitree_sim_isaaclab G1 front cam config
+        print(f"[INFO] Using default camera on d435_link (G1 front camera)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
