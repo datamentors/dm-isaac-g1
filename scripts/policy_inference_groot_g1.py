@@ -387,11 +387,11 @@ def main():
         camera_rot = tuple(args_cli.camera_rot)
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
-        # Default camera on torso_link - forward-facing view of workspace
+        # Default camera on torso_link - egocentric view looking at workspace
         camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-        camera_pos = (0.35, 0.0, 0.15)  # 35cm forward, 15cm up from torso
-        camera_rot = (0.924, 0.0, -0.383, 0.0)  # ~45deg pitch down to see hands/table
-        print(f"[INFO] Using default camera on torso_link", flush=True)
+        camera_pos = (0.4, 0.0, 0.4)  # 40cm forward, 40cm up from torso (near head level)
+        camera_rot = (0.707, 0.0, -0.707, 0.0)  # 90deg pitch down to see table/hands
+        print(f"[INFO] Using default camera on torso_link (egocentric view)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
