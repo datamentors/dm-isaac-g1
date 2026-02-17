@@ -447,12 +447,12 @@ def main():
             # Hardcoded fallback - same as G1_HEAD_CAMERA_FALLBACK
             camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
             camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
-            camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as d435_link rotation
+            camera_rot = (0.5, 0.5, -0.5, -0.5)  # Mirrored to look forward
     else:
         # Hardcoded fallback when configs module not available
         camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
         camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
-        camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as d435_link rotation
+        camera_rot = (0.5, 0.5, -0.5, -0.5)  # Mirrored to look forward
         print(f"[INFO] Using hardcoded fallback camera on torso_link", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(

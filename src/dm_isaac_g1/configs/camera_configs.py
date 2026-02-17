@@ -131,10 +131,11 @@ G1_HEAD_CAMERA_FALLBACK = CameraConfig(
     # Position: forward and up from torso to approximate head position
     # In robot frame: X=forward, Y=left, Z=up
     position=(0.25, 0.0, 0.45),  # 25cm forward, 45cm up (head height)
-    # Rotation: Camera default looks down -Z, we need to rotate to look forward-down
-    # Using same rotation as Unitree d435 camera: (0.5, -0.5, 0.5, -0.5)
-    # This quaternion rotates camera from -Z to +X direction with proper orientation
-    rotation=(0.5, -0.5, 0.5, -0.5),  # wxyz - same as d435_link camera
+    # Rotation: Camera looking forward and down toward workspace
+    # ROS convention: camera looks down -Z by default
+    # We need rotation to look forward (+X) and slightly down
+    # Quaternion (w, x, y, z) = (0.5, 0.5, -0.5, -0.5) rotates 180° from d435 config
+    rotation=(0.5, 0.5, -0.5, -0.5),  # wxyz - mirrored to look forward
     width=640,
     height=480,
     is_hand_dependent=False,

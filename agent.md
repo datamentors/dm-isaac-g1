@@ -230,15 +230,47 @@ source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 
 
 1. **Do NOT install pin-pink via pip** - it conflicts with Isaac Sim's bundled assimp library
 2. **Use IsaacLab's pre-installed version** from `/workspace/IsaacLab/env_isaaclab/`
-3. **Required environment variables:**
-   ```bash
-   VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
-   CMEEL_PATH=$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
-   export PYTHONPATH=$VENV_PATH:$CMEEL_PATH:$PYTHONPATH
-   export LD_LIBRARY_PATH=$VENV_PATH/cmeel.prefix/lib:$LD_LIBRARY_PATH
-   ```
+3. **CRITICAL: Do NOT add IsaacLab env paths to PYTHONPATH at startup**
+   - The IsaacLab env contains a torch stub that conflicts with Isaac Sim's bundled torch
+   - The `policy_inference_groot_g1.py` script adds these paths AFTER torch is imported
+   - This is the correct approach and avoids CUDA library conflicts
 
-The Dockerfile is configured to set these paths automatically. If running manually, always include these exports.
+**Working PYTHONPATH for inference (NO IsaacLab env):**
+```bash
+export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:$PYTHONPATH
+```
+
+**DO NOT use this (causes torch/CUDA conflicts):**
+```bash
+# WRONG - causes ImportError: undefined symbol: __nvJitLinkCreate
+VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
+export PYTHONPATH=$VENV_PATH:$PYTHONPATH  # DON'T DO THIS
+```
+
+The inference script handles pink/pinocchio paths internally after Isaac Sim loads.
+
+### Container Environment Notes
+
+**IMPORTANT: Avoid Container Recreation Issues**
+
+The Docker container loses all manual installations when recreated (`docker compose down && up`). To prevent recurring library issues:
+
+1. **Use `docker compose stop/start`** instead of `down/up` when possible - this preserves container state
+2. **The working container has these libraries pre-installed in IsaacLab env:**
+   - `pink` (pin-pink-3.1.0)
+   - `pinocchio` (in cmeel.prefix)
+   - `hpp-fcl` (in cmeel.prefix)
+3. **If you must recreate the container**, the libraries are already in IsaacLab's env_isaaclab directory which is mounted, so no reinstallation is needed
+4. **CUDA/Driver Compatibility**: The Blackwell GPU uses CUDA 13.1 driver, but Isaac Sim's torch is built for CUDA 12.8. This can cause symbol errors if paths are configured incorrectly.
+
+**Quick Container Commands:**
+```bash
+# PREFERRED - preserves container state
+docker compose stop && docker compose start
+
+# ONLY if needed - recreates container (loses pip installs not in mounted volumes)
+docker compose down && docker compose up -d
+```
 
 ## Directory Structure
 
