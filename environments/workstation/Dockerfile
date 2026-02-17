@@ -73,22 +73,22 @@ COPY pyproject.toml /workspace/env/
 WORKDIR /workspace/env
 RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
+# Install pink and pinocchio for NumPy 2 compatibility
+# pin-pink 4.0.0+ supports NumPy 2.x (Isaac Sim 5.1.0 uses NumPy 2.x)
+# This replaces the older pin-pink 3.1.0 from IsaacLab's env_isaaclab
+RUN /isaac-sim/python.sh -m pip install --upgrade pin-pink
+
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 # Include IsaacLab source paths
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
 
-# PINK/PINOCCHIO PATHS - Set as variables, NOT added to PATH
-# Isaac Sim 5.1.0 uses Python 3.11, so we use env_isaaclab (not .venv which is 3.10)
-# IMPORTANT: We do NOT add these to PYTHONPATH at container startup because:
-#   1. env_isaaclab has torch 2.7.0+cu126 which conflicts with Isaac Sim's torch
-#   2. The CUDA libraries in cmeel.prefix conflict with Isaac Sim's CUDA libs
-# Instead, these paths should be added AFTER Isaac Sim imports torch, before importing pink
+# PINK/PINOCCHIO PATHS (for reference only - now installed in Isaac Sim Python)
+# With pin-pink 4.0.0 installed directly in Isaac Sim's Python environment,
+# we no longer need to manage IsaacLab env_isaaclab paths for pink imports.
+# The paths below are kept for reference if older env_isaaclab versions are needed.
 ENV ISAACLAB_VENV_SITE="/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages"
 ENV ISAACLAB_CMEEL_SITE="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib/python3.11/site-packages"
 ENV ISAACLAB_CMEEL_LIB="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib"
-
-# NOTE: These paths are NOT added to PYTHONPATH or LD_LIBRARY_PATH here
-# The inference script must add them at the right time (after torch imports)
 
 # Expose ports
 # Isaac Sim streaming

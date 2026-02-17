@@ -161,3 +161,84 @@ This means:
 - Code changes are immediately available in container
 - No need to rebuild container for code changes
 - UV venv is inside container, not on host
+
+## Key Dependencies
+
+### Robot Communication (DDS + Unitree SDK)
+
+The workstation environment includes CycloneDDS and the Unitree SDK for real robot communication:
+
+- **CycloneDDS**: Built from source (releases/0.10.x) with Python bindings
+- **unitree_sdk2py**: Installed from GitHub with manual directory copy (pip bug workaround)
+
+These are installed in the **Dockerfile** (not pyproject.toml) because:
+- CycloneDDS requires cmake build from source
+- unitree_sdk2py has a known pip bug where subdirectories (b2, g1, h1, comm) aren't copied
+
+### IK Libraries (Pink/Pinocchio)
+
+Isaac Sim 5.1.0 uses NumPy 2.x, which requires updated IK libraries:
+
+- **pin-pink 4.0.0+**: Supports NumPy 2.x
+- **pinocchio 3.9.0+**: Compiled for NumPy 2.x
+
+These are installed directly into Isaac Sim's Python environment in the Dockerfile:
+```dockerfile
+RUN /isaac-sim/python.sh -m pip install --upgrade pin-pink
+```
+
+**Note**: Older IsaacLab environments (env_isaaclab) have pin-pink 3.1.0 compiled for NumPy 1.x, which crashes with Isaac Sim's NumPy 2.x. The Dockerfile installs the updated versions directly.
+
+### Unitree Robot Assets
+
+The robot USD files must be fetched from HuggingFace:
+
+```bash
+# Inside the container
+cd /workspace/unitree_sim_isaaclab
+bash fetch_assets.sh
+```
+
+This downloads the G1 robot USD files to `/workspace/unitree_sim_isaaclab/assets/`.
+
+## Container Persistence
+
+**Important**: Use `docker compose stop/start` instead of `down/up` when possible:
+
+```bash
+# PREFERRED - preserves container state (installed packages)
+docker compose stop && docker compose start
+
+# ONLY if needed - recreates container (loses pip installs not in Dockerfile)
+docker compose down && docker compose up -d
+```
+
+Packages installed via pip during development are lost when container is recreated with `down/up`.
+
+## Troubleshooting
+
+### NumPy Version Mismatch
+If you see errors like "A module compiled using NumPy 1.x cannot be run in NumPy 2.x":
+```bash
+# Fix by reinstalling pin-pink for NumPy 2
+docker exec dm-workstation /isaac-sim/python.sh -m pip install --upgrade pin-pink
+```
+
+### unitree_sdk2py Import Errors
+If importing unitree_sdk2py fails with "cannot import b2" or similar:
+```bash
+# Manually copy missing directories
+docker exec dm-workstation bash -c "
+  SITE=$(/isaac-sim/python.sh -c 'import site; print(site.getsitepackages()[0])')
+  for dir in b2 g1 h1 comm; do
+    cp -r /opt/unitree_sdk2_python/unitree_sdk2py/\$dir \$SITE/unitree_sdk2py/
+  done
+"
+```
+
+### Git Permission Issues
+If git commands fail with permission errors:
+```bash
+# Fix ownership (run on workstation, not in container)
+sudo chown -R datamentors:datamentors /home/datamentors/dm-isaac-g1/.git
+```
