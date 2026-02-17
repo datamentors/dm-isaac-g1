@@ -166,7 +166,7 @@ from importlib import import_module
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
-from isaaclab.sensors import TiledCameraCfg
+from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg
 import isaaclab.sim as sim_utils
@@ -443,57 +443,36 @@ def main():
         # Head camera is AGNOSTIC to hand type - same config works for all hands
         # First try primary config (d435_link), fallback to torso_link if not available
         #
-        # NOTE: The locomanipulation_g1 scene uses a simplified G1 robot without d435_link.
-        # We'll use the fallback config which attaches to torso_link instead.
-        # For full-featured scenes (e.g., with Unitree USD downloads), d435_link is available.
+        # Camera Configuration - Using Unitree's approach with CameraCfg
+        # The G1 robot USD from unitree_sim_isaaclab includes d435_link for head camera.
+        # Using CameraCfg instead of TiledCameraCfg for better Isaac Sim 5.1.0 compatibility.
+        #
+        # Reference: /workspace/unitree_sim_isaaclab/tasks/common_config/camera_configs.py
 
-        # Detect which camera link is likely available based on scene
-        # NOTE: IsaacLab task environments use simplified robot USDs without d435_link.
-        # The d435_link is only available in Unitree's full robot USDs downloaded from HuggingFace.
-        # For all IsaacLab tasks, we use the fallback camera attached to torso_link.
-        scene_has_d435 = False  # IsaacLab tasks don't have d435_link
-        use_fallback = True  # Always use fallback for IsaacLab tasks
-
-        try:
-            head_cam_cfg = get_head_camera_config(RobotType.G1, use_fallback=use_fallback)
-            camera_parent = head_cam_cfg.prim_path.rsplit("/", 1)[0]  # Remove camera name to get parent
-            camera_pos = head_cam_cfg.position
-            camera_rot = head_cam_cfg.rotation
-            config_type = "fallback" if use_fallback else "primary"
-            print(f"[INFO] Using {config_type} head camera config: parent={head_cam_cfg.parent_link}", flush=True)
-            print(f"[INFO] Camera description: {head_cam_cfg.description}", flush=True)
-        except ValueError as e:
-            print(f"[WARN] Could not get camera config: {e}", flush=True)
-            # Hardcoded fallback - same as G1_HEAD_CAMERA_FALLBACK
-            camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-            camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
-            camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as Unitree d435
+        print(f"[INFO] Using Unitree camera configuration with d435_link", flush=True)
     else:
-        # Hardcoded fallback when configs module not available
-        camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-        camera_pos = (0.25, 0.0, 0.45)  # 25cm forward, 45cm up (head height)
-        camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as Unitree d435
-        print(f"[INFO] Using hardcoded fallback camera on torso_link", flush=True)
+        print(f"[INFO] Camera configs module not available, using Unitree defaults", flush=True)
 
-    # Configure TiledCamera for GROOT observations
-    # Note: Isaac Sim 5.1.0 workarounds (async rendering, DLSS) are applied
-    # at the top of this script via carb.settings to ensure camera stability
-    env_cfg.scene.tiled_camera = TiledCameraCfg(
-        prim_path=f"{camera_parent}/Camera",
-        offset=TiledCameraCfg.OffsetCfg(
-            pos=camera_pos,
-            rot=camera_rot,
-            convention="ros",  # ROS convention: X forward, Y left, Z up
-        ),
+    # Configure Camera for GROOT observations using Unitree's approach
+    # CameraCfg is more stable in Isaac Sim 5.1.0 than TiledCameraCfg
+    # Camera path follows Unitree convention: /World/envs/env_.*/Robot/d435_link/front_cam
+    env_cfg.scene.front_camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/d435_link/front_cam",
+        update_period=0.02,  # 50Hz like Unitree
+        height=args_cli.video_h,
+        width=args_cli.video_w,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.15,  # From GR1T2 scene
+            focal_length=7.6,  # From Unitree camera_configs.py
             focus_distance=400.0,
-            horizontal_aperture=20.955,
-            clipping_range=(0.1, 5.0)  # Extended for scene visibility
+            horizontal_aperture=20.0,
+            clipping_range=(0.1, 1.0e5)
         ),
-        width=args_cli.video_w,
-        height=args_cli.video_h,
+        offset=CameraCfg.OffsetCfg(
+            pos=(0, 0.0, 0),  # No offset - camera is at d435_link origin
+            rot=(0.5, -0.5, 0.5, -0.5),  # Unitree d435 orientation
+            convention="ros"
+        ),
     )
 
     env_cfg.sim.device = args_cli.device
@@ -504,7 +483,7 @@ def main():
     env = ManagerBasedRLEnv(cfg=env_cfg)
     env_action_dim = env.action_manager.total_action_dim
     robot = env.scene["robot"]
-    camera = env.scene["tiled_camera"]
+    camera = env.scene["front_camera"]
 
     print(f"[INFO] Environment created with action dim: {env_action_dim}", flush=True)
 

@@ -105,6 +105,10 @@ RUN /isaac-sim/python.sh -m pip install --upgrade pin-pink
 # These help avoid the "Unable to write from unknown dtype" errors
 RUN /isaac-sim/python.sh -m pip install --upgrade pillow opencv-python-headless
 
+# Install nlopt for NumPy 2.x compatibility (required by IsaacLab dex_retargeting)
+# nlopt 2.10.0+ supports NumPy 2.x
+RUN /isaac-sim/python.sh -m pip install --upgrade nlopt
+
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 # Include IsaacLab source paths
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
