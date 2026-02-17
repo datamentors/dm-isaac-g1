@@ -1,18 +1,21 @@
 # Workstation Environment Dockerfile
-# Unified environment for GROOT training and Isaac Sim/Lab simulation
-# Base: NVIDIA Isaac Sim with UV for dependency management
+# Unified environment for GROOT inference and Isaac Sim/Lab simulation
+# Base: NVIDIA Isaac Sim 5.0.0 (stable, NumPy 1.x compatible)
 #
-# Isaac Sim 5.1.0 Known Issues & Workarounds Applied:
-# 1. Async rendering disabled for synthetic data (camera captures)
-# 2. DLSS set to Quality mode for camera resolution < 600x600
-# 3. Proper extension loading order for camera stability
-# 4. CycloneDDS built from source for unitree_sdk2py
-# 5. pin-pink 4.0.0+ for NumPy 2.x compatibility
+# IMPORTANT: NumPy < 2.0 Requirement
+# ==================================
+# Isaac Sim 5.1.0 uses NumPy 2.x which has bugs in the synthetic data pipeline
+# causing "Unable to write from unknown dtype" errors with cameras.
 #
-# Reference: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/known_issues.html
+# We use Isaac Sim 5.0.0 which:
+# - Uses NumPy 1.x (stable)
+# - Has working camera/TiledCamera operations
+# - Is recommended by Unitree for G1 simulation
+#
 # Reference: https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/doc/isaacsim5.0_install.md
+# Reference: docs/NUMPY_COMPATIBILITY.md
 
-ARG ISAAC_SIM_VERSION=5.1.0
+ARG ISAAC_SIM_VERSION=5.0.0
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
 # Run as root for package installation
@@ -31,12 +34,6 @@ ENV ISAACSIM_PYTHON_EXE="${ISAACSIM_PATH}/python.sh"
 ENV CARB_APP_PATH="${ISAACSIM_PATH}/kit"
 ENV EXP_PATH="${ISAACSIM_PATH}/apps"
 ENV ISAAC_PATH="${ISAACSIM_PATH}"
-
-# Isaac Sim 5.1.0 workarounds for camera/synthetic data stability
-# Disable async rendering to prevent frame skipping with Replicator
-ENV ISAACSIM_DISABLE_ASYNC_RENDERING=1
-# Set DLSS to Quality mode (2) for synthetic data generation
-ENV ISAACSIM_DLSS_MODE=2
 
 # Fix apt permissions
 RUN mkdir -p /var/lib/apt/lists/partial && chmod 755 /var/lib/apt/lists
@@ -96,37 +93,26 @@ COPY pyproject.toml /workspace/env/
 WORKDIR /workspace/env
 RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
-# Install pink and pinocchio for NumPy 2 compatibility
-# pin-pink 4.0.0+ supports NumPy 2.x (Isaac Sim 5.1.0 uses NumPy 2.x)
-# This replaces the older pin-pink 3.1.0 from IsaacLab's env_isaaclab
-RUN /isaac-sim/python.sh -m pip install --upgrade pin-pink
+# CRITICAL: Pin NumPy to < 2.0 for stability
+# This ensures compatibility with:
+# - Isaac Sim synthetic data pipeline
+# - GR00T fine-tuning requirements (numpy>=1.23.5,<2.0.0)
+# - pink/pinocchio IK libraries
+RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0"
 
-# Install additional packages for camera/synthetic data stability
-# These help avoid the "Unable to write from unknown dtype" errors
-RUN /isaac-sim/python.sh -m pip install --upgrade pillow opencv-python-headless
+# Install pink and pinocchio for IK
+# Isaac Sim 5.0.0 uses NumPy 1.x, so standard versions work
+RUN /isaac-sim/python.sh -m pip install pin-pink
 
-# Install nlopt for NumPy 2.x compatibility (required by IsaacLab dex_retargeting)
-# nlopt 2.10.0+ supports NumPy 2.x
-RUN /isaac-sim/python.sh -m pip install --upgrade nlopt
+# Install additional packages
+RUN /isaac-sim/python.sh -m pip install pillow opencv-python-headless
+
+# Install nlopt (required by IsaacLab dex_retargeting)
+RUN /isaac-sim/python.sh -m pip install nlopt
 
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 # Include IsaacLab source paths
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
-
-# Create a startup script that applies Isaac Sim 5.1.0 workarounds
-RUN echo '#!/bin/bash\n\
-# Isaac Sim 5.1.0 startup with camera/synthetic data workarounds\n\
-# Reference: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/known_issues.html\n\
-\n\
-# Disable async rendering for Replicator/camera stability\n\
-ASYNC_FLAG="--/exts/isaacsim.core.throttling/enable_async=false"\n\
-\n\
-# Set DLSS to Quality mode for synthetic data\n\
-DLSS_FLAG="--/rtx/post/dlss/mode=2"\n\
-\n\
-# Run Isaac Sim Python with workarounds\n\
-exec /isaac-sim/python.sh "$ASYNC_FLAG" "$DLSS_FLAG" "$@"\n\
-' > /usr/local/bin/isaac-python-stable && chmod +x /usr/local/bin/isaac-python-stable
 
 # Expose ports
 # Isaac Sim streaming

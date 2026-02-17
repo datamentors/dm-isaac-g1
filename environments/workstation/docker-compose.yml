@@ -1,12 +1,16 @@
 version: "3.8"
 
+# DM-ISAAC-G1 Workstation Environment
+# Uses Isaac Sim 5.0.0 with NumPy < 2.0 for stability
+# See docs/NUMPY_COMPATIBILITY.md for details
+
 services:
   dm-workstation:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        ISAAC_SIM_VERSION: "5.1.0"
+        ISAAC_SIM_VERSION: "5.0.0"
     image: dm-workstation:latest
     container_name: dm-workstation
     runtime: nvidia
@@ -15,7 +19,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - DISPLAY=${DISPLAY:-:0}
       - ACCEPT_EULA=Y
-      # GROOT server connection
+      # GROOT server connection (DGX Spark)
       - GROOT_SERVER_HOST=${GROOT_SERVER_HOST:-192.168.1.237}
       - GROOT_SERVER_PORT=${GROOT_SERVER_PORT:-5555}
       # HuggingFace
@@ -29,10 +33,12 @@ services:
       # Mount datasets and checkpoints (persistent storage)
       - /workspace/datasets:/workspace/datasets
       - /workspace/checkpoints:/workspace/checkpoints
-      # Mount Isaac Lab (if using local install)
+      # Mount Isaac Lab
       - /workspace/IsaacLab:/workspace/IsaacLab
-      # Mount Isaac-GR00T (for fine-tuning)
+      # Mount Isaac-GR00T (for client code)
       - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
+      # Mount unitree_sim_isaaclab
+      - /workspace/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
       # X11 for GUI
       - /tmp/.X11-unix:/tmp/.X11-unix
       # GPU access
