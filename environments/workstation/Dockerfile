@@ -66,15 +66,18 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 # Include IsaacLab source paths
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
 
-# CRITICAL: Include IsaacLab's env_isaaclab for pink/pinocchio IK libraries
+# PINK/PINOCCHIO PATHS - Set as variables, NOT added to PATH
 # Isaac Sim 5.1.0 uses Python 3.11, so we use env_isaaclab (not .venv which is 3.10)
-# These are pre-installed in IsaacLab's virtual environment with proper cmeel configuration
+# IMPORTANT: We do NOT add these to PYTHONPATH at container startup because:
+#   1. env_isaaclab has torch 2.7.0+cu126 which conflicts with Isaac Sim's torch
+#   2. The CUDA libraries in cmeel.prefix conflict with Isaac Sim's CUDA libs
+# Instead, these paths should be added AFTER Isaac Sim imports torch, before importing pink
 ENV ISAACLAB_VENV_SITE="/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages"
 ENV ISAACLAB_CMEEL_SITE="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib/python3.11/site-packages"
-ENV PYTHONPATH="${ISAACLAB_VENV_SITE}:${ISAACLAB_CMEEL_SITE}:${PYTHONPATH}"
+ENV ISAACLAB_CMEEL_LIB="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib"
 
-# Add cmeel.prefix libraries to LD_LIBRARY_PATH (required for hpp-fcl, pinocchio)
-ENV LD_LIBRARY_PATH="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib:${LD_LIBRARY_PATH}"
+# NOTE: These paths are NOT added to PYTHONPATH or LD_LIBRARY_PATH here
+# The inference script must add them at the right time (after torch imports)
 
 # Expose ports
 # Isaac Sim streaming

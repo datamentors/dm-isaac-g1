@@ -108,6 +108,26 @@ simulation_app = app_launcher.app
 import numpy as np
 import torch
 
+# CRITICAL: Add IsaacLab env_isaaclab paths for pink/pinocchio IK libraries
+# This must happen AFTER torch is imported (above) but BEFORE loading scenes that use pink
+# The env_isaaclab paths contain pink, pinocchio, hpp-fcl compiled for Python 3.11
+import ctypes
+_isaaclab_venv = os.environ.get("ISAACLAB_VENV_SITE", "/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages")
+_isaaclab_cmeel = os.environ.get("ISAACLAB_CMEEL_SITE", f"{_isaaclab_venv}/cmeel.prefix/lib/python3.11/site-packages")
+_isaaclab_cmeel_lib = os.environ.get("ISAACLAB_CMEEL_LIB", f"{_isaaclab_venv}/cmeel.prefix/lib")
+
+# Add to Python path (for pink, pinocchio modules)
+if _isaaclab_venv not in sys.path:
+    sys.path.append(_isaaclab_venv)
+if _isaaclab_cmeel not in sys.path:
+    sys.path.append(_isaaclab_cmeel)
+
+# Pre-load hpp-fcl shared library to avoid runtime linking issues
+try:
+    ctypes.CDLL(f"{_isaaclab_cmeel_lib}/libhpp-fcl.so", mode=ctypes.RTLD_GLOBAL)
+except Exception as e:
+    print(f"[WARN] Could not preload libhpp-fcl.so: {e}", flush=True)
+
 from importlib import import_module
 
 from isaaclab.envs import ManagerBasedRLEnv
