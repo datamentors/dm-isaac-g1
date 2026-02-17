@@ -41,12 +41,15 @@ print("Step 3: Finding G1 robot USD...")
 
 # Common locations for G1 USD files
 G1_USD_PATHS = [
+    # Unitree sim isaaclab assets (fetched from HuggingFace)
+    "/workspace/unitree_sim_isaaclab/assets/robots/g1-29dof_wholebody_inspire",
+    "/workspace/unitree_sim_isaaclab/assets/robots/g1-29dof-inspire-base-fix-usd",
+    "/workspace/unitree_sim_isaaclab/assets/robots/g1-29dof_wholebody_dex3",
+    "/workspace/unitree_sim_isaaclab/assets/robots",
     # Isaac Sim assets
     "/isaac-sim/exts/isaacsim.robot.assets/data/Robots/Unitree/G1",
     # IsaacLab assets
     "/workspace/IsaacLab/source/isaaclab_assets/data/Robots/Unitree/G1",
-    # Unitree sim isaaclab
-    "/workspace/unitree_sim_isaaclab/assets/robots/g1",
 ]
 
 # Find available USD files
