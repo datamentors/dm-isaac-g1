@@ -48,13 +48,25 @@ _project_root = _script_dir.parent
 if str(_project_root / "src") not in sys.path:
     sys.path.insert(0, str(_project_root / "src"))
 
+# Add unitree_sim_isaaclab to path for G1 scenes
+# Mounted at /workspace/unitree_sim_isaaclab in container
+_unitree_sim_path = "/workspace/unitree_sim_isaaclab"
+if os.path.exists(_unitree_sim_path) and _unitree_sim_path not in sys.path:
+    sys.path.insert(0, _unitree_sim_path)
+
 from isaaclab.app import AppLauncher
 
 # Available scenes for G1 robot
+# Uses unitree_sim_isaaclab scenes which have full robot USD with d435_link camera
+# See: https://github.com/unitreerobotics/unitree_sim_isaaclab
 AVAILABLE_SCENES = {
-    "locomanipulation_g1": "isaaclab_tasks.manager_based.locomanipulation.pick_place.locomanipulation_g1_env_cfg.LocomanipulationG1EnvCfg",
-    "fixed_base_ik_g1": "isaaclab_tasks.manager_based.locomanipulation.pick_place.fixed_base_upper_body_ik_g1_env_cfg.FixedBaseUpperBodyIKG1EnvCfg",
-    "pickplace_g1_inspire": "isaaclab_tasks.manager_based.manipulation.pick_place.pickplace_unitree_g1_inspire_hand_env_cfg.PickPlaceG1InspireFTPEnvCfg",
+    # G1 with Inspire hands (from unitree_sim_isaaclab)
+    "pickplace_g1_inspire": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_inspire.pickplace_cylinder_g1_29dof_inspire_env_cfg.PickPlaceG129InspireBaseFixEnvCfg",
+    "pickplace_redblock_g1_inspire": "tasks.g1_tasks.pick_place_redblock_g1_29dof_inspire.pickplace_redblock_g1_29dof_inspire_joint_env_cfg.PickPlaceRedblockG129InspireBaseFixEnvCfg",
+    "stack_g1_inspire": "tasks.g1_tasks.stack_rgyblock_g1_29dof_inspire.stack_rgyblock_g1_29dof_inspire_joint_env_cfg.StackRGYBlockG129InspireBaseFixEnvCfg",
+    # G1 with DEX3 hands (from unitree_sim_isaaclab)
+    "pickplace_g1_dex3": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_dex3.pickplace_cylinder_g1_29dof_dex3_joint_env_cfg.PickPlaceG129Dex3BaseFixEnvCfg",
+    # IsaacLab locomotion tasks (simplified robot, no d435_link)
     "locomotion_g1_flat": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg.G1FlatEnvCfg",
     "locomotion_g1_rough": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg.G1RoughEnvCfg",
 }

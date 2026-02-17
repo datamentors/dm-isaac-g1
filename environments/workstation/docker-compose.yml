@@ -37,8 +37,8 @@ services:
       - /workspace/IsaacLab:/workspace/IsaacLab
       # Mount Isaac-GR00T (for client code)
       - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
-      # Mount unitree_sim_isaaclab
-      - /workspace/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
+      # Mount unitree_sim_isaaclab (from /home/datamentors)
+      - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
       # X11 for GUI
       - /tmp/.X11-unix:/tmp/.X11-unix
       # GPU access

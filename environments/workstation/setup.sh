@@ -118,6 +118,51 @@ fi
 echo "PYTHONPATH set"
 
 echo ""
+echo "9. Configuring AWS profile..."
+if [ -n "$AWS_PROFILE" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+    mkdir -p ~/.aws
+    if command -v aws &> /dev/null; then
+        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile "$AWS_PROFILE"
+        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile "$AWS_PROFILE"
+        if [ -n "$AWS_SESSION_TOKEN" ]; then
+            aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile "$AWS_PROFILE"
+        fi
+        if [ -n "$AWS_REGION" ]; then
+            aws configure set region "$AWS_REGION" --profile "$AWS_PROFILE"
+        fi
+        if [ -n "$AWS_OUTPUT" ]; then
+            aws configure set output "$AWS_OUTPUT" --profile "$AWS_PROFILE"
+        fi
+        echo "AWS profile '$AWS_PROFILE' configured via AWS CLI"
+    else
+        {
+            echo ""
+            echo "[$AWS_PROFILE]"
+            echo "aws_access_key_id=$AWS_ACCESS_KEY_ID"
+            echo "aws_secret_access_key=$AWS_SECRET_ACCESS_KEY"
+            if [ -n "$AWS_SESSION_TOKEN" ]; then
+                echo "aws_session_token=$AWS_SESSION_TOKEN"
+            fi
+        } >> ~/.aws/credentials
+
+        {
+            echo ""
+            echo "[profile $AWS_PROFILE]"
+            if [ -n "$AWS_REGION" ]; then
+                echo "region=$AWS_REGION"
+            fi
+            if [ -n "$AWS_OUTPUT" ]; then
+                echo "output=$AWS_OUTPUT"
+            fi
+        } >> ~/.aws/config
+        echo "AWS CLI not found; appended profile to ~/.aws/credentials and ~/.aws/config"
+    fi
+else
+    echo "AWS_PROFILE or credentials not set - skipping AWS profile setup"
+    echo "To enable, set AWS_PROFILE, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY in .env"
+fi
+
+echo ""
 echo "=========================================="
 echo "Setup complete!"
 echo "=========================================="
