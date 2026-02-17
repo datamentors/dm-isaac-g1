@@ -112,14 +112,27 @@ select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
 # ==========================================
-# Note: Additional packages installed from source
+# Robot Communication (DDS + Unitree SDK)
 # ==========================================
-# CycloneDDS: Built from source (releases/0.10.x)
-#   export CYCLONEDDS_HOME=/workspace/cyclonedds/install
+# These are installed in the DOCKERFILE (not via pyproject.toml) because:
+# - CycloneDDS requires cmake build from source
+# - unitree_sdk2py has a pip bug where subdirectories aren't copied
 #
-# unitree_sdk2py: Installed from GitHub
+# CycloneDDS: Built from source in Dockerfile
+#   git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
+#   cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds/install
+#   export CYCLONEDDS_HOME=/opt/cyclonedds/install
+#
+# CycloneDDS Python bindings:
+#   /isaac-sim/python.sh -m pip install cyclonedds
+#
+# unitree_sdk2py: Installed from GitHub with manual directory copy
 #   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
 #   /isaac-sim/python.sh -m pip install .
+#   # Manual copy of b2, g1, h1, comm directories (pip bug workaround)
 #
+# ==========================================
+# Note: Isaac Lab paths
+# ==========================================
 # Isaac Lab: Uses Isaac Sim's embedded Python
 #   /isaac-sim/python.sh -m pip install ...

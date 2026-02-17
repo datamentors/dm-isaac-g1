@@ -46,10 +46,21 @@ RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.
 ENV CYCLONEDDS_HOME=/opt/cyclonedds/install
 ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 
+# Install CycloneDDS Python bindings
+RUN /isaac-sim/python.sh -m pip install cyclonedds
+
 # Install unitree_sdk2py from source
+# NOTE: pip install doesn't always copy all subdirectories (b2, g1, h1, comm)
+# so we manually ensure they exist after installation
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
 WORKDIR /opt/unitree_sdk2_python
-RUN /isaac-sim/python.sh -m pip install .
+RUN /isaac-sim/python.sh -m pip install . && \
+    SITE_PACKAGES=$(/isaac-sim/python.sh -c "import site; print(site.getsitepackages()[0])") && \
+    for dir in b2 g1 h1 comm; do \
+        if [ -d "unitree_sdk2py/$dir" ] && [ ! -d "$SITE_PACKAGES/unitree_sdk2py/$dir" ]; then \
+            cp -r "unitree_sdk2py/$dir" "$SITE_PACKAGES/unitree_sdk2py/"; \
+        fi; \
+    done
 
 # Create workspace directory
 WORKDIR /workspace
