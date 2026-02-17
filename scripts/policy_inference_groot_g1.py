@@ -63,10 +63,10 @@ parser.add_argument("--max_episode_steps", type=int, default=1000,
 parser.add_argument(
     "--camera_parent",
     type=str,
-    default="{ENV_REGEX_NS}/Robot/head_link",  # Attach to robot head for ego-centric view
-    # Alternative links if head_link doesn't exist: logo_link, torso_link
-    # For torso_link use camera_pos=(0.15, 0.0, 0.55) to simulate head height
-    help="Camera parent link (default: head_link for robot head view).",
+    default=None,  # Use scene's built-in camera if None
+    # Example robot links for custom camera: logo_link, torso_link, pelvis
+    # Different scenes have different robot link structures
+    help="Camera parent link (default: None = use scene's built-in camera).",
 )
 parser.add_argument(
     "--camera_pos",
