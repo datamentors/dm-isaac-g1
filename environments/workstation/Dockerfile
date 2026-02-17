@@ -75,7 +75,7 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 # Include IsaacLab source paths
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
 
 # PINK/PINOCCHIO PATHS - Set as variables, NOT added to PATH
 # Isaac Sim 5.1.0 uses Python 3.11, so we use env_isaaclab (not .venv which is 3.10)

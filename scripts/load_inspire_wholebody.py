@@ -6,10 +6,23 @@ defined (unlike the DEX3 scene) to verify camera setup.
 
 IMPORTANT: Run this with Isaac Sim's Python:
     /isaac-sim/python.sh scripts/load_inspire_wholebody.py
+
+Required PYTHONPATH:
+    export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T
+    export PYTHONPATH=$PYTHONPATH:/workspace/IsaacLab/source/isaaclab
+    export PYTHONPATH=$PYTHONPATH:/workspace/IsaacLab/source/isaaclab_tasks
+    export PYTHONPATH=$PYTHONPATH:/workspace/IsaacLab/source/isaaclab_assets
+    export PYTHONPATH=$PYTHONPATH:/workspace/IsaacLab/source/isaaclab_contrib
+    export PYTHONPATH=$PYTHONPATH:/workspace/unitree_sim_isaaclab
 """
 
 import sys
 import os
+
+# Add isaaclab_contrib to path if not present (required by newer Isaac Lab)
+isaaclab_contrib_path = "/workspace/IsaacLab/source/isaaclab_contrib"
+if isaaclab_contrib_path not in sys.path:
+    sys.path.insert(0, isaaclab_contrib_path)
 
 # ============================================================================
 # STEP 1: Import Isaac Sim FIRST (before any other imports)
