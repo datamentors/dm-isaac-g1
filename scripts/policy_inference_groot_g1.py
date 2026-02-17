@@ -314,7 +314,9 @@ def build_flat_observation(
 def main():
     """Main function."""
 
-    def _resolve_camera_parent(parent: str) -> str:
+    def _resolve_camera_parent(parent: str | None) -> str | None:
+        if parent is None:
+            return None
         if parent.startswith("{ENV_REGEX_NS}") or parent.startswith("/"):
             return parent.rstrip("/")
         return f"{{ENV_REGEX_NS}}/Robot/{parent}".rstrip("/")
@@ -387,25 +389,28 @@ def main():
             ),
         )
 
-    # Camera configuration
+    # Camera configuration - only add custom camera if camera_parent is specified
     camera_parent = _resolve_camera_parent(args_cli.camera_parent)
-    env_cfg.scene.tiled_camera = TiledCameraCfg(
-        prim_path=f"{camera_parent}/Camera",
-        offset=TiledCameraCfg.OffsetCfg(
-            pos=tuple(args_cli.camera_pos),
-            rot=tuple(args_cli.camera_rot),
-            convention="ros",  # ROS convention: X forward, Y left, Z up
-        ),
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.15,  # From GR1T2 scene
-            focus_distance=400.0,
-            horizontal_aperture=20.955,
-            clipping_range=(0.1, 5.0)  # Extended for scene visibility
-        ),
-        width=args_cli.video_w,
-        height=args_cli.video_h,
-    )
+    if camera_parent is not None:
+        env_cfg.scene.tiled_camera = TiledCameraCfg(
+            prim_path=f"{camera_parent}/Camera",
+            offset=TiledCameraCfg.OffsetCfg(
+                pos=tuple(args_cli.camera_pos),
+                rot=tuple(args_cli.camera_rot),
+                convention="ros",  # ROS convention: X forward, Y left, Z up
+            ),
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=18.15,  # From GR1T2 scene
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.1, 5.0)  # Extended for scene visibility
+            ),
+            width=args_cli.video_w,
+            height=args_cli.video_h,
+        )
+    else:
+        print("[INFO] Using scene's default camera configuration", flush=True)
 
     env_cfg.sim.device = args_cli.device
     if args_cli.device == "cpu":
