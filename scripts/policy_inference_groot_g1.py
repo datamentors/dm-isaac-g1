@@ -387,13 +387,13 @@ def main():
         camera_rot = tuple(args_cli.camera_rot)
         print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
-        # Default camera on torso_link - third-person view from above and behind looking at workspace
-        # Position: above and in front of robot, looking down at the table/hands
-        # This provides a good view of the manipulation workspace similar to training data
-        camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
-        camera_pos = (0.5, 0.0, 0.8)  # 50cm forward, 80cm up (above head level, looking down)
-        camera_rot = (0.866, 0.0, -0.5, 0.0)  # ~60deg pitch down to see table and hands
-        print(f"[INFO] Using default overhead camera on torso_link", flush=True)
+        # Default camera on left wrist - egocentric view from left hand camera
+        # Based on unitree_sim_isaaclab camera_configs.py for DEX3 hands
+        # This matches the training data camera placement for manipulation tasks
+        camera_parent = "{ENV_REGEX_NS}/Robot/left_hand_camera_base_link"
+        camera_pos = (-0.04012, 0.07441, 0.15711)  # From unitree_sim_isaaclab DEX3 config
+        camera_rot = (0.00539, 0.86024, 0.0424, 0.50809)  # From unitree_sim_isaaclab DEX3 config
+        print(f"[INFO] Using default camera on left_hand_camera_base_link (DEX3 wrist cam)", flush=True)
 
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
