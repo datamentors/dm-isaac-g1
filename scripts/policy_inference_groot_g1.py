@@ -379,28 +379,37 @@ def main():
             ),
         )
 
-    # Camera configuration - only add custom camera if camera_parent is specified
-    camera_parent = _resolve_camera_parent(args_cli.camera_parent)
-    if camera_parent is not None:
-        env_cfg.scene.tiled_camera = TiledCameraCfg(
-            prim_path=f"{camera_parent}/Camera",
-            offset=TiledCameraCfg.OffsetCfg(
-                pos=tuple(args_cli.camera_pos),
-                rot=tuple(args_cli.camera_rot),
-                convention="ros",  # ROS convention: X forward, Y left, Z up
-            ),
-            data_types=["rgb"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=18.15,  # From GR1T2 scene
-                focus_distance=400.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.1, 5.0)  # Extended for scene visibility
-            ),
-            width=args_cli.video_w,
-            height=args_cli.video_h,
-        )
+    # Camera configuration - always add tiled camera for inference
+    # Use specified parent or default to torso_link (commonly available on G1 robots)
+    if args_cli.camera_parent is not None:
+        camera_parent = _resolve_camera_parent(args_cli.camera_parent)
+        camera_pos = tuple(args_cli.camera_pos)
+        camera_rot = tuple(args_cli.camera_rot)
+        print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
     else:
-        print("[INFO] Using scene's default camera configuration", flush=True)
+        # Default camera on torso_link - forward-facing view of workspace
+        camera_parent = "{ENV_REGEX_NS}/Robot/torso_link"
+        camera_pos = (0.35, 0.0, 0.15)  # 35cm forward, 15cm up from torso
+        camera_rot = (0.924, 0.0, -0.383, 0.0)  # ~45deg pitch down to see hands/table
+        print(f"[INFO] Using default camera on torso_link", flush=True)
+
+    env_cfg.scene.tiled_camera = TiledCameraCfg(
+        prim_path=f"{camera_parent}/Camera",
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=camera_pos,
+            rot=camera_rot,
+            convention="ros",  # ROS convention: X forward, Y left, Z up
+        ),
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=18.15,  # From GR1T2 scene
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 5.0)  # Extended for scene visibility
+        ),
+        width=args_cli.video_w,
+        height=args_cli.video_h,
+    )
 
     env_cfg.sim.device = args_cli.device
     if args_cli.device == "cpu":
