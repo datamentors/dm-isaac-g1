@@ -23,8 +23,9 @@ dependencies = [
     # ==========================================
     # ML/DL Framework
     # ==========================================
-    "torch>=2.2.0",
-    "torchvision>=0.17.0",
+    # NOTE: torch and torchvision are NOT installed here.
+    # They are provided by Isaac Sim's bundled pip_prebundle.
+    # Installing them separately causes CUDA library conflicts.
     "transformers>=4.40.0",
     "accelerate>=0.28.0",
     "safetensors>=0.4.0",
