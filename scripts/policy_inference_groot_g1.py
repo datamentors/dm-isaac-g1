@@ -119,6 +119,25 @@ if unknown:
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+# ============================================================================
+# Apply Isaac Sim 5.1.0 workarounds for camera/synthetic data stability
+# Reference: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/overview/known_issues.html
+# ============================================================================
+import carb.settings
+_settings = carb.settings.get_settings()
+
+# Disable async rendering to prevent frame skipping with Replicator/TiledCamera
+_settings.set("/exts/isaacsim.core.throttling/enable_async", False)
+
+# Set DLSS to Quality mode (2) for synthetic data generation
+# Required for camera resolutions below 600x600
+_settings.set("/rtx/post/dlss/mode", 2)
+
+# Increase subframes for material loading stability
+_settings.set("/rtx/replicator/rt_subframes", 4)
+
+print("[INFO] Applied Isaac Sim 5.1.0 camera stability workarounds", flush=True)
+
 """After app launch, import the rest."""
 import numpy as np
 import torch
@@ -456,6 +475,9 @@ def main():
         camera_rot = (0.5, -0.5, 0.5, -0.5)  # Same as Unitree d435
         print(f"[INFO] Using hardcoded fallback camera on torso_link", flush=True)
 
+    # Configure TiledCamera for GROOT observations
+    # Note: Isaac Sim 5.1.0 workarounds (async rendering, DLSS) are applied
+    # at the top of this script via carb.settings to ensure camera stability
     env_cfg.scene.tiled_camera = TiledCameraCfg(
         prim_path=f"{camera_parent}/Camera",
         offset=TiledCameraCfg.OffsetCfg(
@@ -683,6 +705,12 @@ def main():
 
     obs, _ = env.reset()
     client.reset()
+
+    # Isaac Sim 5.1.0 stability: render extra frames after reset
+    # This allows physics to settle and camera buffers to initialize properly
+    print("[INFO] Stabilizing simulation (30 frames)...", flush=True)
+    for _ in range(30):
+        obs, _, _, _, _ = env.step(torch.zeros_like(env.action_manager.action))
 
     step_count = 0
     action_buffer = None
