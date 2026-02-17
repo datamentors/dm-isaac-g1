@@ -101,14 +101,19 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0"
 
 # Install pink and pinocchio for IK
-# Isaac Sim 5.0.0 uses NumPy 1.x, so standard versions work
-RUN /isaac-sim/python.sh -m pip install pin-pink
+# IMPORTANT: Use pin-pink 3.1.0 (same as IsaacLab env_isaaclab)
+# pin-pink 4.0.0+ requires NumPy 2.x which breaks Isaac Sim
+RUN /isaac-sim/python.sh -m pip install "pin-pink==3.1.0" "pin==2.7.0"
 
 # Install additional packages
 RUN /isaac-sim/python.sh -m pip install pillow opencv-python-headless
 
 # Install nlopt (required by IsaacLab dex_retargeting)
-RUN /isaac-sim/python.sh -m pip install nlopt
+# Use nlopt < 2.9 which supports NumPy 1.x
+RUN /isaac-sim/python.sh -m pip install "nlopt<2.9"
+
+# FINAL: Re-pin NumPy to ensure it wasn't upgraded by dependencies
+RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
 # Include IsaacLab source paths
