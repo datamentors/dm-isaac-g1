@@ -172,29 +172,30 @@ DEX3_RIGHT_WRIST_CAMERA = CameraConfig(
 )
 
 # Inspire Hand Wrist Cameras
-# Inspire hands may have different camera mount positions
+# Inspire hands use same camera mount links as DEX3 (verified from USD inspection)
+# Links: left_hand_camera_base_link, right_hand_camera_base_link
 INSPIRE_LEFT_WRIST_CAMERA = CameraConfig(
     name="left_wrist_cam",
-    prim_path="{ENV_REGEX_NS}/Robot/left_wrist_yaw_link/left_wrist_cam",
-    parent_link="left_wrist_yaw_link",
-    position=(0.0, 0.05, 0.1),
-    rotation=(0.5, -0.5, 0.5, -0.5),  # wxyz - looking toward palm
+    prim_path="{ENV_REGEX_NS}/Robot/left_hand_camera_base_link/left_wrist_cam",
+    parent_link="left_hand_camera_base_link",
+    position=(-0.04012, 0.07441, 0.15711),  # Same as DEX3
+    rotation=(0.50809, 0.00539, 0.86024, 0.0424),  # wxyz - Same as DEX3
     width=640,
     height=480,
     is_hand_dependent=True,
-    description="Left wrist camera on Inspire hand (attached to wrist link)",
+    description="Left wrist camera on Inspire hand (same mount as DEX3)",
 )
 
 INSPIRE_RIGHT_WRIST_CAMERA = CameraConfig(
     name="right_wrist_cam",
-    prim_path="{ENV_REGEX_NS}/Robot/right_wrist_yaw_link/right_wrist_cam",
-    parent_link="right_wrist_yaw_link",
-    position=(0.0, -0.05, 0.1),
-    rotation=(0.5, 0.5, 0.5, 0.5),  # wxyz - mirrored
+    prim_path="{ENV_REGEX_NS}/Robot/right_hand_camera_base_link/right_wrist_cam",
+    parent_link="right_hand_camera_base_link",
+    position=(-0.04012, -0.07441, 0.15711),  # Same as DEX3, mirrored
+    rotation=(0.50809, -0.00539, 0.86024, -0.0424),  # Mirrored for right hand
     width=640,
     height=480,
     is_hand_dependent=True,
-    description="Right wrist camera on Inspire hand (attached to wrist link)",
+    description="Right wrist camera on Inspire hand (same mount as DEX3)",
 )
 
 # Gripper Wrist Cameras (simple parallel gripper)
