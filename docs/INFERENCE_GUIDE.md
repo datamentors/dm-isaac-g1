@@ -85,18 +85,49 @@ There are several ways to view Isaac Sim:
 # http://192.168.1.205:48010/streaming/webrtc-client
 ```
 
-**Option B: VNC with TurboVNC**
+**Option B: VNC with TurboVNC (Recommended for debugging)**
+
+VNC provides the most reliable way to view Isaac Sim with full GUI interaction.
+
 ```bash
-# Inside container, start TurboVNC server
+# 1. Enter the container
+docker exec -it dm-workstation bash
+
+# 2. Start TurboVNC server (only needed once per container session)
 /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24
 
-# Set DISPLAY for Isaac Sim
+# 3. Set DISPLAY environment variable (CRITICAL!)
 export DISPLAY=:1
 
-# Run inference
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py ...
+# 4. Run inference WITHOUT --headless flag
+cd /workspace/dm-isaac-g1
+export PYTHONPATH=/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:$PYTHONPATH
+export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene pickplace_g1_inspire \
+    --language "pick up the apple" \
+    --enable_cameras \
+    --save_debug_frames
 
-# Connect VNC client to 192.168.1.205:5901
+# 5. Connect VNC client to 192.168.1.205:5901
+#    On Mac: open vnc://192.168.1.205:5901
+```
+
+**One-liner for VNC Inference (from host):**
+```bash
+docker exec dm-workstation bash -c '
+  /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true
+  export DISPLAY=:1
+  cd /workspace/dm-isaac-g1
+  export PYTHONPATH=/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:$PYTHONPATH
+  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene pickplace_g1_inspire \
+    --language "pick up the apple" \
+    --enable_cameras
+'
 ```
 
 **Option C: X11 Forwarding (if on local network)**

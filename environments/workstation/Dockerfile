@@ -57,7 +57,17 @@ WORKDIR /workspace/env
 RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
 # Set PYTHONPATH for dm-isaac-g1 (will be mounted)
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
+# Include IsaacLab source paths
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:${PYTHONPATH}"
+
+# CRITICAL: Include IsaacLab's .venv for pink/pinocchio IK libraries
+# These are pre-installed in IsaacLab's virtual environment with proper cmeel configuration
+ENV ISAACLAB_VENV_SITE="/workspace/IsaacLab/.venv/lib/python3.10/site-packages"
+ENV ISAACLAB_CMEEL_SITE="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib/python3.10/site-packages"
+ENV PYTHONPATH="${ISAACLAB_VENV_SITE}:${ISAACLAB_CMEEL_SITE}:${PYTHONPATH}"
+
+# Add cmeel.prefix libraries to LD_LIBRARY_PATH (required for hpp-fcl, pinocchio)
+ENV LD_LIBRARY_PATH="${ISAACLAB_VENV_SITE}/cmeel.prefix/lib:${LD_LIBRARY_PATH}"
 
 # Expose ports
 # Isaac Sim streaming

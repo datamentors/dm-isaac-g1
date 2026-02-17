@@ -72,9 +72,12 @@ dependencies = [
     "logging_mp>=0.1.5",
 
     # ==========================================
-    # IK / Motion Planning (from ENVIRONMENT_SETUP_LEARNINGS.md)
+    # IK / Motion Planning
     # ==========================================
-    "pin>=2.7.0",
+    # NOTE: pink/pinocchio (pin-pink, pin) are NOT installed here.
+    # They are provided by IsaacLab's pre-configured .venv with proper cmeel setup.
+    # The Dockerfile sets PYTHONPATH and LD_LIBRARY_PATH to use IsaacLab's versions.
+    # Installing them separately causes library conflicts with Isaac Sim's bundled assimp.
     "qpsolvers[open_source_solvers]>=4.0.0",
 ]
 

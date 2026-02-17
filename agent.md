@@ -155,6 +155,91 @@ The main work environment is inside the Docker container:
 docker exec -it dm-workstation bash -c 'cd /workspace/dm-isaac-g1 && your_command'
 ```
 
+### Isaac Sim with VNC Display (NOT Headless)
+
+**IMPORTANT**: When running Isaac Sim inference, ALWAYS use VNC display mode unless specifically asked for headless. This allows viewing the simulation.
+
+**Complete VNC Launch Command (from local Mac):**
+```bash
+# 1. First, kill any existing Isaac Sim processes and start fresh
+source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 "
+  cd /home/datamentors/dm-isaac-g1/environments/workstation && \
+  docker compose down && docker compose up -d && sleep 5
+"
+
+# 2. Run inference with VNC display
+source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'docker exec dm-workstation bash -c "
+  /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true
+  export DISPLAY=:1
+  cd /workspace/dm-isaac-g1
+
+  # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
+  VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
+  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+  export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
+  export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
+  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+
+  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene pickplace_g1_inspire \
+    --language \"pick up the apple\" \
+    --enable_cameras \
+    --save_debug_frames
+"'
+
+# 3. Connect VNC client to view simulation
+# On Mac: open vnc://192.168.1.205:5901
+```
+
+**Key Points:**
+- Do NOT use `--headless` flag if you want to see the simulation
+- VNC server must be started with `export DISPLAY=:1` before running Isaac Sim
+- Connect VNC client to `192.168.1.205:5901` to view
+- Debug frames are saved to `/tmp/groot_debug/` in the container
+
+**Background VNC Inference (non-blocking):**
+```bash
+source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'nohup docker exec dm-workstation bash -c "
+  /opt/TurboVNC/bin/vncserver :1 2>/dev/null || true
+  export DISPLAY=:1
+  cd /workspace/dm-isaac-g1
+
+  # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
+  VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
+  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+  export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
+  export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
+  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+
+  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    --server 192.168.1.237:5555 \
+    --scene pickplace_g1_inspire \
+    --language \"pick up the apple\" \
+    --enable_cameras \
+    --save_debug_frames 2>&1
+" > /tmp/inference.log 2>&1 &'
+
+# Check progress:
+source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'tail -50 /tmp/inference.log'
+```
+
+### Pink/Pinocchio IK Library Configuration
+
+**IMPORTANT**: The pink inverse kinematics library (used for G1 manipulation scenes) requires specific path configuration:
+
+1. **Do NOT install pin-pink via pip** - it conflicts with Isaac Sim's bundled assimp library
+2. **Use IsaacLab's pre-installed version** from `/workspace/IsaacLab/.venv/`
+3. **Required environment variables:**
+   ```bash
+   VENV_PATH=/workspace/IsaacLab/.venv/lib/python3.10/site-packages
+   CMEEL_PATH=$VENV_PATH/cmeel.prefix/lib/python3.10/site-packages
+   export PYTHONPATH=$VENV_PATH:$CMEEL_PATH:$PYTHONPATH
+   export LD_LIBRARY_PATH=$VENV_PATH/cmeel.prefix/lib:$LD_LIBRARY_PATH
+   ```
+
+The Dockerfile is configured to set these paths automatically. If running manually, always include these exports.
+
 ## Directory Structure
 
 ### Local Repository (Mac)

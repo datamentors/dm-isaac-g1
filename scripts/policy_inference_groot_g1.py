@@ -63,21 +63,23 @@ parser.add_argument("--max_episode_steps", type=int, default=1000,
 parser.add_argument(
     "--camera_parent",
     type=str,
-    default="{ENV_REGEX_NS}/Robot/torso_link",  # Attach to robot torso for ego view
-    help="Camera parent link (default: torso_link for robot-attached view).",
+    default="{ENV_REGEX_NS}/Robot/head_link",  # Attach to robot head for ego-centric view
+    # Alternative links if head_link doesn't exist: logo_link, torso_link
+    # For torso_link use camera_pos=(0.15, 0.0, 0.55) to simulate head height
+    help="Camera parent link (default: head_link for robot head view).",
 )
 parser.add_argument(
     "--camera_pos",
     type=float,
     nargs=3,
-    default=(0.25, 0.0, 0.55),  # Higher up, slightly forward - more overhead view like training data
+    default=(0.12, 0.0, 0.0),  # Forward from head center - simulates looking from eyes
     help="Camera position offset (x y z) relative to parent link.",
 )
 parser.add_argument(
     "--camera_rot",
     type=float,
     nargs=4,
-    default=(0.259, 0.966, 0.0, 0.0),  # ~75deg pitch down - nearly top-down to match training view
+    default=(0.906, 0.0, -0.423, 0.0),  # ~50deg pitch down - looking at hands/table from head
     help="Camera rotation quaternion (w x y z) in ROS convention.",
 )
 parser.add_argument(
