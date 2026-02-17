@@ -5,12 +5,18 @@
 ARG ISAAC_SIM_VERSION=5.1.0
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
+# Run as root for package installation
+USER root
+
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV UV_SYSTEM_PYTHON=1
 ENV UV_LINK_MODE=copy
+
+# Fix apt permissions
+RUN mkdir -p /var/lib/apt/lists/partial && chmod 755 /var/lib/apt/lists
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
