@@ -1,0 +1,36 @@
+# GR00T extra dependencies
+# =========================
+# Packages needed by Isaac-GR00T on top of what Isaac Sim 5.0.0 +
+# IsaacLab v2.2.0 already install in the conda env.
+#
+# NOT included here (already provided or intentionally skipped):
+#   torch, torchvision, torchaudio  — already installed (2.7.0 cu126)
+#   numpy                           — already pinned <2.0 for Isaac Sim
+#   flash-attn                      — requires CUDA build toolchain, not needed for inference
+#   torchcodec                      — not needed for inference
+#   pyzmq                           — already installed via unitree_sim_isaaclab requirements
+#
+# Source: https://github.com/NVIDIA/Isaac-GR00T/blob/main/pyproject.toml
+
+albumentations==1.4.18
+av==15.0.0
+diffusers==0.35.1
+dm-tree==0.1.8
+lmdb==1.7.5
+msgpack==1.1.0
+msgpack-numpy==0.4.8
+pandas==2.2.3
+peft==0.17.1
+termcolor==3.2.0
+# transformers: relaxed from ==4.51.3 to avoid conflicts with Isaac Sim deps
+transformers>=4.40.0,<5.0.0
+tyro==0.9.17
+click==8.1.8
+datasets==3.6.0
+einops==0.8.1
+gymnasium==1.2.2
+matplotlib==3.10.1
+omegaconf==2.3.0
+scipy==1.15.3
+wandb==0.23.0
+deepspeed==0.17.6

@@ -3,28 +3,25 @@
 # Based on Unitree's official unitree_sim_isaaclab Dockerfile
 # https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/Dockerfile
 #
-# Changes from upstream:
-#   - Base image updated to cuda:12.8.0 to match Blackwell workstation driver
-#   - PyTorch cu126 kept (driver 12.8 is backward compatible with CUDA 12.6 builds)
-#   - Aliyun mirror removed (replaced with default Ubuntu mirrors for non-CN infra)
-#   - Added TurboVNC for remote visualization (VNC display for Isaac Sim)
-#   - Added Isaac-GR00T paths and GROOT inference support
-#   - Added unitree_sim_isaaclab (cloned, not mounted, to bake USD/assets in)
-#   - PYTHONPATH configured for dm-isaac-g1, Isaac-GR00T, IsaacLab, unitree_sim_isaaclab
-#   - numpy<2.0 pin retained for Isaac Sim synthetic data pipeline stability
+# TWO-IMAGE STRATEGY:
+#   Stage "base"  → dm-workstation-base:latest  (pushed to ECR, stable)
+#   Stage "groot" → dm-workstation:latest        (extends base, adds GR00T deps)
+#
+# Build base only:
+#   docker build --target base -t dm-workstation-base:latest .
+# Build full (base + groot):
+#   docker build --target groot -t dm-workstation:latest .
 #
 # CUDA Compatibility:
-#   Workstation driver: 12.8 (RTX Blackwell)
-#   CUDA toolkit in image: 12.8
-#   PyTorch build: cu126 (CUDA 12.6 runtime wheels — driver 12.8 is backward compatible)
-#   Isaac Sim 5.0.0: ships its own CUDA 12.x runtime libs
-#
-# Reference:
-#   https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/doc/isaacsim5.0_install.md
+#   Workstation driver: 590.48.01 (CUDA 13.1 max)
+#   CUDA toolkit in image: 12.8.0 (conservative, fully supported)
+#   PyTorch build: cu126 (backward compatible with driver 13.1)
+#   Isaac Sim 5.0.0: installed via pip from pypi.nvidia.com
 # ==============================
 
 # ==============================
 # Stage 1: Builder
+# Heavy compilation happens here; artifacts copied to final stages.
 # ==============================
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS builder
 
@@ -33,7 +30,7 @@ ENV TZ=UTC
 ENV CONDA_DIR=/opt/conda
 ENV PATH=$CONDA_DIR/bin:$PATH
 
-# Install build dependencies (GCC 12 + GLU + Vulkan)
+# Build dependencies (GCC 12 + GLU + Vulkan + cmake)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-12 g++-12 cmake build-essential unzip git git-lfs \
     libglu1-mesa-dev vulkan-tools wget ca-certificates \
@@ -47,7 +44,7 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     rm miniconda.sh && \
     $CONDA_DIR/bin/conda clean -afy
 
-# Accept Conda TOS and create the environment
+# Accept Conda TOS and create Python 3.11 environment
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
     conda create -n unitree_sim_env python=3.11 -y && \
@@ -55,41 +52,30 @@ RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkg
 
 SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
 
-# Install compatible libgcc/libstdc++ and Vulkan runtime inside the conda env
+# ABI-compatible libgcc/libstdc++ for compiled wheels
 RUN conda install -y -c conda-forge "libgcc-ng>=12" "libstdcxx-ng>=12" && \
     apt-get update && apt-get install -y --no-install-recommends libvulkan1 vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# -----------------------------------------------
-# PyTorch — cu126 wheels work with driver >= 12.6
-# (Blackwell has driver 12.8, backward compatible)
-# -----------------------------------------------
-RUN pip install --upgrade pip && \
+# PyTorch cu126 — compatible with driver >= 12.6 (workstation is 13.1)
+RUN pip install --upgrade pip uv && \
     pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
         --index-url https://download.pytorch.org/whl/cu126
 
-# -----------------------------------------------
-# Isaac Sim 5.0.0 (pip install — Unitree-approved approach)
-# NumPy pinned < 2.0 for synthetic data pipeline stability
-# -----------------------------------------------
+# Isaac Sim 5.0.0 via pip (Unitree-approved approach)
+# numpy pinned <2.0: Isaac Sim synthetic data pipeline requires numpy 1.x
 RUN pip install "isaacsim[all,extscache]==5.0.0" --extra-index-url https://pypi.nvidia.com && \
     pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 
-# Create working directory
-RUN mkdir -p /home/code
 WORKDIR /home/code
 
-# -----------------------------------------------
 # IsaacLab v2.2.0 (compatible with Isaac Sim 5.0.0 per Unitree docs)
-# -----------------------------------------------
 RUN git clone https://github.com/isaac-sim/IsaacLab.git && \
     cd IsaacLab && \
     git checkout v2.2.0 && \
     ./isaaclab.sh --install
 
-# -----------------------------------------------
-# CycloneDDS (required by unitree_sdk2_python)
-# -----------------------------------------------
+# CycloneDDS — required by unitree_sdk2_python
 RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x /cyclonedds && \
     cd /cyclonedds && mkdir build install && cd build && \
     cmake .. -DCMAKE_INSTALL_PREFIX=../install && \
@@ -97,45 +83,28 @@ RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.
 
 ENV CYCLONEDDS_HOME=/cyclonedds/install
 
-# -----------------------------------------------
-# unitree_sdk2_python
-# -----------------------------------------------
+# unitree_sdk2_python — robot SDK
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python && \
     cd unitree_sdk2_python && pip install -e .
 
-# -----------------------------------------------
-# unitree_sim_isaaclab (Unitree's Isaac Sim/Lab integration)
-# Contains USD assets, configs, and task definitions for G1
-# -----------------------------------------------
+# unitree_sim_isaaclab — USD assets, G1 task definitions, pink/pinocchio IK
 RUN git clone https://github.com/unitreerobotics/unitree_sim_isaaclab.git /home/code/unitree_sim_isaaclab && \
     cd /home/code/unitree_sim_isaaclab && pip install -r requirements.txt
 
-# -----------------------------------------------
-# Isaac-GR00T (GROOT N1.6 fine-tuning + inference framework)
-# -----------------------------------------------
-RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /home/code/Isaac-GR00T && \
-    cd /home/code/Isaac-GR00T && \
-    pip install --no-deps -e . && \
-    pip install --ignore-requires-python \
-        albumentations av diffusers dm-tree lmdb msgpack msgpack-numpy \
-        peft termcolor tyro datasets gymnasium omegaconf pyzmq deepspeed wandb \
-        transformers==4.51.3
-
 # ==============================
-# Stage 2: Runtime
+# Stage 2: base — stable image pushed to ECR
+# Isaac Sim + IsaacLab + unitree stack, NO GR00T
 # ==============================
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS runtime
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 ENV CONDA_DIR=/opt/conda
 ENV PATH=$CONDA_DIR/bin:$PATH
-
-# Isaac Sim / Kit flags
 ENV OMNI_KIT_ALLOW_ROOT=1
 ENV ACCEPT_EULA=Y
 
-# Install runtime system dependencies
+# Runtime system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa git git-lfs curl wget \
     zenity unzip vim htop tmux \
@@ -144,35 +113,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ncurses-term dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
-# -----------------------------------------------
 # TurboVNC — remote visualization for Isaac Sim
-# -----------------------------------------------
 RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb \
         -O /tmp/turbovnc.deb && \
     dpkg -i /tmp/turbovnc.deb || apt-get install -f -y && \
     rm /tmp/turbovnc.deb
 ENV PATH="/opt/TurboVNC/bin:${PATH}"
 
-# Copy artifacts from builder
-COPY --from=builder /home/code/IsaacLab          /home/code/IsaacLab
-COPY --from=builder /home/code/unitree_sdk2_python /home/code/unitree_sdk2_python
+# Copy all artifacts from builder
+COPY --from=builder /home/code/IsaacLab            /home/code/IsaacLab
+COPY --from=builder /home/code/unitree_sdk2_python  /home/code/unitree_sdk2_python
 COPY --from=builder /home/code/unitree_sim_isaaclab /home/code/unitree_sim_isaaclab
-COPY --from=builder /home/code/Isaac-GR00T       /home/code/Isaac-GR00T
-COPY --from=builder /cyclonedds                  /cyclonedds
-COPY --from=builder /opt/conda                   /opt/conda
+COPY --from=builder /cyclonedds                     /cyclonedds
+COPY --from=builder /opt/conda                      /opt/conda
 
 ENV CYCLONEDDS_HOME=/cyclonedds/install
 ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 
-# -----------------------------------------------
-# PYTHONPATH — all modules accessible from conda env
-# Ordered: dm-isaac-g1 (mounted at runtime) → Isaac-GR00T → IsaacLab → unitree_sim_isaaclab
-# Note: IsaacLab env_isaaclab paths (pink/pinocchio) are added AFTER torch import
-#       in the inference script to avoid CUDA symbol conflicts.
-# -----------------------------------------------
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/home/code/Isaac-GR00T:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_rl:/home/code/IsaacLab/source/isaaclab_assets:/home/code/IsaacLab/source/isaaclab_contrib:/home/code/unitree_sim_isaaclab:${PYTHONPATH}"
+# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T are mounted at runtime
+# unitree_sim_isaaclab path covers the G1 scene configs and USD references
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_rl:/home/code/IsaacLab/source/isaaclab_assets:/home/code/IsaacLab/source/isaaclab_contrib:/home/code/unitree_sim_isaaclab:${PYTHONPATH}"
 
-# Activate conda env in interactive shells
 RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> ~/.bashrc && \
     echo 'conda activate unitree_sim_env' >> ~/.bashrc && \
     echo 'export OMNI_KIT_ALLOW_ROOT=1' >> ~/.bashrc && \
@@ -180,7 +141,6 @@ RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> ~/.bashrc && \
     echo 'export CYCLONEDDS_HOME=/cyclonedds/install' >> ~/.bashrc && \
     echo 'export LD_LIBRARY_PATH=/cyclonedds/install/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
-# Expose ports: Isaac Sim streaming, services, TensorBoard, GROOT ZMQ, VNC
 EXPOSE 47995-48012
 EXPOSE 49000-49007
 EXPOSE 6006
@@ -188,6 +148,38 @@ EXPOSE 5555
 EXPOSE 5901
 
 WORKDIR /home/code
+CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
 
-# Default: drop into conda env bash
+# ==============================
+# Stage 3: groot — extends base with GR00T inference deps
+# This is the image used for running inference against the GROOT server.
+#
+# GR00T extra deps (on top of what Isaac Sim + IsaacLab already provide):
+#   - gr00t package itself (editable install, source mounted at /workspace/Isaac-GR00T)
+#   - albumentations, av, diffusers, dm-tree, lmdb, msgpack, msgpack-numpy
+#   - peft, termcolor, tyro, datasets, gymnasium, omegaconf, pyzmq
+#   - deepspeed, wandb, einops, click, pandas, scipy
+#   - transformers (relaxed from ==4.51.3 to >=4.40.0)
+#   - flash-attn and torchcodec intentionally EXCLUDED (not needed for inference,
+#     flash-attn requires CUDA build toolchain, torchcodec unavailable on all platforms)
+# ==============================
+FROM base AS groot
+
+SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
+
+# Install uv into the conda env for fast, reproducible dep resolution
+RUN pip install uv
+
+# Copy the groot requirements file
+COPY requirements-groot.txt /tmp/requirements-groot.txt
+
+# Install GR00T extra deps via uv
+# uv respects existing site-packages (torch, numpy already present)
+# --no-build-isolation allows editable installs in conda envs
+RUN uv pip install \
+    --python $(conda run -n unitree_sim_env python -c "import sys; print(sys.executable)") \
+    --no-build-isolation \
+    -r /tmp/requirements-groot.txt
+
+WORKDIR /home/code
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
