@@ -180,12 +180,12 @@ RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> ~/.bashrc && \
     echo 'export CYCLONEDDS_HOME=/cyclonedds/install' >> ~/.bashrc && \
     echo 'export LD_LIBRARY_PATH=/cyclonedds/install/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
-# Expose ports
-EXPOSE 47995-48012   # Isaac Sim streaming
-EXPOSE 49000-49007   # Isaac Sim services
-EXPOSE 6006          # TensorBoard
-EXPOSE 5555          # GROOT ZMQ
-EXPOSE 5901          # VNC
+# Expose ports: Isaac Sim streaming, services, TensorBoard, GROOT ZMQ, VNC
+EXPOSE 47995-48012
+EXPOSE 49000-49007
+EXPOSE 6006
+EXPOSE 5555
+EXPOSE 5901
 
 WORKDIR /home/code
 
