@@ -177,12 +177,10 @@ RUN pip install uv
 COPY requirements-groot.txt /tmp/requirements-groot.txt
 
 # Install GR00T extra deps via uv
-# uv respects existing site-packages (torch, numpy already present)
-# --no-build-isolation allows editable installs in conda envs
-RUN uv pip install \
-    --python $(conda run -n unitree_sim_env python -c "import sys; print(sys.executable)") \
-    --no-build-isolation \
-    -r /tmp/requirements-groot.txt
+# The SHELL directive above already runs inside unitree_sim_env so
+# uv picks up the active python directly — no --python flag needed.
+# --system allows uv to install into the conda env's site-packages.
+RUN uv pip install --system -r /tmp/requirements-groot.txt
 
 WORKDIR /home/code
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
