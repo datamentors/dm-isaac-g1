@@ -1,85 +1,71 @@
 # Workstation Environment (Blackwell)
-# For GROOT fine-tuning and Isaac Sim/Lab simulation
-# Based on actual installed dependencies from ENVIRONMENT_SETUP_LEARNINGS.md
+# Additional dependencies beyond Isaac Sim + IsaacLab
+#
+# NOTE: Isaac Sim 5.0.0 + IsaacLab v2.2.0 already provide:
+# - numpy, scipy, pillow, h5py, pyyaml
+# - torch, torchvision (bundled)
+# - gymnasium, tensorboard
+# - warp, pink, pinocchio (via ./isaaclab.sh --install)
 
 [project]
 name = "dm-workstation-env"
 version = "0.1.0"
-description = "Unified environment for GROOT training and Isaac Sim/Lab simulation"
+description = "Additional dependencies for GROOT inference and dm-isaac-g1"
 requires-python = ">=3.10,<3.12"
 license = {text = "MIT"}
 
 dependencies = [
     # ==========================================
-    # Core dependencies (from dm-isaac-g1)
+    # dm-isaac-g1 CLI
     # ==========================================
-    "numpy>=1.26.0,<2.0.0",
-    "pyyaml>=6.0.1",
     "python-dotenv>=1.0.0",
     "click>=8.1.0",
     "rich>=13.0.0",
     "tqdm>=4.66.0",
 
     # ==========================================
-    # ML/DL Framework
+    # GROOT Model Dependencies
     # ==========================================
-    # NOTE: torch and torchvision are NOT installed here.
-    # They are provided by Isaac Sim's bundled pip_prebundle.
-    # Installing them separately causes CUDA library conflicts.
     "transformers>=4.40.0",
     "accelerate>=0.28.0",
     "safetensors>=0.4.0",
+    "huggingface-hub>=0.21.0",
+    "einops>=0.7.0",
+    "timm>=0.9.0",
+    "diffusers>=0.27.0",
+    "peft>=0.10.0",
+
+    # ==========================================
+    # GROOT Server Communication
+    # ==========================================
+    "pyzmq>=25.0.0",
+    "msgpack>=1.0.0",
+
+    # ==========================================
+    # Network / SSH
+    # ==========================================
+    "httpx>=0.27.0",
+    "paramiko>=3.4.0",
+    "aiohttp",
+    "aiortc",
 
     # ==========================================
     # Data Processing
     # ==========================================
     "pyarrow>=15.0.0",
-    "huggingface-hub>=0.21.0",
-    "h5py>=3.10.0",
-    "pillow>=10.0.0",
     "opencv-python-headless>=4.9.0",
-    "scipy>=1.12.0",
 
     # ==========================================
-    # RL & Simulation (from ENVIRONMENT_SETUP_LEARNINGS.md)
+    # Logging
     # ==========================================
-    "gymnasium",
-    "flatdict",
-
-    # ==========================================
-    # Network / Communication
-    # ==========================================
-    "httpx>=0.27.0",
-    "paramiko>=3.4.0",
-    "pyzmq>=25.0.0",
-    "msgpack>=1.0.0",
-    "aiohttp",
-    "aiortc",
-
-    # ==========================================
-    # Visualization / Logging
-    # ==========================================
-    "tensorboard>=2.16.0",
     "wandb>=0.16.0",
 
     # ==========================================
-    # GROOT Fine-tuning (Isaac-GR00T deps)
+    # Utilities
     # ==========================================
-    "einops>=0.7.0",
-    "timm>=0.9.0",
-    "diffusers>=0.27.0",
-    "peft>=0.10.0",
+    "flatdict",
     "onnxruntime>=1.22.0",
     "logging_mp>=0.1.5",
-
-    # ==========================================
-    # IK / Motion Planning
-    # ==========================================
-    # NOTE: pink/pinocchio (pin-pink, pin) are NOT installed here.
-    # They are provided by IsaacLab's pre-configured .venv with proper cmeel setup.
-    # The Dockerfile sets PYTHONPATH and LD_LIBRARY_PATH to use IsaacLab's versions.
-    # Installing them separately causes library conflicts with Isaac Sim's bundled assimp.
-    "qpsolvers[open_source_solvers]>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -89,19 +75,11 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.9.0",
     "ipython>=8.0.0",
-    "jupyter>=1.0.0",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.0.0",
-    "ruff>=0.3.0",
-    "ipython>=8.0.0",
-]
 
 [tool.ruff]
 line-length = 100
@@ -110,29 +88,3 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
-
-# ==========================================
-# Robot Communication (DDS + Unitree SDK)
-# ==========================================
-# These are installed in the DOCKERFILE (not via pyproject.toml) because:
-# - CycloneDDS requires cmake build from source
-# - unitree_sdk2py has a pip bug where subdirectories aren't copied
-#
-# CycloneDDS: Built from source in Dockerfile
-#   git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
-#   cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds/install
-#   export CYCLONEDDS_HOME=/opt/cyclonedds/install
-#
-# CycloneDDS Python bindings:
-#   /isaac-sim/python.sh -m pip install cyclonedds
-#
-# unitree_sdk2py: Installed from GitHub with manual directory copy
-#   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
-#   /isaac-sim/python.sh -m pip install .
-#   # Manual copy of b2, g1, h1, comm directories (pip bug workaround)
-#
-# ==========================================
-# Note: Isaac Lab paths
-# ==========================================
-# Isaac Lab: Uses Isaac Sim's embedded Python
-#   /isaac-sim/python.sh -m pip install ...

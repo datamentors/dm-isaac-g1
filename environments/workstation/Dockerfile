@@ -1,6 +1,10 @@
 # Workstation Environment Dockerfile
 # Unified environment for GROOT inference and Isaac Sim/Lab simulation
-# Base: NVIDIA Isaac Sim 5.0.0 (stable, NumPy 1.x compatible)
+#
+# APPROACH: Following IsaacLab Docker deployment guide
+# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
+#
+# Base: NVIDIA Isaac Sim 5.0.0 → Install IsaacLab via ./isaaclab.sh --install
 #
 # IMPORTANT: NumPy < 2.0 Requirement
 # ==================================
@@ -13,7 +17,6 @@
 # - Is recommended by Unitree for G1 simulation
 #
 # Reference: https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/doc/isaacsim5.0_install.md
-# Reference: docs/NUMPY_COMPATIBILITY.md
 
 ARG ISAAC_SIM_VERSION=5.0.0
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
@@ -38,7 +41,7 @@ ENV ISAAC_PATH="${ISAACSIM_PATH}"
 # Fix apt permissions
 RUN mkdir -p /var/lib/apt/lists/partial && chmod 755 /var/lib/apt/lists
 
-# Install system dependencies
+# Install system dependencies (includes IsaacLab requirements)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     git-lfs \
@@ -56,6 +59,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     libxi6 \
     libglu1-mesa \
+    libglib2.0-0 \
+    ncurses-term \
     dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -75,7 +80,9 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Build CycloneDDS from source (required for unitree_sdk2py)
+# ==========================================
+# CycloneDDS (required for unitree_sdk2py)
+# ==========================================
 WORKDIR /opt
 RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x && \
     cd cyclonedds && \
@@ -89,9 +96,9 @@ ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 # Install CycloneDDS Python bindings
 RUN /isaac-sim/python.sh -m pip install cyclonedds
 
-# Install unitree_sdk2py from source
-# NOTE: pip install doesn't always copy all subdirectories (b2, g1, h1, comm)
-# so we manually ensure they exist after installation
+# ==========================================
+# unitree_sdk2py
+# ==========================================
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
 WORKDIR /opt/unitree_sdk2_python
 RUN /isaac-sim/python.sh -m pip install . && \
@@ -102,42 +109,56 @@ RUN /isaac-sim/python.sh -m pip install . && \
         fi; \
     done
 
-# Create workspace directory
+# ==========================================
+# IsaacLab Installation (following official Docker approach)
+# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
+# ==========================================
+WORKDIR /workspace
+
+# Clone IsaacLab v2.2.0 (compatible with Isaac Sim 5.0.0 per Unitree docs)
+RUN git clone https://github.com/isaac-sim/IsaacLab.git /workspace/IsaacLab && \
+    cd /workspace/IsaacLab && \
+    git checkout v2.2.0
+
+# Create symlink to Isaac Sim (required by isaaclab.sh)
+RUN ln -sf /isaac-sim /workspace/IsaacLab/_isaac_sim
+
+# Install IsaacLab dependencies via official script
+# This properly installs: warp, pink, pinocchio, and all other dependencies
+WORKDIR /workspace/IsaacLab
+RUN chmod +x isaaclab.sh && \
+    ./isaaclab.sh --install && \
+    # Ensure all isaaclab dependencies are installed (isaaclab.sh may miss some)
+    /isaac-sim/python.sh -m pip install -e /workspace/IsaacLab/source/isaaclab
+
+# ==========================================
+# Additional dependencies for dm-isaac-g1
+# ==========================================
 WORKDIR /workspace
 
 # Copy environment config
 COPY pyproject.toml /workspace/env/
 
-# Install dependencies with UV
-# Note: We install to the Isaac Sim Python environment
+# Install dm-isaac-g1 dependencies with UV
 WORKDIR /workspace/env
 RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
+
+# ==========================================
 # CRITICAL: Pin NumPy to < 2.0 for stability
+# ==========================================
 # This ensures compatibility with:
 # - Isaac Sim synthetic data pipeline
 # - GR00T fine-tuning requirements (numpy>=1.23.5,<2.0.0)
 # - pink/pinocchio IK libraries
-RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0"
-
-# Install pink and pinocchio for IK
-# IMPORTANT: Use pin-pink 3.1.0 (same as IsaacLab env_isaaclab)
-# pin-pink 4.0.0+ requires NumPy 2.x which breaks Isaac Sim
-RUN /isaac-sim/python.sh -m pip install "pin-pink==3.1.0" "pin==2.7.0"
-
-# Install additional packages
-RUN /isaac-sim/python.sh -m pip install pillow opencv-python-headless
-
-# Install nlopt (required by IsaacLab dex_retargeting)
-# Use nlopt < 2.9 which supports NumPy 1.x
-RUN /isaac-sim/python.sh -m pip install "nlopt<2.9"
-
-# FINAL: Re-pin NumPy to ensure it wasn't upgraded by dependencies
 RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 
-# Set PYTHONPATH for dm-isaac-g1 (will be mounted)
-# Include IsaacLab source paths
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
+# ==========================================
+# Environment Configuration
+# ==========================================
+# Set PYTHONPATH for all modules
+# Note: warp is bundled in Isaac Sim's extscache, not installed via pip
+ENV PYTHONPATH="/isaac-sim/extscache/omni.warp.core-1.7.1+lx64:/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
 
 # Expose ports
 # Isaac Sim streaming

@@ -1,8 +1,11 @@
 version: "3.8"
 
 # DM-ISAAC-G1 Workstation Environment
+# Follows IsaacLab Docker deployment approach
+# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
+#
+# IsaacLab v2.2.0 is built INTO the image (not mounted)
 # Uses Isaac Sim 5.0.0 with NumPy < 2.0 for stability
-# See docs/NUMPY_COMPATIBILITY.md for details
 
 services:
   dm-workstation:
@@ -33,8 +36,8 @@ services:
       # Mount datasets and checkpoints (persistent storage)
       - /workspace/datasets:/workspace/datasets
       - /workspace/checkpoints:/workspace/checkpoints
-      # Mount Isaac Lab
-      - /workspace/IsaacLab:/workspace/IsaacLab
+      # NOTE: IsaacLab v2.2.0 is built into the image, not mounted
+      # This ensures ./isaaclab.sh --install ran correctly during build
       # Mount Isaac-GR00T (for client code)
       - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
       # Mount unitree_sim_isaaclab (from /home/datamentors)
