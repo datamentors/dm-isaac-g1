@@ -1,0 +1,73 @@
+version: "3.8"
+
+# DM-ISAAC-G1 Workstation — Unitree-based Docker Environment
+#
+# Based on: https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/Dockerfile
+# Base: nvidia/cuda:12.8.0-runtime-ubuntu22.04 + Isaac Sim 5.0.0 via pip
+#
+# Key differences from previous docker-compose.yml:
+#   - Uses Dockerfile.unitree (conda-based, not nvcr isaac-sim image)
+#   - Isaac Sim installed via pip inside conda env (unitree_sim_env)
+#   - IsaacLab, unitree_sim_isaaclab, Isaac-GR00T baked into image
+#   - dm-isaac-g1 repo, datasets, checkpoints still mounted (live editing)
+#   - Isaac-GR00T mounted to override the baked version with live code
+#
+# Usage:
+#   docker compose -f docker-compose.unitree.yml build
+#   docker compose -f docker-compose.unitree.yml up -d
+#   docker exec -it dm-workstation-unitree conda run -n unitree_sim_env bash
+
+services:
+  dm-workstation-unitree:
+    build:
+      context: .
+      dockerfile: Dockerfile.unitree
+    image: dm-workstation-unitree:latest
+    container_name: dm-workstation-unitree
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:1}
+      - ACCEPT_EULA=Y
+      - OMNI_KIT_ALLOW_ROOT=1
+      # GROOT server (DGX Spark)
+      - GROOT_SERVER_HOST=${GROOT_SERVER_HOST:-192.168.1.237}
+      - GROOT_SERVER_PORT=${GROOT_SERVER_PORT:-5555}
+      # HuggingFace
+      - HF_TOKEN=${HF_TOKEN}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+      # W&B
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      # GROOT statistics path (inside container)
+      - GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+    volumes:
+      # dm-isaac-g1 repo — live editing from local/workstation
+      - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
+      # Datasets — persistent, never delete
+      - /workspace/datasets:/workspace/datasets
+      # Checkpoints — persistent model weights
+      - /workspace/checkpoints:/workspace/checkpoints
+      # Isaac-GR00T — live override of baked version
+      - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
+      # unitree_sim_isaaclab — live override (USD assets, task configs)
+      - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
+      # X11 for GUI (VNC uses virtual display :1, not X11 socket)
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # GPU DRI access
+      - /dev/dri:/dev/dri
+    ports:
+      - "47995-48012:47995-48012"  # Isaac Sim streaming
+      - "6006:6006"                 # TensorBoard
+      - "5901:5901"                 # VNC
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
