@@ -513,11 +513,9 @@ def main():
     # This gives the exact pos/quat of d435_link/front_cam in world frame at step 0,
     # before any robot motion. Use these values in option_b_worldcam in inference_setups.py.
     try:
-        import omni.isaac.core.utils.prims as prim_utils
         import omni.usd
-        from pxr import UsdGeom, Gf
+        from pxr import UsdGeom
         stage = omni.usd.get_context().get_stage()
-        # Try both env_0 and direct path
         cam_prim_paths = [
             "/World/envs/env_0/Robot/d435_link/front_cam",
             "/World/envs/env_0/Robot/d435_link",
