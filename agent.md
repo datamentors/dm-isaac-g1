@@ -4,6 +4,24 @@ This document defines the standard workflows and best practices for working with
 
 ---
 
+## PyTorch + CUDA Compatibility Reference
+
+**Source of truth**: https://pytorch.org/get-started/previous-versions/
+
+| PyTorch | Correct CUDA index | pip flag |
+|---------|-------------------|----------|
+| 2.7.x   | CUDA 12.8         | `--index-url https://download.pytorch.org/whl/cu128` |
+| 2.6.x   | CUDA 12.4         | `--index-url https://download.pytorch.org/whl/cu124` |
+
+**Workstation (Blackwell RTX PRO 6000)**:
+- Driver: 590.48.01 → supports up to CUDA 13.1
+- Docker base image: `nvidia/cuda:12.8.0-runtime-ubuntu22.04`
+- PyTorch install: `torch==2.7.0 ... --index-url https://download.pytorch.org/whl/cu128`
+
+**Rule**: Always check the official previous-versions page above before changing the PyTorch CUDA index. Never use cu126 for PyTorch 2.7.x — cu128 is the correct matching index.
+
+---
+
 ## Single Repository Workflow
 
 **CRITICAL**: Both local (Mac) and workstation use the **same** `dm-isaac-g1` repository.
@@ -159,95 +177,61 @@ docker exec -it dm-workstation bash -c 'cd /workspace/dm-isaac-g1 && your_comman
 
 **IMPORTANT**: When running Isaac Sim inference, ALWAYS use VNC display mode unless specifically asked for headless. This allows viewing the simulation.
 
+**NOTE**: Our `dm-workstation` image does NOT have `/isaac-sim/python.sh`. Isaac Sim is installed as a Python package inside the `unitree_sim_env` conda environment. Always use `conda run -n unitree_sim_env python`.
+
 **Complete VNC Launch Command (from local Mac):**
 ```bash
-# 1. First, kill any existing Isaac Sim processes and start fresh
-source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 "
-  cd /home/datamentors/dm-isaac-g1/environments/workstation && \
-  docker compose down && docker compose up -d && sleep 5
-"
+source .env
 
-# 2. Run inference with VNC display
-source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'docker exec dm-workstation bash -c "
-  /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true
+# Start VNC if not running
+sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no datamentors@192.168.1.205 \
+  "docker exec dm-workstation /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true"
+
+# Launch inference in background
+sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no datamentors@192.168.1.205 '
+docker exec -d dm-workstation bash -c "
   export DISPLAY=:1
-  cd /workspace/dm-isaac-g1
-
-  # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
-  VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
-  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
-  export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
-  export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
+  export PROJECT_ROOT=/workspace/unitree_sim_isaaclab
   export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
-
-  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+  export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:\$PYTHONPATH
+  cd /workspace/dm-isaac-g1
+  conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
     --server 192.168.1.237:5555 \
     --scene pickplace_g1_inspire \
-    --language \"pick up the apple\" \
+    --language \"pick up the cylinder\" \
+    --num_action_steps 30 \
+    --action_scale 0.1 \
     --enable_cameras \
-    --save_debug_frames
-"'
+    > /tmp/inference.log 2>&1
+"
+'
 
-# 3. Connect VNC client to view simulation
-# On Mac: open vnc://192.168.1.205:5901
+# Connect VNC: open vnc://192.168.1.205:5901 (password: datament)
+
+# Check log:
+sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no datamentors@192.168.1.205 \
+  "docker exec dm-workstation tail -50 /tmp/inference.log"
 ```
 
 **Key Points:**
 - Do NOT use `--headless` flag if you want to see the simulation
-- VNC server must be started with `export DISPLAY=:1` before running Isaac Sim
-- Connect VNC client to `192.168.1.205:5901` to view
-- Debug frames are saved to `/tmp/groot_debug/` in the container
-
-**Background VNC Inference (non-blocking):**
-```bash
-source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'nohup docker exec dm-workstation bash -c "
-  /opt/TurboVNC/bin/vncserver :1 2>/dev/null || true
-  export DISPLAY=:1
-  cd /workspace/dm-isaac-g1
-
-  # CRITICAL: Include IsaacLab .venv paths for pink/pinocchio IK libraries
-  VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
-  CMEEL_PATH=\$VENV_PATH/cmeel.prefix/lib/python3.11/site-packages
-  export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:\$VENV_PATH:\$CMEEL_PATH:\$PYTHONPATH
-  export LD_LIBRARY_PATH=\$VENV_PATH/cmeel.prefix/lib:\$LD_LIBRARY_PATH
-  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
-
-  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene pickplace_g1_inspire \
-    --language \"pick up the apple\" \
-    --enable_cameras \
-    --save_debug_frames 2>&1
-" > /tmp/inference.log 2>&1 &'
-
-# Check progress:
-source .env && sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 'tail -50 /tmp/inference.log'
-```
+- `--enable_cameras` is REQUIRED for `pickplace_g1_inspire` (scene has cameras defined)
+- `PROJECT_ROOT` MUST be set — without it USD asset paths become `None/assets/...` and scene crashes
+- VNC password: `datament` (8-char max for TurboVNC)
+- Connect VNC client to `192.168.1.205:5901`
 
 ### Pink/Pinocchio IK Library Configuration
 
-**IMPORTANT**: The pink inverse kinematics library (used for G1 manipulation scenes) requires specific path configuration:
+Pink and pinocchio are installed directly in the `unitree_sim_env` conda environment (baked into the `dm-workstation` image during the builder stage). No special path configuration is needed.
 
-1. **Do NOT install pin-pink via pip** - it conflicts with Isaac Sim's bundled assimp library
-2. **Use IsaacLab's pre-installed version** from `/workspace/IsaacLab/env_isaaclab/`
-3. **CRITICAL: Do NOT add IsaacLab env paths to PYTHONPATH at startup**
-   - The IsaacLab env contains a torch stub that conflicts with Isaac Sim's bundled torch
-   - The `policy_inference_groot_g1.py` script adds these paths AFTER torch is imported
-   - This is the correct approach and avoids CUDA library conflicts
-
-**Working PYTHONPATH for inference (NO IsaacLab env):**
+**Working PYTHONPATH for inference:**
 ```bash
-export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_assets:$PYTHONPATH
+export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:$PYTHONPATH
+# The conda env already has IsaacLab and unitree_sim_isaaclab on its path
+# DO NOT manually add /workspace/IsaacLab/... — that path is NOT used by the conda env
 ```
 
-**DO NOT use this (causes torch/CUDA conflicts):**
-```bash
-# WRONG - causes ImportError: undefined symbol: __nvJitLinkCreate
-VENV_PATH=/workspace/IsaacLab/env_isaaclab/lib/python3.11/site-packages
-export PYTHONPATH=$VENV_PATH:$PYTHONPATH  # DON'T DO THIS
-```
-
-The inference script handles pink/pinocchio paths internally after Isaac Sim loads.
+See [docs/WORKSTATION_ENVIRONMENT_MAP.md](docs/WORKSTATION_ENVIRONMENT_MAP.md) for full details on the environment architecture and why certain paths impact others.
 
 ### Container Environment Notes
 
