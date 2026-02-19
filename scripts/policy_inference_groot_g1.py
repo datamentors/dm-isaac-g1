@@ -9,14 +9,18 @@ G1 Robot Policy Inference with GR00T N1.6
 This script runs the Unitree G1 robot in Isaac Sim with GR00T policy inference.
 It uses nested dictionary format for observations as required by the GR00T server.
 
-Camera Configuration:
-    Camera settings are loaded from dm_isaac_g1.configs.camera_configs module.
-    The script automatically detects available camera links and uses:
-    - Primary config (d435_link) if available
-    - Fallback config (torso_link) for simpler robot models
+Camera and Scene Configuration:
+    Camera/scene setups are defined in inference_setups.py (same directory).
+    Select a setup with --setup <name>.  Default: "default" (d435_link top-down).
 
-    Camera configs are based on official Unitree settings from:
-    https://github.com/unitreerobotics/unitree_sim_isaaclab
+    Available setups (run with --list_setups to print all):
+      default     Original d435_link camera (top-down view, not training-matched)
+      option_a    Torso chest camera, forward-facing ~15° pitch (matches cam_left_high)
+      option_a_v2 Same as option_a but 30° pitch (more table visible)
+      option_a_v3 Higher mount, 20° pitch, objects further forward
+      option_a_left  Apple placed further left
+
+    Add new setups in inference_setups.py without touching this script.
 
 Usage:
     # Ensure GROOT server is running with NEW_EMBODIMENT tag
@@ -26,15 +30,28 @@ Usage:
     #       --model-path /workspace/checkpoints/groot-g1-inspire-9datasets \
     #       --embodiment-tag NEW_EMBODIMENT --port 5555'
 
-    # Then run this script:
+    # Run with default (original) setup:
     PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
     GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
-    conda run -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
+    conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
         --server 192.168.1.237:5555 \
         --scene pickplace_g1_inspire \
         --language "Pick up the red apple and place it on the plate" \
         --action_scale 1.0 \
         --enable_cameras
+
+    # Run with Option A (training-matched forward-facing camera):
+    PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
+    GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
+    conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
+        --server 192.168.1.237:5555 \
+        --scene pickplace_g1_inspire \
+        --setup option_a \
+        --language "Pick up the red apple and place it on the plate" \
+        --action_scale 1.0 \
+        --enable_cameras \
+        --save_debug_frames \
+        --debug_dir /tmp/groot_debug_option_a
 """
 
 import argparse
@@ -90,26 +107,20 @@ parser.add_argument("--action_scale", type=float, default=1.0,
 parser.add_argument("--max_episode_steps", type=int, default=1000,
                     help="Maximum steps per episode before reset.")
 parser.add_argument(
-    "--camera_parent",
+    "--setup",
     type=str,
-    default=None,  # Use scene's built-in camera if None
-    # Example robot links for custom camera: logo_link, torso_link, pelvis
-    # Different scenes have different robot link structures
-    help="Camera parent link (default: None = use scene's built-in camera).",
+    default="default",
+    help=(
+        "Inference setup name from inference_setups.py. "
+        "Controls camera position/orientation and object placement. "
+        "Use --list_setups to see all available options. "
+        "Default: 'default' (original d435_link top-down camera)."
+    ),
 )
 parser.add_argument(
-    "--camera_pos",
-    type=float,
-    nargs=3,
-    default=(0.12, 0.0, 0.0),  # Forward from head center - simulates looking from eyes
-    help="Camera position offset (x y z) relative to parent link.",
-)
-parser.add_argument(
-    "--camera_rot",
-    type=float,
-    nargs=4,
-    default=(0.906, 0.0, -0.423, 0.0),  # ~50deg pitch down - looking at hands/table from head
-    help="Camera rotation quaternion (w x y z) in ROS convention.",
+    "--list_setups",
+    action="store_true",
+    help="Print all available inference setups and exit.",
 )
 parser.add_argument(
     "--debug_dir",
@@ -128,6 +139,22 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, unknown = parser.parse_known_args()
 if unknown:
     print(f"[WARN] Ignoring unknown args: {unknown}", flush=True)
+
+# Import inference setups (must happen after path setup above, before AppLauncher)
+from inference_setups import get_setup, list_setups, SETUPS  # noqa: E402
+
+# Handle --list_setups early exit (no Isaac Sim needed)
+if args_cli.list_setups:
+    print(list_setups())
+    sys.exit(0)
+
+# Validate setup name before launching Isaac Sim (fail fast)
+try:
+    _selected_setup = get_setup(args_cli.setup)
+    print(f"[INFO] Using inference setup: '{args_cli.setup}' — {_selected_setup.description[:80]}...", flush=True)
+except ValueError as e:
+    print(f"[ERROR] {e}", flush=True)
+    sys.exit(1)
 
 # Launch Isaac Sim
 app_launcher = AppLauncher(args_cli)
@@ -184,22 +211,6 @@ from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg
 import isaaclab.sim as sim_utils
-
-# Import camera configurations from dm_isaac_g1
-try:
-    from dm_isaac_g1.configs.camera_configs import (
-        get_head_camera_config,
-        get_wrist_camera_configs,
-        get_all_camera_configs,
-        HandType,
-        RobotType,
-        CameraConfig,
-    )
-    CAMERA_CONFIGS_AVAILABLE = True
-except ImportError as e:
-    print(f"[WARN] Could not import camera configs: {e}", flush=True)
-    print("[WARN] Using hardcoded fallback camera configuration", flush=True)
-    CAMERA_CONFIGS_AVAILABLE = False
 
 
 def load_env_cfg_class(scene_name: str):
@@ -367,13 +378,9 @@ def build_flat_observation(
 
 def main():
     """Main function."""
-
-    def _resolve_camera_parent(parent: str | None) -> str | None:
-        if parent is None:
-            return None
-        if parent.startswith("{ENV_REGEX_NS}") or parent.startswith("/"):
-            return parent.rstrip("/")
-        return f"{{ENV_REGEX_NS}}/Robot/{parent}".rstrip("/")
+    # Load the selected inference setup (camera + scene layout)
+    setup = get_setup(args_cli.setup)
+    print(f"[INFO] Inference setup '{args_cli.setup}': {setup.description}", flush=True)
 
     # Load environment configuration dynamically based on --scene argument
     print(f"[INFO] Loading scene: {args_cli.scene}", flush=True)
@@ -399,107 +406,69 @@ def main():
     if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
         env_cfg.observations.lower_body_policy = None
 
-    # Scene layout for apple pick-and-place task.
-    #
-    # Coordinate system (Isaac Sim / robot frame):
-    #   +X = forward (away from robot)
-    #   +Y = left
-    #   -Y = right
-    #   +Z = up
-    #
-    # Table surface height: ~0.87 m (table at z=-0.2, height ~1.07 m)
-    # Robot root: (0, 0, 0)
-    #
-    # Apple: left side of robot, on table, clearly visible from d435_link head camera
-    #   pos = (-0.30, 0.45, 0.87)  →  slightly behind robot center, left, on table
-    #
-    # Plate: center-front of robot, on same table surface
-    #   pos = (-0.10, 0.45, 0.865) →  same left area but closer to center, giving the
-    #                                   robot a short reach from apple to plate.
-    #
-    # Training task: "Pick up the red apple and place it on the plate"
-    # The model is vision-guided — it locates the apple from the head camera image.
+    # Scene layout — loaded from inference_setups.py based on --setup argument.
+    # Edit inference_setups.py to add/modify object positions; no changes needed here.
+    print(f"[INFO] Scene objects — apple: {setup.object_pos}, plate: {setup.plate_pos}", flush=True)
 
     # Apple (replace the scene's default cylinder object)
     env_cfg.scene.object = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.30, 0.45, 0.87),  # Left side of robot, on table surface
-            rot=(1, 0, 0, 0),
-        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=setup.object_pos, rot=(1, 0, 0, 0)),
         spawn=sim_utils.SphereCfg(
-            radius=0.04,              # ~8 cm diameter, apple-sized
+            radius=0.04,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.8, 0.1, 0.1),  # Red
-            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
         ),
     )
 
     # Plate (static kinematic object — destination for the apple)
     env_cfg.scene.plate = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Plate",
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(-0.10, 0.45, 0.865),  # Center-front, same table surface, same Y as apple
-            rot=(1, 0, 0, 0),
-        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=setup.plate_pos, rot=(1, 0, 0, 0)),
         spawn=sim_utils.CylinderCfg(
-            radius=0.12,              # ~24 cm diameter plate
-            height=0.01,              # Flat disk
+            radius=0.12,
+            height=0.01,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.9, 0.9, 0.85),  # Off-white plate
-            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.9, 0.85)),
         ),
     )
 
-    # Camera configuration - always add tiled camera for inference
-    # Use camera configs from dm_isaac_g1.configs.camera_configs module
-    # These are based on official Unitree settings from unitree_sim_isaaclab
-    if args_cli.camera_parent is not None:
-        # User-specified camera parent takes precedence
-        camera_parent = _resolve_camera_parent(args_cli.camera_parent)
-        camera_pos = tuple(args_cli.camera_pos)
-        camera_rot = tuple(args_cli.camera_rot)
-        print(f"[INFO] Using custom camera parent: {camera_parent}", flush=True)
-    elif CAMERA_CONFIGS_AVAILABLE:
-        # Use camera configs from the module
-        # Head camera is AGNOSTIC to hand type - same config works for all hands
-        # First try primary config (d435_link), fallback to torso_link if not available
-        #
-        # Camera Configuration - Using Unitree's approach with CameraCfg
-        # The G1 robot USD from unitree_sim_isaaclab includes d435_link for head camera.
-        # Using CameraCfg instead of TiledCameraCfg for better Isaac Sim 5.1.0 compatibility.
-        #
-        # Reference: /workspace/unitree_sim_isaaclab/tasks/common_config/camera_configs.py
-
-        print(f"[INFO] Using Unitree camera configuration with d435_link", flush=True)
+    # Camera — configured from the selected inference setup.
+    # setup.camera_parent=None → use d435_link (original/default behaviour).
+    # setup.camera_parent="torso_link" → attach chest-height forward-facing camera.
+    if setup.camera_parent is None:
+        # Default: use the scene's built-in d435_link camera
+        camera_prim = "{ENV_REGEX_NS}/Robot/d435_link/front_cam"
+        cam_pos = (0.0, 0.0, 0.0)
+        cam_rot = (0.5, -0.5, 0.5, -0.5)
     else:
-        print(f"[INFO] Camera configs module not available, using Unitree defaults", flush=True)
+        camera_prim = f"{{ENV_REGEX_NS}}/Robot/{setup.camera_parent}/inference_cam"
+        cam_pos = setup.camera_pos
+        cam_rot = setup.camera_rot
 
-    # Configure Camera for GROOT observations using Unitree's approach
-    # CameraCfg is more stable in Isaac Sim 5.1.0 than TiledCameraCfg
-    # Camera path follows Unitree convention: /World/envs/env_.*/Robot/d435_link/front_cam
+    print(f"[INFO] Camera prim: {camera_prim}", flush=True)
+    print(f"[INFO] Camera pos={cam_pos}, rot={cam_rot}", flush=True)
+
     env_cfg.scene.front_camera = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/d435_link/front_cam",
-        update_period=0.02,  # 50Hz like Unitree
+        prim_path=camera_prim,
+        update_period=0.02,
         height=args_cli.video_h,
         width=args_cli.video_w,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=7.6,  # From Unitree camera_configs.py
+            focal_length=setup.focal_length,
             focus_distance=400.0,
-            horizontal_aperture=20.0,
-            clipping_range=(0.1, 1.0e5)
+            horizontal_aperture=setup.horizontal_aperture,
+            clipping_range=(0.1, 1.0e5),
         ),
         offset=CameraCfg.OffsetCfg(
-            pos=(0, 0.0, 0),  # No offset - camera is at d435_link origin
-            rot=(0.5, -0.5, 0.5, -0.5),  # Unitree d435 orientation
-            convention="ros"
+            pos=cam_pos,
+            rot=cam_rot,
+            convention="ros",
         ),
     )
 
