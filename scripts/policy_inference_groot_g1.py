@@ -509,6 +509,32 @@ def main():
     # Camera info (from selected setup)
     print(f"[DEBUG] Camera setup: {args_cli.setup}, parent={setup.camera_parent}, pos={setup.camera_pos}", flush=True)
 
+    # Print camera world pose so we can hardcode it for the world-fixed camera setup.
+    # This gives the exact pos/quat of d435_link/front_cam in world frame at step 0,
+    # before any robot motion. Use these values in option_b_worldcam in inference_setups.py.
+    try:
+        import omni.isaac.core.utils.prims as prim_utils
+        import omni.usd
+        from pxr import UsdGeom, Gf
+        stage = omni.usd.get_context().get_stage()
+        # Try both env_0 and direct path
+        cam_prim_paths = [
+            "/World/envs/env_0/Robot/d435_link/front_cam",
+            "/World/envs/env_0/Robot/d435_link",
+        ]
+        for cp in cam_prim_paths:
+            prim = stage.GetPrimAtPath(cp)
+            if prim.IsValid():
+                xform = UsdGeom.Xformable(prim)
+                world_xform = xform.ComputeLocalToWorldTransform(0)
+                t = world_xform.ExtractTranslation()
+                r = world_xform.ExtractRotationQuat()
+                ri = r.GetImaginary()
+                print(f"[DEBUG] {cp} world pos: ({t[0]:.4f}, {t[1]:.4f}, {t[2]:.4f})", flush=True)
+                print(f"[DEBUG] {cp} world rot (w,x,y,z): ({r.GetReal():.4f}, {ri[0]:.4f}, {ri[1]:.4f}, {ri[2]:.4f})", flush=True)
+    except Exception as e:
+        print(f"[DEBUG] Could not read d435_link world pose: {e}", flush=True)
+
     # Print all joint names for debugging
     all_joint_names = robot.data.joint_names
     print(f"[DEBUG] All joint names ({len(all_joint_names)}):", flush=True)

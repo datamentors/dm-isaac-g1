@@ -155,13 +155,14 @@ SETUPS: dict[str, InferenceSetup] = {
     "option_b_worldcam": InferenceSetup(
         description=(
             "World-fixed camera — side-left view. "
-            "Camera at (-0.80, 0.40, 1.05): to the robot's left at table height. "
-            "Looks right (+X direction) toward table center. "
+            "Camera at (-0.80, 0.40, 1.00): to the robot's left at table height. "
+            "Faces world +X (same rotation as d435_link option_a). "
             "Stable across all steps; shows both arms and apple from the side."
         ),
         camera_parent="__world__",
-        camera_pos=(-0.80, 0.40, 1.05),
-        camera_rot=(0.4374, 0.5268, 0.5608, 0.4656),
+        camera_pos=(-0.80, 0.40, 1.00),
+        # Same rotation as option_a: cam-Z=+X, cam-up=+Z — verified working
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
@@ -171,12 +172,13 @@ SETUPS: dict[str, InferenceSetup] = {
     "option_b_worldcam_v2": InferenceSetup(
         description=(
             "World-fixed camera — front view. "
-            "Camera at (-0.15, 1.30, 1.10): in front of the table, looking back at robot. "
-            "Shows the robot face-on and both hands working on the table."
+            "Camera at (-0.15, 1.30, 1.10): in front of the table, looking back at robot (-Y). "
+            "cam-Z=world -Y, cam-up=world +Z. Shows robot face-on, hands on table."
         ),
         camera_parent="__world__",
         camera_pos=(-0.15, 1.30, 1.10),
-        camera_rot=(0.6198, 0.7799, 0.0683, 0.0543),
+        # cam-Z=-Y, cam-X=-X, cam-Y=-Z: R cols=[-X,-Z,-Y], quat=(0,0,0.7071,-0.7071)
+        camera_rot=(0.0, 0.0, 0.7071, -0.7071),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
@@ -186,12 +188,13 @@ SETUPS: dict[str, InferenceSetup] = {
     "option_b_worldcam_top": InferenceSetup(
         description=(
             "World-fixed camera — overhead top-down view. "
-            "Camera at (-0.10, 0.45, 1.90): directly above table center, looking down. "
-            "Shows full table, both hands, apple and plate from above."
+            "Camera at (-0.10, 0.45, 1.80): above table center, looking straight down (-Z). "
+            "cam-down=world +Y (table=bottom of image). Shows full table from above."
         ),
         camera_parent="__world__",
-        camera_pos=(-0.10, 0.45, 1.90),
-        camera_rot=(0.0484, 0.0, 0.9988, 0.0),
+        camera_pos=(-0.10, 0.45, 1.80),
+        # cam-Z=-Z, derived from forward-facing quat pitched down 90deg: (0,-1,0,0)
+        camera_rot=(0.0, -1.0, 0.0, 0.0),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
