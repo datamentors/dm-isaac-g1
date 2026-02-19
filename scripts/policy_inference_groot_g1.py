@@ -491,10 +491,8 @@ def main():
         obj = env.scene['object']
         obj_pos = obj.data.root_pos_w.detach().cpu().numpy()
         print(f"[DEBUG] Object position (world): {obj_pos[0]}", flush=True)
-    # Camera info
-    print(f"[DEBUG] Camera parent: {args_cli.camera_parent}", flush=True)
-    print(f"[DEBUG] Camera pos offset: {args_cli.camera_pos}", flush=True)
-    print(f"[DEBUG] Camera rot: {args_cli.camera_rot}", flush=True)
+    # Camera info (from selected setup)
+    print(f"[DEBUG] Camera setup: {args_cli.setup}, parent={setup.camera_parent}, pos={setup.camera_pos}", flush=True)
 
     # Print all joint names for debugging
     all_joint_names = robot.data.joint_names
