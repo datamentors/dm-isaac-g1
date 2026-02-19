@@ -123,6 +123,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xorg libxext6 libxrender1 libxtst6 libxi6 \
     libglib2.0-0 libvulkan1 vulkan-tools \
     ncurses-term dbus-x11 \
+    xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
 
 # TurboVNC — remote visualization for Isaac Sim
@@ -131,6 +132,12 @@ RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovn
     dpkg -i /tmp/turbovnc.deb || apt-get install -f -y && \
     rm /tmp/turbovnc.deb
 ENV PATH="/opt/TurboVNC/bin:${PATH}"
+
+# VNC: set password (max 8 chars) and use XFCE4 as the desktop session.
+# TVNC_WM=xfce maps to /usr/share/xsessions/xfce.desktop → startxfce4.
+ENV TVNC_WM=xfce
+RUN mkdir -p ~/.vnc && \
+    printf "datament\ndatament\nn\n" | /opt/TurboVNC/bin/vncpasswd
 
 # Copy all artifacts from builder
 COPY --from=builder /home/code/IsaacLab            /home/code/IsaacLab

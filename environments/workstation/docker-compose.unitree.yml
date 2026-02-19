@@ -43,8 +43,11 @@ x-common-volumes: &common-volumes
   - /workspace/checkpoints:/workspace/checkpoints
   - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
   - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
-  - /tmp/.X11-unix:/tmp/.X11-unix
   - /dev/dri:/dev/dri
+  # NOTE: /tmp/.X11-unix intentionally NOT mounted from host.
+  # Mounting it causes stale X lock files (/tmp/.X1-lock) to persist across
+  # container restarts, blocking vncserver from starting on :1.
+  # TurboVNC manages its own /tmp/.X11-unix inside the container.
 
 x-common-deploy: &common-deploy
   resources:
