@@ -820,7 +820,9 @@ def main():
             # Build action vector using predicted trajectory
             # Based on embodiment config (rep=ABSOLUTE, type=NON_EEF):
             # Actions are ABSOLUTE joint position targets, not deltas
-            current_action_vec = joint_pos[:, action_joint_ids].copy()
+            # Initialize with ALL robot joints (env_action_dim=53), not just the 41 mapped ones.
+            # This ensures the action tensor is the correct size for env.step().
+            current_action_vec = joint_pos[:, :env_action_dim].copy()
 
             # Action 53 DOF ranges (same as state)
             action_53dof_ranges = {
@@ -873,8 +875,8 @@ def main():
                 arr = _get_action_at_timestep(key, action_step_idx)
                 if arr is None:
                     return
-                names = group_joint_names.get(key, [])
-                idxs = [action_name_to_index[n] for n in names if n in action_name_to_index]
+                # Use group_joint_ids (robot joint indices in env_action_dim space)
+                idxs = group_joint_ids.get(key, [])
                 if not idxs:
                     return
                 d = len(idxs)
@@ -910,8 +912,7 @@ def main():
 
             # Debug: print first few steps
             if step_count < 10:
-                la_names = group_joint_names.get("left_arm", [])
-                la_idxs = [action_name_to_index[n] for n in la_names if n in action_name_to_index]
+                la_idxs = group_joint_ids.get("left_arm", [])
                 print(f"[DEBUG] Step {step_count}: current_joint_pos[left_arm] = {joint_pos[0, group_joint_ids['left_arm']]}", flush=True)
                 arr = _get_action_at_timestep("left_arm", action_step_idx)
                 if arr is not None:
