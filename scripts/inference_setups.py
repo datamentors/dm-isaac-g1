@@ -154,17 +154,14 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "option_b_worldcam": InferenceSetup(
         description=(
-            "World-fixed camera: stable view that never moves when robot actuates. "
-            "Camera at world pos (-0.15, -0.20, 1.30) — behind robot, 1.3m height. "
-            "Faces +Y toward table (Y=0.55), ~29° pitch-down to see table surface. "
-            "Quaternion computed to aim from camera pos directly at table center. "
-            "camera_parent='__world__' → prim placed outside Robot hierarchy."
+            "World-fixed camera — side-left view. "
+            "Camera at (-0.80, 0.40, 1.05): to the robot's left at table height. "
+            "Looks right (+X direction) toward table center. "
+            "Stable across all steps; shows both arms and apple from the side."
         ),
         camera_parent="__world__",
-        camera_pos=(-0.15, -0.20, 1.30),
-        # Quaternion (w,x,y,z) to face table from behind: points toward (+Y, -Z) direction
-        # Computed via rotation matrix aligning camera-Z to (0.17, 0.85, -0.49) world direction
-        camera_rot=(0.50, -0.86, 0.04, -0.07),
+        camera_pos=(-0.80, 0.40, 1.05),
+        camera_rot=(0.4374, 0.5268, 0.5608, 0.4656),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
@@ -173,14 +170,28 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "option_b_worldcam_v2": InferenceSetup(
         description=(
-            "World-fixed camera v2: same position as option_b_worldcam but "
-            "moved closer (Y=-0.05) and slightly lower (Z=1.15) for a tighter "
-            "view of the table surface and hands."
+            "World-fixed camera — front view. "
+            "Camera at (-0.15, 1.30, 1.10): in front of the table, looking back at robot. "
+            "Shows the robot face-on and both hands working on the table."
         ),
         camera_parent="__world__",
-        camera_pos=(-0.15, -0.05, 1.15),
-        # Same facing direction: toward table at Y=0.55, Z=0.87
-        camera_rot=(0.50, -0.86, 0.04, -0.07),
+        camera_pos=(-0.15, 1.30, 1.10),
+        camera_rot=(0.6198, 0.7799, 0.0683, 0.0543),
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
+    ),
+
+    # -------------------------------------------------------------------------
+    "option_b_worldcam_top": InferenceSetup(
+        description=(
+            "World-fixed camera — overhead top-down view. "
+            "Camera at (-0.10, 0.45, 1.90): directly above table center, looking down. "
+            "Shows full table, both hands, apple and plate from above."
+        ),
+        camera_parent="__world__",
+        camera_pos=(-0.10, 0.45, 1.90),
+        camera_rot=(0.0484, 0.0, 0.9988, 0.0),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
