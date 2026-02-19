@@ -155,15 +155,16 @@ SETUPS: dict[str, InferenceSetup] = {
     "option_b_worldcam": InferenceSetup(
         description=(
             "World-fixed camera: stable view that never moves when robot actuates. "
-            "Camera placed at absolute world position matching d435_link head height: "
-            "  world pos (-0.15, -0.20, 1.30) — at robot X, 0.2m behind robot, 1.3m height. "
-            "  Faces +Y (toward table at Y=0.55), ~20° pitch-down to see table surface. "
-            "camera_parent='__world__' → prim placed outside Robot hierarchy. "
-            "Objects on table in canonical positions."
+            "Camera at world pos (-0.15, -0.20, 1.30) — behind robot, 1.3m height. "
+            "Faces +Y toward table (Y=0.55), ~29° pitch-down to see table surface. "
+            "Quaternion computed to aim from camera pos directly at table center. "
+            "camera_parent='__world__' → prim placed outside Robot hierarchy."
         ),
         camera_parent="__world__",
         camera_pos=(-0.15, -0.20, 1.30),
-        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        # Quaternion (w,x,y,z) to face table from behind: points toward (+Y, -Z) direction
+        # Computed via rotation matrix aligning camera-Z to (0.17, 0.85, -0.49) world direction
+        camera_rot=(0.50, -0.86, 0.04, -0.07),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
@@ -172,13 +173,14 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "option_b_worldcam_v2": InferenceSetup(
         description=(
-            "World-fixed camera v2: same world position, steeper 30° downward pitch "
-            "to show more of the table surface and hands. "
-            "Use if option_b_worldcam shows too much background above the table."
+            "World-fixed camera v2: same position as option_b_worldcam but "
+            "moved closer (Y=-0.05) and slightly lower (Z=1.15) for a tighter "
+            "view of the table surface and hands."
         ),
         camera_parent="__world__",
-        camera_pos=(-0.15, -0.20, 1.30),
-        camera_rot=(0.56, -0.50, 0.43, -0.50),
+        camera_pos=(-0.15, -0.05, 1.15),
+        # Same facing direction: toward table at Y=0.55, Z=0.87
+        camera_rot=(0.50, -0.86, 0.04, -0.07),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
