@@ -424,11 +424,13 @@ def main():
     )
 
     # Plate (static kinematic object — destination for the apple)
+    # Radius comes from setup.plate_radius (default 0.06m = 12cm diameter)
+    # Placed away from robot hands' initial pose to avoid spawn collisions
     env_cfg.scene.plate = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Plate",
         init_state=RigidObjectCfg.InitialStateCfg(pos=setup.plate_pos, rot=(1, 0, 0, 0)),
         spawn=sim_utils.CylinderCfg(
-            radius=0.12,
+            radius=setup.plate_radius,
             height=0.01,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
@@ -438,14 +440,27 @@ def main():
     )
 
     # Camera — configured from the selected inference setup.
-    # setup.camera_parent=None → use d435_link (original/default behaviour).
-    # setup.camera_parent="torso_link" → attach chest-height forward-facing camera.
+    #
+    # Three modes depending on setup.camera_parent:
+    #   None           → use d435_link (scene's built-in head camera, Unitree default)
+    #   "__world__"    → world-fixed camera; pos/rot are absolute world coordinates
+    #                    (camera doesn't move with robot — stable across all steps)
+    #   "<link_name>"  → attach to named robot link (moves with that link)
+    #
+    # World-fixed camera note: prim path outside Robot hierarchy so it never moves.
+    # Position (x,y,z) is absolute world position; rot is world-frame orientation.
     if setup.camera_parent is None:
         # Default: use the scene's built-in d435_link camera
         camera_prim = "{ENV_REGEX_NS}/Robot/d435_link/front_cam"
         cam_pos = (0.0, 0.0, 0.0)
         cam_rot = (0.5, -0.5, 0.5, -0.5)
+    elif setup.camera_parent == "__world__":
+        # World-fixed camera: placed at absolute world position, never moves
+        camera_prim = "{ENV_REGEX_NS}/inference_cam_world"
+        cam_pos = setup.camera_pos    # absolute world position (x, y, z)
+        cam_rot = setup.camera_rot    # world-frame orientation (w, x, y, z)
     else:
+        # Robot-link-attached camera
         camera_prim = f"{{ENV_REGEX_NS}}/Robot/{setup.camera_parent}/inference_cam"
         cam_pos = setup.camera_pos
         cam_rot = setup.camera_rot

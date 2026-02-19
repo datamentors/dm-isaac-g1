@@ -68,7 +68,8 @@ class InferenceSetup:
     # Scene layout — initial world positions (x, y, z)
     # Default: on the table surface, reachable by the left arm
     object_pos: tuple = (-0.35, 0.40, 0.87)   # Apple: on table, left of center
-    plate_pos: tuple = (-0.05, 0.45, 0.865)   # Plate: on table, closer to center-right
+    plate_pos: tuple = (0.15, 0.50, 0.865)    # Plate: on table, right side away from hands
+    plate_radius: float = 0.06                 # Plate radius in meters (0.06 = 12cm diameter)
 
 
 # =============================================================================
@@ -80,75 +81,107 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "default": InferenceSetup(
         description=(
-            "Original d435_link camera (Unitree default). "
-            "Robot faces +Y, table is at Y=0.55. "
-            "Objects placed on table surface matching training data layout: "
-            "apple at (-0.35, 0.40, 0.87), plate at (-0.05, 0.45, 0.865)."
+            "d435_link camera (Unitree default). "
+            "Robot faces +Y, table at Y=0.55, surface Z=0.87. "
+            "Apple at (-0.35, 0.40, 0.87) matches training cylinder position. "
+            "Plate smaller (r=0.06m) and placed further from start pose to avoid hand collision."
         ),
-        camera_parent=None,           # Use d435_link as configured in the scene
+        camera_parent=None,
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.35, 0.40, 0.87),
-        plate_pos=(-0.05, 0.45, 0.865),
+        plate_pos=(0.15, 0.50, 0.865),  # Further right — away from right hand start
+        plate_radius=0.06,
     ),
 
     # -------------------------------------------------------------------------
     "option_a": InferenceSetup(
         description=(
-            "Option A: d435_link camera with corrected forward-facing orientation. "
-            "Objects placed ON the table in correct world positions. "
-            "Robot faces +Y; table at Y=0.55, surface Z=0.87. "
-            "Apple at (-0.35, 0.40, 0.87) — matches training data cylinder position. "
-            "Plate at (-0.05, 0.45, 0.865) — slightly right of apple on table."
+            "d435_link camera. Apple at canonical table position (-0.35, 0.40, 0.87). "
+            "Plate placed at (0.15, 0.50) — away from hands' initial pose, smaller radius. "
+            "This is the primary test setup: correct camera, correct table positions."
         ),
-        camera_parent=None,           # Use d435_link — it IS the correct forward camera
+        camera_parent=None,
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
-        # Correct positions — ON the table, in front of robot (+Y direction)
         object_pos=(-0.35, 0.40, 0.87),
-        plate_pos=(-0.05, 0.45, 0.865),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
     ),
 
     # -------------------------------------------------------------------------
     "option_a_apple_center": InferenceSetup(
         description=(
-            "Apple centered on table (Y=0.45), plate further right (Y=0.55). "
-            "Tests pick from the center of the robot's reach. "
-            "Same d435_link camera as default."
+            "Apple at table center (X=-0.15, Y=0.45), plate further right (X=0.10, Y=0.52). "
+            "Tests pick from center of reach zone. Smaller plate (r=0.06m)."
         ),
         camera_parent=None,
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.15, 0.45, 0.87),
         plate_pos=(0.10, 0.52, 0.865),
+        plate_radius=0.06,
     ),
 
     # -------------------------------------------------------------------------
     "option_a_apple_left": InferenceSetup(
         description=(
-            "Apple far left on table (X=-0.45, Y=0.35), plate center (X=-0.10, Y=0.50). "
-            "Tests reaching to the far-left side of the table — "
-            "matches training episodes where apple is on robot's left."
+            "Apple far left (X=-0.45, Y=0.35), plate center (X=0.05, Y=0.50). "
+            "Tests reaching to the far-left side of the table."
         ),
         camera_parent=None,
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.45, 0.35, 0.87),
-        plate_pos=(-0.10, 0.50, 0.865),
+        plate_pos=(0.05, 0.50, 0.865),
+        plate_radius=0.06,
     ),
 
     # -------------------------------------------------------------------------
     "option_a_closer": InferenceSetup(
         description=(
-            "Apple closer to robot (Y=0.30), plate at table center (Y=0.45). "
-            "Tests reaching to the near edge of the table — "
-            "useful if model trained with close-range pickup."
+            "Apple near table edge (X=-0.30, Y=0.30), plate further (X=0.05, Y=0.45). "
+            "Tests short-reach pickup from the near edge of the table."
         ),
         camera_parent=None,
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.30, 0.30, 0.87),
-        plate_pos=(-0.05, 0.45, 0.865),
+        plate_pos=(0.05, 0.45, 0.865),
+        plate_radius=0.06,
+    ),
+
+    # -------------------------------------------------------------------------
+    "option_b_worldcam": InferenceSetup(
+        description=(
+            "World-fixed camera: stable view that never moves when robot actuates. "
+            "Camera placed at absolute world position matching d435_link head height: "
+            "  world pos (-0.15, -0.20, 1.30) — at robot X, 0.2m behind robot, 1.3m height. "
+            "  Faces +Y (toward table at Y=0.55), ~20° pitch-down to see table surface. "
+            "camera_parent='__world__' → prim placed outside Robot hierarchy. "
+            "Objects on table in canonical positions."
+        ),
+        camera_parent="__world__",
+        camera_pos=(-0.15, -0.20, 1.30),
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
+    ),
+
+    # -------------------------------------------------------------------------
+    "option_b_worldcam_v2": InferenceSetup(
+        description=(
+            "World-fixed camera v2: same world position, steeper 30° downward pitch "
+            "to show more of the table surface and hands. "
+            "Use if option_b_worldcam shows too much background above the table."
+        ),
+        camera_parent="__world__",
+        camera_pos=(-0.15, -0.20, 1.30),
+        camera_rot=(0.56, -0.50, 0.43, -0.50),
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
     ),
 }
 
