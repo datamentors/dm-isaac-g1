@@ -101,6 +101,12 @@ RUN git clone https://github.com/unitreerobotics/unitree_sim_isaaclab.git /home/
 RUN pip install pin-pink meshcat && \
     pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 
+# flatdict — required by isaaclab.sim.simulation_context (isaaclab dep, not auto-installed).
+# Without this, Isaac Sim crashes during extension startup with:
+#   ModuleNotFoundError: No module named 'flatdict'
+# flatdict 4.1.0 is functionally compatible with isaaclab's pinned 4.0.1 requirement.
+RUN pip install flatdict
+
 # ==============================
 # Stage 2: base — stable image pushed to ECR
 # Isaac Sim + IsaacLab + unitree stack, NO GR00T
@@ -148,6 +154,15 @@ COPY --from=builder /opt/conda                      /opt/conda
 
 ENV CYCLONEDDS_HOME=/cyclonedds/install
 ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
+
+# PROJECT_ROOT — required by unitree_sim_isaaclab scene configs to locate USD assets.
+# Without this, scenes crash with:
+#   FileNotFoundError: USD file not found at path 'None/assets/objects/PackingTable/PackingTable.usd'
+# The scene configs use: project_root = os.environ.get("PROJECT_ROOT")
+# At runtime /workspace/unitree_sim_isaaclab is mounted from host (contains the assets).
+# At image build time the same scenes are at /home/code/unitree_sim_isaaclab.
+# We set /workspace/... because the mount path is what's used at runtime.
+ENV PROJECT_ROOT=/workspace/unitree_sim_isaaclab
 
 # PYTHONPATH: dm-isaac-g1 and Isaac-GR00T are mounted at runtime
 # unitree_sim_isaaclab path covers the G1 scene configs and USD references
