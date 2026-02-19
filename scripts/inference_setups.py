@@ -5,38 +5,47 @@ This module defines named experimental setups (camera + scene layout) that can b
 selected when running policy_inference_groot_g1.py via --setup <name>.
 
 Each setup is an InferenceSetup dataclass with:
-  - camera_parent: robot link the camera is attached to (None = use scene default)
-  - camera_pos: (x, y, z) offset from camera_parent
+  - camera_parent: robot link the camera is attached to (None = use scene default d435_link)
+  - camera_pos: (x, y, z) offset from camera_parent link origin
   - camera_rot: (w, x, y, z) ROS-convention quaternion
   - object_pos: (x, y, z) initial position of the apple/object in world frame
   - plate_pos:  (x, y, z) initial position of the plate in world frame
   - description: human-readable explanation of the setup
-
-Available setups:
-  default       Original setup — uses the scene's built-in d435_link camera (top-down view)
-  option_a      Forward-facing chest-height camera matching training data cam_left_high
-  option_a_v2   Same as option_a but with steeper downward pitch (30°) for wider table view
-  option_a_v3   Torso camera, 20° pitch, objects further forward for longer reach test
 
 Adding a new setup:
   1. Add an InferenceSetup instance to SETUPS dict below.
   2. Run inference with --setup <your_setup_name>.
   3. No other changes needed.
 
-Camera quaternion reference (ROS convention, w x y z):
-  - Pure forward (no tilt):     (0.5, -0.5, 0.5, -0.5)
-  - ~15° downward pitch:        (0.56, -0.50, 0.43, -0.50)
-  - ~30° downward pitch:        (0.61, -0.50, 0.35, -0.50)
-  - ~45° downward pitch:        (0.65, -0.50, 0.27, -0.50)
+=============================================================================
+SCENE COORDINATE SYSTEM — CRITICAL REFERENCE
+=============================================================================
 
-Object/plate position reference (Isaac Sim: +X=forward, +Y=left, +Z=up):
-  - Table surface height: ~0.87 m
-  - Safe arm reach from robot: ~0.3-0.5 m forward (+X)
-  - Apple left of center:  Y ≈ +0.10 to +0.20
-  - Plate right of apple:  Y ≈ -0.05 to +0.05
+Robot spawn:   (-0.15, 0.0, 0.76) in world frame
+Robot rotation: (0.7071, 0, 0, 0.7071) = 90° around X → robot faces +Y direction
+
+Table (packing_table): world pos = (0.0, 0.55, -0.2)
+  Table model height ≈ 1.07 m → table surface at world Z ≈ -0.2 + 1.07 = 0.87 m
+  Table center is at Y=0.55 — directly in FRONT of robot (robot faces +Y)
+
+Object reach zone (on table surface, reachable by arm):
+  X: -0.35 to +0.05  (left-right relative to robot facing direction)
+  Y:  0.35 to 0.55   (in front of robot — toward table center)
+  Z:  0.84 to 0.87   (table surface + object height)
+
+Default scene cylinder position (from base_scene_pickplace_cylindercfg.py):
+  pos = [-0.35, 0.40, 0.84]  ← this is the canonical "on table" position
+
+Camera (d435_link/front_cam):
+  Parent: d435_link on robot head
+  ROS quaternion: (0.5, -0.5, 0.5, -0.5) = forward-facing in robot frame
+  Because robot is rotated 90° around X, "forward" in robot frame = +Y in world frame
+  The camera is already forward-facing relative to the robot — it looks toward the table.
+
+=============================================================================
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -47,18 +56,19 @@ class InferenceSetup:
     description: str
 
     # Camera configuration
-    # camera_parent=None means use the scene's built-in camera (d435_link)
+    # camera_parent=None → use d435_link (the scene's built-in head camera)
     camera_parent: Optional[str]    # Robot link name (relative to Robot prim), or None
     camera_pos: tuple               # (x, y, z) offset from camera_parent link origin
     camera_rot: tuple               # (w, x, y, z) quaternion, ROS convention
 
-    # Camera optics (shared defaults match Unitree D435 specs)
+    # Camera optics (defaults match Unitree D435 specs)
     focal_length: float = 7.6
     horizontal_aperture: float = 20.0  # ~75° horizontal FOV
 
     # Scene layout — initial world positions (x, y, z)
-    object_pos: tuple = (0.35, 0.15, 0.87)   # Apple: front-left, on table
-    plate_pos: tuple = (0.40, -0.05, 0.865)  # Plate: front-center, on table
+    # Default: on the table surface, reachable by the left arm
+    object_pos: tuple = (-0.35, 0.40, 0.87)   # Apple: on table, left of center
+    plate_pos: tuple = (-0.05, 0.45, 0.865)   # Plate: on table, closer to center-right
 
 
 # =============================================================================
@@ -70,76 +80,75 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "default": InferenceSetup(
         description=(
-            "Original setup: uses the scene's built-in d435_link camera. "
-            "In the unitree_sim_isaaclab USD this produces a nearly top-down "
-            "birds-eye view (not matching training data)."
+            "Original d435_link camera (Unitree default). "
+            "Robot faces +Y, table is at Y=0.55. "
+            "Objects placed on table surface matching training data layout: "
+            "apple at (-0.35, 0.40, 0.87), plate at (-0.05, 0.45, 0.865)."
         ),
-        camera_parent=None,         # Use d435_link as configured in the scene
+        camera_parent=None,           # Use d435_link as configured in the scene
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
-        # Objects behind robot (original placement from previous experiments)
-        object_pos=(-0.30, 0.45, 0.87),
-        plate_pos=(-0.10, 0.45, 0.865),
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(-0.05, 0.45, 0.865),
     ),
 
     # -------------------------------------------------------------------------
     "option_a": InferenceSetup(
         description=(
-            "Option A: torso_link chest camera matching training cam_left_high. "
-            "Camera attached 15 cm forward, 42 cm above torso_link → ~1.14 m world height. "
-            "Forward-facing with ~15° downward pitch to see table + hands. "
-            "Apple front-left (0.35, 0.15, 0.87), plate front-center (0.40, -0.05, 0.865)."
+            "Option A: d435_link camera with corrected forward-facing orientation. "
+            "Objects placed ON the table in correct world positions. "
+            "Robot faces +Y; table at Y=0.55, surface Z=0.87. "
+            "Apple at (-0.35, 0.40, 0.87) — matches training data cylinder position. "
+            "Plate at (-0.05, 0.45, 0.865) — slightly right of apple on table."
         ),
-        camera_parent="torso_link",
-        camera_pos=(0.15, 0.0, 0.42),
-        # Base forward (0.5,-0.5,0.5,-0.5) + ~15° pitch-down adjustment
-        camera_rot=(0.56, -0.50, 0.43, -0.50),
-        object_pos=(0.35, 0.15, 0.87),
-        plate_pos=(0.40, -0.05, 0.865),
+        camera_parent=None,           # Use d435_link — it IS the correct forward camera
+        camera_pos=(0.0, 0.0, 0.0),
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        # Correct positions — ON the table, in front of robot (+Y direction)
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(-0.05, 0.45, 0.865),
     ),
 
     # -------------------------------------------------------------------------
-    "option_a_v2": InferenceSetup(
+    "option_a_apple_center": InferenceSetup(
         description=(
-            "Option A v2: same torso_link mount, steeper 30° downward pitch. "
-            "Shows more of the table surface and less sky/background. "
-            "Useful if option_a shows too much background above the table."
+            "Apple centered on table (Y=0.45), plate further right (Y=0.55). "
+            "Tests pick from the center of the robot's reach. "
+            "Same d435_link camera as default."
         ),
-        camera_parent="torso_link",
-        camera_pos=(0.15, 0.0, 0.42),
-        # ~30° downward pitch: more table visible in frame
-        camera_rot=(0.61, -0.50, 0.35, -0.50),
-        object_pos=(0.35, 0.15, 0.87),
-        plate_pos=(0.40, -0.05, 0.865),
+        camera_parent=None,
+        camera_pos=(0.0, 0.0, 0.0),
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        object_pos=(-0.15, 0.45, 0.87),
+        plate_pos=(0.10, 0.52, 0.865),
     ),
 
     # -------------------------------------------------------------------------
-    "option_a_v3": InferenceSetup(
+    "option_a_apple_left": InferenceSetup(
         description=(
-            "Option A v3: slightly higher mount (0.45 m above torso_link), "
-            "20° pitch, objects placed further forward (0.45 m) to test longer reach. "
-            "Tests whether model can generalize to slightly different object positions."
+            "Apple far left on table (X=-0.45, Y=0.35), plate center (X=-0.10, Y=0.50). "
+            "Tests reaching to the far-left side of the table — "
+            "matches training episodes where apple is on robot's left."
         ),
-        camera_parent="torso_link",
-        camera_pos=(0.15, 0.0, 0.45),
-        # ~20° downward pitch
-        camera_rot=(0.59, -0.50, 0.39, -0.50),
-        object_pos=(0.40, 0.12, 0.87),
-        plate_pos=(0.45, -0.05, 0.865),
+        camera_parent=None,
+        camera_pos=(0.0, 0.0, 0.0),
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        object_pos=(-0.45, 0.35, 0.87),
+        plate_pos=(-0.10, 0.50, 0.865),
     ),
 
     # -------------------------------------------------------------------------
-    "option_a_left": InferenceSetup(
+    "option_a_closer": InferenceSetup(
         description=(
-            "Option A left: same as option_a but apple placed further left (0.20 m). "
-            "Tests model's ability to reach for apple on the left side of the workspace, "
-            "matching the left-biased placement in some training episodes."
+            "Apple closer to robot (Y=0.30), plate at table center (Y=0.45). "
+            "Tests reaching to the near edge of the table — "
+            "useful if model trained with close-range pickup."
         ),
-        camera_parent="torso_link",
-        camera_pos=(0.15, 0.0, 0.42),
-        camera_rot=(0.56, -0.50, 0.43, -0.50),
-        object_pos=(0.32, 0.20, 0.87),
-        plate_pos=(0.38, 0.02, 0.865),
+        camera_parent=None,
+        camera_pos=(0.0, 0.0, 0.0),
+        camera_rot=(0.5, -0.5, 0.5, -0.5),
+        object_pos=(-0.30, 0.30, 0.87),
+        plate_pos=(-0.05, 0.45, 0.865),
     ),
 }
 
