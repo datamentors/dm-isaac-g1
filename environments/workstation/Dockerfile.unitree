@@ -132,6 +132,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
 
+# Google Chrome — required for AWS SSO authentication in the browser
+# Installed via official Google apt repo for latest stable release.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
+        https://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
 # TurboVNC — remote visualization for Isaac Sim
 RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb \
         -O /tmp/turbovnc.deb && \
