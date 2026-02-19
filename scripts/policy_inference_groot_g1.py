@@ -28,10 +28,12 @@ Usage:
 
     # Then run this script:
     PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
-    GR00T_STATS=/path/to/statistics.json \
-    /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
+    GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
+    conda run -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
         --server 192.168.1.237:5555 \
-        --language "pick up the apple" \
+        --scene pickplace_g1_inspire \
+        --language "Pick up the red apple and place it on the plate" \
+        --action_scale 1.0 \
         --enable_cameras
 """
 
@@ -78,13 +80,13 @@ parser.add_argument("--scene", type=str, default="locomanipulation_g1",
                     choices=list(AVAILABLE_SCENES.keys()),
                     help=f"Scene/environment to use. Available: {', '.join(AVAILABLE_SCENES.keys())}")
 parser.add_argument("--api_token", type=str, default=None, help="Optional API token for the inference server.")
-parser.add_argument("--language", type=str, default="pick up the object", help="Language command for the task.")
+parser.add_argument("--language", type=str, default="Pick up the red apple and place it on the plate", help="Language command for the task.")
 parser.add_argument("--video_h", type=int, default=480, help="Camera image height.")
 parser.add_argument("--video_w", type=int, default=640, help="Camera image width.")
 parser.add_argument("--num_action_steps", type=int, default=30,
                     help="Number of action steps to execute per inference call (default: 30, execute full trajectory).")
-parser.add_argument("--action_scale", type=float, default=0.1,
-                    help="Scale factor for actions to dampen robot response (default: 0.1).")
+parser.add_argument("--action_scale", type=float, default=1.0,
+                    help="Scale factor for actions (default: 1.0 for absolute joint targets).")
 parser.add_argument("--max_episode_steps", type=int, default=1000,
                     help="Maximum steps per episode before reset.")
 parser.add_argument(
@@ -397,49 +399,63 @@ def main():
     if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
         env_cfg.observations.lower_body_policy = None
 
-    # Replace object with apple for pick-and-place tasks
-    # This ensures we have a graspable apple-like object regardless of scene default
-    if args_cli.scene in ["locomanipulation_g1", "pickplace_g1_inspire"]:
-        # Position varies by scene - Inspire scene table is at different position
-        if args_cli.scene == "pickplace_g1_inspire":
-            apple_pos = (-0.35, 0.45, 1.05)  # Match original steering wheel position but slightly higher
-        else:
-            apple_pos = (0.0, 0.5, 0.75)  # Default scene position
+    # Scene layout for apple pick-and-place task.
+    #
+    # Coordinate system (Isaac Sim / robot frame):
+    #   +X = forward (away from robot)
+    #   +Y = left
+    #   -Y = right
+    #   +Z = up
+    #
+    # Table surface height: ~0.87 m (table at z=-0.2, height ~1.07 m)
+    # Robot root: (0, 0, 0)
+    #
+    # Apple: left side of robot, on table, clearly visible from d435_link head camera
+    #   pos = (-0.30, 0.45, 0.87)  →  slightly behind robot center, left, on table
+    #
+    # Plate: center-front of robot, on same table surface
+    #   pos = (-0.10, 0.45, 0.865) →  same left area but closer to center, giving the
+    #                                   robot a short reach from apple to plate.
+    #
+    # Training task: "Pick up the red apple and place it on the plate"
+    # The model is vision-guided — it locates the apple from the head camera image.
 
-        env_cfg.scene.object = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=apple_pos,
-                rot=(1, 0, 0, 0),
+    # Apple (replace the scene's default cylinder object)
+    env_cfg.scene.object = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(-0.30, 0.45, 0.87),  # Left side of robot, on table surface
+            rot=(1, 0, 0, 0),
+        ),
+        spawn=sim_utils.SphereCfg(
+            radius=0.04,              # ~8 cm diameter, apple-sized
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.8, 0.1, 0.1),  # Red
             ),
-            spawn=sim_utils.SphereCfg(
-                radius=0.04,  # Apple-sized sphere (~8cm diameter)
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),  # ~150g like an apple
-                collision_props=sim_utils.CollisionPropertiesCfg(),
-                visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=(0.8, 0.1, 0.1),  # Red apple color
-                ),
+        ),
+    )
+
+    # Plate (static kinematic object — destination for the apple)
+    env_cfg.scene.plate = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Plate",
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(-0.10, 0.45, 0.865),  # Center-front, same table surface, same Y as apple
+            rot=(1, 0, 0, 0),
+        ),
+        spawn=sim_utils.CylinderCfg(
+            radius=0.12,              # ~24 cm diameter plate
+            height=0.01,              # Flat disk
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.9, 0.9, 0.85),  # Off-white plate
             ),
-        )
-    elif not hasattr(env_cfg.scene, 'object') or env_cfg.scene.object is None:
-        # Fallback for other scenes without objects
-        env_cfg.scene.object = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(0.0, 0.5, 0.75),
-                rot=(1, 0, 0, 0),
-            ),
-            spawn=sim_utils.SphereCfg(
-                radius=0.04,
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
-                collision_props=sim_utils.CollisionPropertiesCfg(),
-                visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=(0.8, 0.1, 0.1),
-                ),
-            ),
-        )
+        ),
+    )
 
     # Camera configuration - always add tiled camera for inference
     # Use camera configs from dm_isaac_g1.configs.camera_configs module
