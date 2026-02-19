@@ -568,20 +568,43 @@ def main():
     for k, v in group_joint_ids.items():
         print(f"  {k}: {v} -> {group_joint_names.get(k, [])}", flush=True)
 
-    # Hands: all finger joints per side
-    # Support both DEX3 (left_hand_*) and Inspire (L_*, R_*) naming
+    # Hands: resolve in EXACT training config order (g1_inspire_53dof.py)
+    # Order matters — the 53 DOF action vector slots 29-40 (left) and 41-52 (right)
+    # are assigned positionally. Using wildcards risks alphabetical reordering.
+    #
+    # Training order (from g1_inspire_53dof.py JOINT_INDEX_RANGES):
+    #   left  [29-40]: index_proximal, index_intermediate, middle_proximal, middle_intermediate,
+    #                  pinky_proximal, pinky_intermediate, ring_proximal, ring_intermediate,
+    #                  thumb_proximal_yaw, thumb_proximal_pitch, thumb_intermediate, thumb_distal
+    #   right [41-52]: same pattern with R_ prefix
+    #
+    # DEX3 fallback uses left_hand_*/right_hand_* patterns (alphabetical is fine for those).
     hand_names = robot.data.joint_names
-    # DEX3 style: left_hand_index_0_joint, etc.
     left_hand_dex3 = [n for n in hand_names if n.startswith("left_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
     right_hand_dex3 = [n for n in hand_names if n.startswith("right_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
-    # Inspire style: L_index_proximal_joint, etc.
-    left_hand_inspire = [n for n in hand_names if n.startswith("L_") and any(f in n for f in ["index", "middle", "ring", "pinky", "thumb"])]
-    right_hand_inspire = [n for n in hand_names if n.startswith("R_") and any(f in n for f in ["index", "middle", "ring", "pinky", "thumb"])]
-    # Use whichever is available
-    left_hand_names = left_hand_dex3 if left_hand_dex3 else left_hand_inspire
-    right_hand_names = right_hand_dex3 if right_hand_dex3 else right_hand_inspire
-    group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_names)
-    group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_names)
+
+    if left_hand_dex3:
+        # DEX3 hands — order is acceptable
+        group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_dex3)
+        group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_dex3)
+    else:
+        # Inspire hands — must use EXACT training order, not alphabetical wildcards
+        group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve([
+            "L_index_proximal_joint", "L_index_intermediate_joint",
+            "L_middle_proximal_joint", "L_middle_intermediate_joint",
+            "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
+            "L_ring_proximal_joint", "L_ring_intermediate_joint",
+            "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
+            "L_thumb_intermediate_joint", "L_thumb_distal_joint",
+        ])
+        group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve([
+            "R_index_proximal_joint", "R_index_intermediate_joint",
+            "R_middle_proximal_joint", "R_middle_intermediate_joint",
+            "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
+            "R_ring_proximal_joint", "R_ring_intermediate_joint",
+            "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
+            "R_thumb_intermediate_joint", "R_thumb_distal_joint",
+        ])
 
     # Build dynamic action joint patterns based on detected hand type
     # Base patterns for body joints
@@ -608,12 +631,22 @@ def main():
         "right_wrist_pitch_joint",
     ]
 
-    # Add hand patterns based on what's available
-    if left_hand_inspire:
-        # Inspire hands (L_*, R_*)
+    # Add hand joints based on what's available — explicit order to match training
+    if not left_hand_dex3:
+        # Inspire hands — explicit order matching training config (g1_inspire_53dof.py)
         dynamic_action_patterns.extend([
-            "L_index_.*", "L_middle_.*", "L_ring_.*", "L_pinky_.*", "L_thumb_.*",
-            "R_index_.*", "R_middle_.*", "R_ring_.*", "R_pinky_.*", "R_thumb_.*",
+            "L_index_proximal_joint", "L_index_intermediate_joint",
+            "L_middle_proximal_joint", "L_middle_intermediate_joint",
+            "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
+            "L_ring_proximal_joint", "L_ring_intermediate_joint",
+            "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
+            "L_thumb_intermediate_joint", "L_thumb_distal_joint",
+            "R_index_proximal_joint", "R_index_intermediate_joint",
+            "R_middle_proximal_joint", "R_middle_intermediate_joint",
+            "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
+            "R_ring_proximal_joint", "R_ring_intermediate_joint",
+            "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
+            "R_thumb_intermediate_joint", "R_thumb_distal_joint",
         ])
     elif left_hand_dex3:
         # DEX3 hands (left_hand_*, right_hand_*)
