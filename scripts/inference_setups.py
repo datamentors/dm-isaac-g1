@@ -169,6 +169,10 @@ class InferenceSetup:
     # Whether to disable lower body policy (True for tabletop manipulation).
     disable_lower_body: bool = True
 
+    # Whether to spawn extra objects (apple + plate) on top of the scene.
+    # Set False for scenes that already have their own objects (e.g. block stacking).
+    spawn_objects: bool = True
+
     def get_cameras(self) -> list:
         """Return camera list, building from legacy fields if needed."""
         if self.cameras:
@@ -449,6 +453,7 @@ SETUPS: dict[str, InferenceSetup] = {
             "left_hand_.*", "right_hand_.*",
         ],
         hand_type="dex3",
+        spawn_objects=False,  # Scene has its own RGB blocks for stacking
     ),
 }
 

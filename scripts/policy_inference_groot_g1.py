@@ -425,37 +425,39 @@ def main():
             env_cfg.observations.lower_body_policy = None
 
     # Scene layout — loaded from inference_setups.py based on --setup argument.
-    # Edit inference_setups.py to add/modify object positions; no changes needed here.
-    print(f"[INFO] Scene objects — apple: {setup.object_pos}, plate: {setup.plate_pos}", flush=True)
+    # Only spawn extra objects (apple + plate) if setup.spawn_objects is True.
+    # Scenes like block stacking already have their own objects.
+    if setup.spawn_objects:
+        print(f"[INFO] Spawning objects — apple: {setup.object_pos}, plate: {setup.plate_pos}", flush=True)
 
-    # Apple (replace the scene's default cylinder object)
-    env_cfg.scene.object = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=setup.object_pos, rot=(1, 0, 0, 0)),
-        spawn=sim_utils.SphereCfg(
-            radius=0.04,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
-        ),
-    )
+        # Apple (replace the scene's default cylinder object)
+        env_cfg.scene.object = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            init_state=RigidObjectCfg.InitialStateCfg(pos=setup.object_pos, rot=(1, 0, 0, 0)),
+            spawn=sim_utils.SphereCfg(
+                radius=0.04,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
+            ),
+        )
 
-    # Plate (static kinematic object — destination for the apple)
-    # Radius comes from setup.plate_radius (default 0.06m = 12cm diameter)
-    # Placed away from robot hands' initial pose to avoid spawn collisions
-    env_cfg.scene.plate = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Plate",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=setup.plate_pos, rot=(1, 0, 0, 0)),
-        spawn=sim_utils.CylinderCfg(
-            radius=setup.plate_radius,
-            height=0.01,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.9, 0.85)),
-        ),
-    )
+        # Plate (static kinematic object — destination for the apple)
+        env_cfg.scene.plate = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Plate",
+            init_state=RigidObjectCfg.InitialStateCfg(pos=setup.plate_pos, rot=(1, 0, 0, 0)),
+            spawn=sim_utils.CylinderCfg(
+                radius=setup.plate_radius,
+                height=0.01,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+                mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.9, 0.9, 0.85)),
+            ),
+        )
+    else:
+        print(f"[INFO] Using scene's native objects (spawn_objects=False)", flush=True)
 
     # Camera setup — config-driven from InferenceSetup
     # Supports single camera (legacy) and multi-camera (new CameraSpec list)
@@ -850,19 +852,30 @@ def main():
         debug_dir.mkdir(parents=True, exist_ok=True)
         print(f"[DEBUG] Saving debug frames to: {debug_dir}", flush=True)
 
-    def save_debug_data(rgb_np, observation, action_dict, frame_idx, step):
+    def save_debug_data(rgb_np, observation, action_dict, frame_idx, step,
+                        extra_rgbs=None):
         """Save camera image and observation data for debugging."""
         try:
             import cv2
+            _use_cv2 = True
         except ImportError:
-            print("[WARN] cv2 not available, using PIL for image saving", flush=True)
             from PIL import Image
-            img = Image.fromarray(rgb_np[0])  # First env
-            img.save(debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}.png")
-        else:
-            # OpenCV expects BGR, our images are RGB
-            bgr_img = cv2.cvtColor(rgb_np[0], cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}.png"), bgr_img)
+            _use_cv2 = False
+
+        def _save_img(img_rgb, path):
+            if _use_cv2:
+                bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(path), bgr)
+            else:
+                Image.fromarray(img_rgb).save(path)
+
+        # Primary camera
+        _save_img(rgb_np[0], debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}.png")
+
+        # Extra cameras (wrist cameras, etc.)
+        if extra_rgbs:
+            for cam_name, cam_rgb in extra_rgbs.items():
+                _save_img(cam_rgb[0], debug_dir / f"frame_{frame_idx:04d}_step_{step:06d}_{cam_name}.png")
 
         # Save observation and action data as JSON
         obs_data = {
@@ -873,6 +886,12 @@ def main():
             "camera_shape": list(rgb_np.shape),
             "camera_min_max": [int(rgb_np.min()), int(rgb_np.max())],
         }
+
+        # Log extra camera info
+        if extra_rgbs:
+            for cam_name, cam_rgb in extra_rgbs.items():
+                obs_data[f"cam_{cam_name}_shape"] = list(cam_rgb.shape)
+                obs_data[f"cam_{cam_name}_min_max"] = [int(cam_rgb.min()), int(cam_rgb.max())]
 
         # Add state data
         if "state" in observation:
@@ -961,7 +980,8 @@ def main():
                 # Save debug frames (every inference call, first 10 frames, then every 10th)
                 if args_cli.save_debug_frames:
                     if debug_frame_count < 10 or debug_frame_count % 10 == 0:
-                        save_debug_data(rgb_np, observation, action_dict, debug_frame_count, step_count)
+                        save_debug_data(rgb_np, observation, action_dict, debug_frame_count, step_count,
+                                        extra_rgbs=extra_camera_rgbs if extra_camera_rgbs else None)
                     debug_frame_count += 1
 
             # Build action vector using predicted trajectory
