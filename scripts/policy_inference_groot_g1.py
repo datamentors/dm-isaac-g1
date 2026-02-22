@@ -557,6 +557,18 @@ def main():
 
     print(f"[INFO] Environment created with action dim: {env_action_dim}", flush=True)
 
+    # Dump hand joint limits for debugging finger stuck-at-zero issues
+    _soft_limits = robot.data.soft_joint_pos_limits  # (num_envs, num_joints, 2)
+    _joint_names = robot.data.joint_names
+    print("[DEBUG] Hand joint limits:", flush=True)
+    for _i, _name in enumerate(_joint_names):
+        if "hand" in _name:
+            _lo = _soft_limits[0, _i, 0].item()
+            _hi = _soft_limits[0, _i, 1].item()
+            _rng = _hi - _lo
+            _locked = " *** LOCKED ***" if abs(_rng) < 0.01 else ""
+            print(f"  [{_i}] {_name:<40s} range=[{_lo:+.4f}, {_hi:+.4f}] width={_rng:.4f}{_locked}", flush=True)
+
     # Debug: Print robot and object positions
     robot_root_pos = robot.data.root_pos_w.detach().cpu().numpy()
     print(f"[DEBUG] Robot root position (world): {robot_root_pos[0]}", flush=True)
