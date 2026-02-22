@@ -125,6 +125,17 @@ parser.add_argument(
     action="store_true",
     help="Save camera frames and observation data for debugging.",
 )
+parser.add_argument(
+    "--control_decimation",
+    type=int,
+    default=1,
+    help=(
+        "Number of sim steps to hold each action before advancing to the next action step. "
+        "Use this to match the sim control rate to the real robot's training frequency. "
+        "E.g., sim at 100Hz with training data at 30Hz → --control_decimation 3. "
+        "Default: 1 (no decimation, use sim rate directly)."
+    ),
+)
 
 # Isaac Sim app launcher args
 AppLauncher.add_app_launcher_args(parser)
@@ -828,6 +839,12 @@ def main():
     print(f"[INFO] Starting inference with language command: '{language_cmd}'", flush=True)
     print(f"[INFO] Action steps per inference: {args_cli.num_action_steps} (of 30 predicted)", flush=True)
     print(f"[INFO] Action scale: {args_cli.action_scale}", flush=True)
+    sim_dt = env.unwrapped.cfg.sim.dt if hasattr(env.unwrapped.cfg.sim, 'dt') else 0.005
+    sim_decimation = env.unwrapped.cfg.decimation if hasattr(env.unwrapped.cfg, 'decimation') else 2
+    sim_control_hz = 1.0 / (sim_dt * sim_decimation)
+    effective_hz = sim_control_hz / args_cli.control_decimation
+    print(f"[INFO] Sim: dt={sim_dt}, decimation={sim_decimation} → {sim_control_hz:.0f}Hz control", flush=True)
+    print(f"[INFO] Control decimation: {args_cli.control_decimation} → effective {effective_hz:.1f}Hz (training data: 30Hz)", flush=True)
     sys.stdout.flush()
 
     obs, _ = env.reset()
@@ -848,7 +865,7 @@ def main():
         # Apply via env.step for several frames to settle into the pose
         init_action_env = init_action[:, :env_action_dim]
         print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
-        for _ in range(50):
+        for _ in range(100):
             obs, _, _, _, _ = env.step(init_action_env)
 
     # Isaac Sim 5.1.0 stability: render extra frames after reset
@@ -1100,15 +1117,21 @@ def main():
 
             action_tensor = torch.tensor(current_action_vec, device=env.device, dtype=torch.float32)
 
-            # Step environment
-            obs, _, terminated, truncated, _ = env.step(action_tensor)
+            # Step environment with control decimation
+            # When control_decimation > 1, we hold the same action target for multiple
+            # sim steps to match the real robot's control frequency.
+            # E.g., sim at 100Hz with training at 30Hz → hold each action for 3 sim steps.
+            for _dec_step in range(args_cli.control_decimation):
+                obs, _, terminated, truncated, _ = env.step(action_tensor)
+                step_count += 1
+                if terminated.any() or truncated.any():
+                    break
 
-            step_count += 1
             action_step_idx += 1
 
             # Periodic logging
             if step_count % 100 == 0:
-                print(f"[INFO] Step {step_count}", flush=True)
+                print(f"[INFO] Step {step_count} (action_step {action_step_idx})", flush=True)
 
             # Debug: print arm positions periodically
             if step_count % 50 == 0 and step_count <= 300:
@@ -1125,16 +1148,26 @@ def main():
                 client.reset()
                 # Re-apply training mean initial pose on reset
                 if state_stats and "mean" in state_stats:
+                    print("[INFO] Re-applying training mean initial pose after reset...", flush=True)
                     init_action = robot.data.joint_pos.clone()
                     for dof_idx, robot_idx in joint_to_dof_mapping.items():
                         if robot_idx is not None and dof_idx < len(training_mean):
                             init_action[:, robot_idx] = float(training_mean[dof_idx])
                     init_action_env = init_action[:, :env_action_dim]
-                    for _ in range(50):
+                    for _ in range(100):
                         obs, _, _, _, _ = env.step(init_action_env)
-                    for _ in range(10):
+                    # Stabilize: hold current pose
+                    for _ in range(30):
                         hold_action = robot.data.joint_pos[:, :env_action_dim].clone()
                         obs, _, _, _, _ = env.step(hold_action)
+                    # Verify pose settled near training mean
+                    settled_pos = robot.data.joint_pos.cpu().numpy()[0]
+                    la_ids = group_joint_ids.get("left_arm", [])
+                    ra_ids = group_joint_ids.get("right_arm", [])
+                    if la_ids:
+                        print(f"[INFO] After reset init - left_arm: {settled_pos[la_ids]}", flush=True)
+                    if ra_ids:
+                        print(f"[INFO] After reset init - right_arm: {settled_pos[ra_ids]}", flush=True)
                 step_count = 0
                 action_buffer = None
                 action_step_idx = 0
