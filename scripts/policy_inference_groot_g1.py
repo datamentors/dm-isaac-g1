@@ -833,11 +833,31 @@ def main():
     obs, _ = env.reset()
     client.reset()
 
+    # Override initial pose with training data mean (from statistics.json)
+    # The sim starts at zero pose, but training data has the arms already
+    # forward/raised. Setting the initial pose to training mean puts the robot
+    # in a configuration the model expects, improving inference quality.
+    state_stats = stats[embodiment_key]["state"].get("observation.state")
+    if state_stats and "mean" in state_stats:
+        training_mean = np.array(state_stats["mean"], dtype=np.float32)
+        # Build initial action from training mean using the DOF mapping
+        init_action = robot.data.joint_pos.clone()
+        for dof_idx, robot_idx in joint_to_dof_mapping.items():
+            if robot_idx is not None and dof_idx < len(training_mean):
+                init_action[:, robot_idx] = training_mean[dof_idx]
+        # Apply via env.step for several frames to settle into the pose
+        init_action_env = init_action[:, :env_action_dim]
+        print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
+        for _ in range(50):
+            obs, _, _, _, _ = env.step(init_action_env)
+
     # Isaac Sim 5.1.0 stability: render extra frames after reset
     # This allows physics to settle and camera buffers to initialize properly
+    # Maintain current joint positions (don't snap to zero)
     print("[INFO] Stabilizing simulation (30 frames)...", flush=True)
     for _ in range(30):
-        obs, _, _, _, _ = env.step(torch.zeros_like(env.action_manager.action))
+        hold_action = robot.data.joint_pos[:, :env_action_dim].clone()
+        obs, _, _, _, _ = env.step(hold_action)
 
     step_count = 0
     action_buffer = None
@@ -1103,6 +1123,18 @@ def main():
                 print(f"[INFO] Episode ended at step {step_count}. Resetting...", flush=True)
                 obs, _ = env.reset()
                 client.reset()
+                # Re-apply training mean initial pose on reset
+                if state_stats and "mean" in state_stats:
+                    init_action = robot.data.joint_pos.clone()
+                    for dof_idx, robot_idx in joint_to_dof_mapping.items():
+                        if robot_idx is not None and dof_idx < len(training_mean):
+                            init_action[:, robot_idx] = training_mean[dof_idx]
+                    init_action_env = init_action[:, :env_action_dim]
+                    for _ in range(50):
+                        obs, _, _, _, _ = env.step(init_action_env)
+                    for _ in range(10):
+                        hold_action = robot.data.joint_pos[:, :env_action_dim].clone()
+                        obs, _, _, _, _ = env.step(hold_action)
                 step_count = 0
                 action_buffer = None
                 action_step_idx = 0
