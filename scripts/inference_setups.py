@@ -173,6 +173,14 @@ class InferenceSetup:
     # Set False for scenes that already have their own objects (e.g. block stacking).
     spawn_objects: bool = True
 
+    # Joint names whose action targets should be negated before sending to the sim.
+    # This fixes sign convention mismatches between real robot and sim URDF.
+    # For example, if the real Dex3 hand uses positive values for finger curl but
+    # the sim URDF uses negative values for the same motion, the joint should be
+    # listed here. The negation is applied AFTER the model predicts the action
+    # and BEFORE sending to env.step().
+    negate_action_joints: list = field(default_factory=list)
+
     def get_cameras(self) -> list:
         """Return camera list, building from legacy fields if needed."""
         if self.cameras:
@@ -454,6 +462,17 @@ SETUPS: dict[str, InferenceSetup] = {
         ],
         hand_type="dex3",
         spawn_objects=False,  # Scene has its own RGB blocks for stacking
+        # Sign convention fix: these Dex3 hand joints have opposite sign in the sim
+        # URDF compared to the real robot training data. The model predicts positive
+        # values but the sim joint limits only allow negative (or vice versa).
+        # Negating these action targets aligns sim behavior with real robot.
+        negate_action_joints=[
+            "left_hand_middle_0_joint",   # training mean +0.91, sim range [-1.49, -0.08]
+            "left_hand_thumb_2_joint",    # training mean -0.55, sim range [+0.09, +1.66]
+            "right_hand_index_0_joint",   # training mean -0.54, sim range [+0.08, +1.49]
+            "right_hand_middle_0_joint",  # training mean -0.88, sim range [+0.08, +1.49]
+            "right_hand_thumb_2_joint",   # training mean +0.43, sim range [-1.66, -0.09]
+        ],
     ),
 }
 

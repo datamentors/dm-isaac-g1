@@ -294,6 +294,7 @@ def build_flat_observation(
     joint_to_53dof_mapping: dict = None,
     extra_camera_rgbs: dict = None,
     primary_camera_name: str = "cam_left_high",
+    negate_state_mask: np.ndarray = None,
 ) -> dict:
     """
     Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
@@ -361,6 +362,10 @@ def build_flat_observation(
                 vals[:, :robot_joints] = joint_pos
             else:
                 vals = joint_pos[:, :state_dim]
+
+        # Apply sign negation for joints with flipped sim conventions
+        if negate_state_mask is not None:
+            vals = vals * negate_state_mask[:state_dim]
 
         vals = vals[:, None, :]  # Add time dimension (B, 1, D)
         if state_horizon > 1:
@@ -847,6 +852,31 @@ def main():
         missing_indices = [k for k, v in joint_to_dof_mapping.items() if v is None]
         print(f"[INFO] Missing joint indices (padded): {missing_indices}", flush=True)
 
+    # Build sign negation masks for joints with flipped sim-vs-real conventions.
+    # Some sim URDF joints use opposite sign from the real robot training data.
+    # negate_action_mask[action_idx] = -1.0 for joints to negate, +1.0 otherwise.
+    # negate_state_mask[dof_idx] = -1.0 for the corresponding state DOF indices.
+    negate_action_mask = np.ones(env_action_dim, dtype=np.float32)
+    negate_state_mask = np.ones(total_state_dim, dtype=np.float32)
+    if setup.negate_action_joints:
+        negated = []
+        for joint_name in setup.negate_action_joints:
+            for action_idx, name in enumerate(action_joint_names):
+                if name == joint_name:
+                    negate_action_mask[action_idx] = -1.0
+                    robot_idx = action_joint_ids[action_idx]
+                    for dof_idx, mapped_robot_idx in joint_to_dof_mapping.items():
+                        if mapped_robot_idx == robot_idx:
+                            negate_state_mask[dof_idx] = -1.0
+                            break
+                    negated.append(f"{joint_name} (action[{action_idx}], dof[{dof_idx}])")
+                    break
+        print(f"[INFO] Negating {len(negated)} joint(s) for sim sign convention:", flush=True)
+        for n in negated:
+            print(f"  {n}", flush=True)
+    else:
+        negate_state_mask = None  # No negation needed — skip in build_flat_observation
+
     # Run inference loop
     print(f"[INFO] Starting inference with language command: '{language_cmd}'", flush=True)
     print(f"[INFO] Action steps per inference: {args_cli.num_action_steps} (of 30 predicted)", flush=True)
@@ -879,7 +909,11 @@ def main():
         for action_idx, robot_idx in enumerate(action_joint_ids):
             dof_idx = robot_idx_to_dof_idx.get(robot_idx)
             if dof_idx is not None and dof_idx < len(training_mean):
-                init_action_env[:, action_idx] = float(training_mean[dof_idx])
+                val = float(training_mean[dof_idx])
+                # Negate training mean for joints with flipped sim sign convention
+                if setup.negate_action_joints:
+                    val *= float(negate_action_mask[action_idx])
+                init_action_env[:, action_idx] = val
         print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
         print(f"[INFO] Training mean (arms): L_sh_pitch={training_mean[0]:.3f}, L_sh_roll={training_mean[1]:.3f}, "
               f"R_sh_pitch={training_mean[7]:.3f}, R_sh_roll={training_mean[8]:.3f}", flush=True)
@@ -1019,6 +1053,7 @@ def main():
                     joint_to_53dof_mapping=joint_to_53dof_mapping,
                     extra_camera_rgbs=extra_camera_rgbs if extra_camera_rgbs else None,
                     primary_camera_name=primary_cam.name,
+                    negate_state_mask=negate_state_mask,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
@@ -1131,7 +1166,7 @@ def main():
             for part_name in action_dof_ranges:
                 _apply_group(part_name, relative=False)
 
-            # Debug: print first few steps
+            # Debug: print first few steps (arms + finger negation)
             if step_count < 10:
                 la_action_idxs = group_action_ids.get("left_arm", [])
                 la_robot_idxs = group_joint_ids.get("left_arm", [])
@@ -1142,6 +1177,23 @@ def main():
                     print(f"[DEBUG] Step {step_count}: ABSOLUTE target[{action_step_idx}] = {arr[0]}", flush=True)
                 if la_action_idxs:
                     print(f"[DEBUG] Step {step_count}: applied_target = {current_action_vec[0, la_action_idxs]}", flush=True)
+                # Log finger joints (before negation) for debugging sign convention
+                if setup.negate_action_joints and step_count < 3:
+                    for jname in setup.negate_action_joints[:3]:
+                        aidx = action_name_to_index.get(jname)
+                        if aidx is not None:
+                            ridx = action_joint_ids[aidx]
+                            sim_val = joint_pos[0, ridx]
+                            model_val = current_action_vec[0, aidx]
+                            neg_val = model_val * negate_action_mask[aidx]
+                            print(f"[DEBUG] Negate check {jname}: sim_state={sim_val:+.4f}, "
+                                  f"model_pred={model_val:+.4f}, after_negate={neg_val:+.4f}", flush=True)
+
+            # Apply sign negation for joints with flipped sim-vs-real conventions.
+            # The model predicts actions in real-robot sign convention; we negate
+            # specific joints so the sim URDF receives the correct sign.
+            if setup.negate_action_joints:
+                current_action_vec = current_action_vec * negate_action_mask[None, :]
 
             # Clip to environment action dimension
             current_action_vec = current_action_vec[:, :env_action_dim]
@@ -1189,7 +1241,10 @@ def main():
                     for action_idx, robot_idx in enumerate(action_joint_ids):
                         dof_idx = robot_idx_to_dof_idx.get(robot_idx)
                         if dof_idx is not None and dof_idx < len(training_mean):
-                            reset_action[:, action_idx] = float(training_mean[dof_idx])
+                            val = float(training_mean[dof_idx])
+                            if setup.negate_action_joints:
+                                val *= float(negate_action_mask[action_idx])
+                            reset_action[:, action_idx] = val
                     for _ in range(100):
                         obs, _, _, _, _ = env.step(reset_action)
                     # Stabilize: hold current pose in action space order
