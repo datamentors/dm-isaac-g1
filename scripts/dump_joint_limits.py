@@ -9,34 +9,53 @@ Usage:
 """
 
 import argparse
+import os
 import sys
+from pathlib import Path
+
+# Same path setup as policy_inference_groot_g1.py
+_script_dir = Path(__file__).parent.absolute()
+_project_root = _script_dir.parent
+if str(_project_root / "src") not in sys.path:
+    sys.path.insert(0, str(_project_root / "src"))
+_unitree_sim_path = "/workspace/unitree_sim_isaaclab"
+if os.path.exists(_unitree_sim_path) and _unitree_sim_path not in sys.path:
+    sys.path.insert(0, _unitree_sim_path)
+if not os.environ.get("PROJECT_ROOT") and os.path.exists(_unitree_sim_path):
+    os.environ["PROJECT_ROOT"] = _unitree_sim_path
+
+from isaaclab.app import AppLauncher
+
+AVAILABLE_SCENES = {
+    "stack_g1_dex3": "tasks.g1_tasks.stack_rgyblock_g1_29dof_dex3.stack_rgyblock_g1_29dof_dex3_joint_env_cfg.StackRgyBlockG129DEX3BaseFixEnvCfg",
+    "pickplace_g1_dex3": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_dex3.pickplace_cylinder_g1_29dof_dex3_joint_env_cfg.PickPlaceG129DEX3JointEnvCfg",
+    "stack_g1_inspire": "tasks.g1_tasks.stack_rgyblock_g1_29dof_inspire.stack_rgyblock_g1_29dof_inspire_joint_env_cfg.StackRgyBlockG129InspireBaseFixEnvCfg",
+}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--scene", type=str, default="stack_g1_dex3",
-                    help="Scene name from AVAILABLE_SCENES")
-
-# IsaacLab CLI args
-from omni.isaac.lab.app import AppLauncher
+                    help=f"Scene name. Available: {list(AVAILABLE_SCENES.keys())}")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.headless = True
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+import importlib
 import torch
-from omni.isaac.lab.envs import ManagerBasedRLEnv
-
-sys.path.insert(0, "/workspace/unitree_sim_isaaclab")
-from dm_isaac_g1.inference.available_scenes import AVAILABLE_SCENES
+from isaaclab.envs import ManagerBasedRLEnv
 
 scene_name = args_cli.scene
-scene_entry = AVAILABLE_SCENES.get(scene_name)
-if not scene_entry:
+scene_path = AVAILABLE_SCENES.get(scene_name)
+if not scene_path:
     print(f"Unknown scene: {scene_name}")
-    print(f"Available: {list(AVAILABLE_SCENES.keys())}")
     sys.exit(1)
 
-env_cfg = scene_entry["cfg_class"]()
+module_path, class_name = scene_path.rsplit(".", 1)
+mod = importlib.import_module(module_path)
+cfg_class = getattr(mod, class_name)
+
+env_cfg = cfg_class()
 env_cfg.scene.num_envs = 1
 
 env = ManagerBasedRLEnv(cfg=env_cfg)
@@ -58,7 +77,6 @@ for i, name in enumerate(joint_names):
     hi = soft_limits[0, i, 1].item()
     rng = hi - lo
     locked = "LOCKED" if abs(rng) < 0.01 else ""
-    # Highlight hand joints
     prefix = ">>>" if "hand" in name else "   "
     print(f"{prefix}{i:<4d} {name:<40s} {lo:+10.4f} {hi:+10.4f} {rng:10.4f} {locked:>8s}")
 
