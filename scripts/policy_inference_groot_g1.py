@@ -857,24 +857,42 @@ def main():
     state_stats = stats[embodiment_key]["state"].get("observation.state")
     if state_stats and "mean" in state_stats:
         training_mean = np.array(state_stats["mean"], dtype=np.float32)
-        # Build initial action from training mean using the DOF mapping
-        init_action = robot.data.joint_pos.clone()
-        for dof_idx, robot_idx in joint_to_dof_mapping.items():
-            if robot_idx is not None and dof_idx < len(training_mean):
-                init_action[:, robot_idx] = float(training_mean[dof_idx])
-        # Apply via env.step for several frames to settle into the pose
-        init_action_env = init_action[:, :env_action_dim]
+        # Build initial action in ACTION SPACE (not robot joint space).
+        # action_joint_ids maps action_idx -> robot_joint_idx, and
+        # joint_to_dof_mapping maps dof_idx -> robot_joint_idx.
+        # We need: for each action_idx, find which dof_idx maps to the same robot_joint_idx.
+        robot_idx_to_dof_idx = {robot_idx: dof_idx for dof_idx, robot_idx in joint_to_dof_mapping.items()
+                                if robot_idx is not None}
+        init_action_env = robot.data.joint_pos[:, :env_action_dim].clone()
+        for action_idx, robot_idx in enumerate(action_joint_ids):
+            dof_idx = robot_idx_to_dof_idx.get(robot_idx)
+            if dof_idx is not None and dof_idx < len(training_mean):
+                init_action_env[:, action_idx] = float(training_mean[dof_idx])
         print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
+        print(f"[INFO] Training mean (arms): L_sh_pitch={training_mean[0]:.3f}, L_sh_roll={training_mean[1]:.3f}, "
+              f"R_sh_pitch={training_mean[7]:.3f}, R_sh_roll={training_mean[8]:.3f}", flush=True)
         for _ in range(100):
             obs, _, _, _, _ = env.step(init_action_env)
 
     # Isaac Sim 5.1.0 stability: render extra frames after reset
     # This allows physics to settle and camera buffers to initialize properly
     # Maintain current joint positions (don't snap to zero)
+    # NOTE: Build hold action in action space order (action[i] → robot[action_joint_ids[i]])
     print("[INFO] Stabilizing simulation (30 frames)...", flush=True)
     for _ in range(30):
-        hold_action = robot.data.joint_pos[:, :env_action_dim].clone()
+        hold_action = torch.zeros(1, env_action_dim, device=env.device, dtype=torch.float32)
+        for action_idx, robot_idx in enumerate(action_joint_ids):
+            hold_action[:, action_idx] = robot.data.joint_pos[:, robot_idx]
         obs, _, _, _, _ = env.step(hold_action)
+    # Log achieved pose after init
+    if state_stats and "mean" in state_stats:
+        settled = robot.data.joint_pos.cpu().numpy()[0]
+        la_ids = group_joint_ids.get("left_arm", [])
+        ra_ids = group_joint_ids.get("right_arm", [])
+        if la_ids:
+            print(f"[INFO] After init - left_arm: {settled[la_ids]}", flush=True)
+        if ra_ids:
+            print(f"[INFO] After init - right_arm: {settled[ra_ids]}", flush=True)
 
     step_count = 0
     action_buffer = None
@@ -999,8 +1017,10 @@ def main():
                 # Store action buffer and reset index
                 action_buffer = action_dict
                 action_step_idx = 0
-                # Save trajectory starting position for relative actions
-                trajectory_start_pos = joint_pos.copy()
+                # Save trajectory starting position for relative actions (in action space order)
+                trajectory_start_pos = np.zeros((1, env_action_dim), dtype=np.float32)
+                for action_idx, robot_idx in enumerate(action_joint_ids):
+                    trajectory_start_pos[:, action_idx] = joint_pos[:, robot_idx]
 
                 if not first_action_logged:
                     first_action_logged = True
@@ -1024,9 +1044,12 @@ def main():
             # Build action vector using predicted trajectory
             # Based on embodiment config (rep=ABSOLUTE, type=NON_EEF):
             # Actions are ABSOLUTE joint position targets, not deltas
-            # Initialize with ALL robot joints (env_action_dim=53), not just the 41 mapped ones.
-            # This ensures the action tensor is the correct size for env.step().
-            current_action_vec = joint_pos[:, :env_action_dim].copy()
+            # Initialize with current joint positions in ACTION SPACE order.
+            # action[i] controls robot joint action_joint_ids[i], so we read
+            # robot.data.joint_pos at those indices.
+            current_action_vec = np.zeros((1, env_action_dim), dtype=np.float32)
+            for action_idx, robot_idx in enumerate(action_joint_ids):
+                current_action_vec[:, action_idx] = joint_pos[:, robot_idx]
 
             def _get_action_at_timestep(key: str, timestep: int) -> np.ndarray | None:
                 """Get action value at specific timestep in trajectory.
@@ -1081,7 +1104,7 @@ def main():
                 if relative:
                     ref_ids = group_action_ids.get(key, [])
                     if len(ref_ids) >= d:
-                        start_vals = trajectory_start_pos[:, :env_action_dim][:, ref_ids[:d]]
+                        start_vals = trajectory_start_pos[:, ref_ids[:d]]
                     else:
                         start_vals = np.zeros((1, d), dtype=np.float32)
                     target = start_vals + arr * args_cli.action_scale
@@ -1147,18 +1170,21 @@ def main():
                 obs, _ = env.reset()
                 client.reset()
                 # Re-apply training mean initial pose on reset
+                # Use action space indexing (not robot joint space) — same as initial setup
                 if state_stats and "mean" in state_stats:
                     print("[INFO] Re-applying training mean initial pose after reset...", flush=True)
-                    init_action = robot.data.joint_pos.clone()
-                    for dof_idx, robot_idx in joint_to_dof_mapping.items():
-                        if robot_idx is not None and dof_idx < len(training_mean):
-                            init_action[:, robot_idx] = float(training_mean[dof_idx])
-                    init_action_env = init_action[:, :env_action_dim]
+                    reset_action = robot.data.joint_pos[:, :env_action_dim].clone()
+                    for action_idx, robot_idx in enumerate(action_joint_ids):
+                        dof_idx = robot_idx_to_dof_idx.get(robot_idx)
+                        if dof_idx is not None and dof_idx < len(training_mean):
+                            reset_action[:, action_idx] = float(training_mean[dof_idx])
                     for _ in range(100):
-                        obs, _, _, _, _ = env.step(init_action_env)
-                    # Stabilize: hold current pose
+                        obs, _, _, _, _ = env.step(reset_action)
+                    # Stabilize: hold current pose in action space order
                     for _ in range(30):
-                        hold_action = robot.data.joint_pos[:, :env_action_dim].clone()
+                        hold_action = torch.zeros(1, env_action_dim, device=env.device, dtype=torch.float32)
+                        for action_idx, robot_idx in enumerate(action_joint_ids):
+                            hold_action[:, action_idx] = robot.data.joint_pos[:, robot_idx]
                         obs, _, _, _, _ = env.step(hold_action)
                     # Verify pose settled near training mean
                     settled_pos = robot.data.joint_pos.cpu().numpy()[0]
