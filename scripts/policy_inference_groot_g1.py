@@ -844,7 +844,7 @@ def main():
         init_action = robot.data.joint_pos.clone()
         for dof_idx, robot_idx in joint_to_dof_mapping.items():
             if robot_idx is not None and dof_idx < len(training_mean):
-                init_action[:, robot_idx] = training_mean[dof_idx]
+                init_action[:, robot_idx] = float(training_mean[dof_idx])
         # Apply via env.step for several frames to settle into the pose
         init_action_env = init_action[:, :env_action_dim]
         print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
@@ -1128,7 +1128,7 @@ def main():
                     init_action = robot.data.joint_pos.clone()
                     for dof_idx, robot_idx in joint_to_dof_mapping.items():
                         if robot_idx is not None and dof_idx < len(training_mean):
-                            init_action[:, robot_idx] = training_mean[dof_idx]
+                            init_action[:, robot_idx] = float(training_mean[dof_idx])
                     init_action_env = init_action[:, :env_action_dim]
                     for _ in range(50):
                         obs, _, _, _, _ = env.step(init_action_env)
