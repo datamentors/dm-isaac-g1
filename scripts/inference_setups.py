@@ -144,6 +144,31 @@ class InferenceSetup:
     #   {"left_arm": (0,7), "right_arm": (7,14), "left_hand": (14,21), "right_hand": (21,28)}
     dof_layout: dict = field(default_factory=dict)
 
+    # ----- Joint Configuration -----
+    # Maps body part name → ordered list of joint names for the robot.
+    # Used to resolve joint indices from the robot articulation.
+    # If empty, the script uses G1-specific defaults (backward compat).
+    # Example:
+    #   {"left_arm": ["left_shoulder_pitch_joint", ...], "left_hand": ["left_hand_*"]}
+    joint_groups: dict = field(default_factory=dict)
+
+    # Ordered list of joint name patterns for the action space.
+    # These define which joints the action manager controls and in what order.
+    # If empty, the script auto-detects from hand type (backward compat).
+    # Supports regex patterns (e.g., "left_hand_.*").
+    action_joint_patterns: list = field(default_factory=list)
+
+    # ----- Robot Configuration -----
+    # Hand type: "dex3", "inspire", "gripper", or None for auto-detect.
+    # Controls which hand joint names to use and how to resolve them.
+    hand_type: Optional[str] = None
+
+    # Whether to fix the root link (True for manipulation, False for locomotion).
+    fix_root_link: bool = True
+
+    # Whether to disable lower body policy (True for tabletop manipulation).
+    disable_lower_body: bool = True
+
     def get_cameras(self) -> list:
         """Return camera list, building from legacy fields if needed."""
         if self.cameras:
@@ -397,6 +422,33 @@ SETUPS: dict[str, InferenceSetup] = {
             "left_hand": (14, 21),
             "right_hand": (21, 28),
         },
+        joint_groups={
+            "left_arm": [
+                "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+                "left_shoulder_yaw_joint", "left_elbow_joint",
+                "left_wrist_yaw_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
+            ],
+            "right_arm": [
+                "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+                "right_shoulder_yaw_joint", "right_elbow_joint",
+                "right_wrist_yaw_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+            ],
+            "left_hand": ["left_hand_.*"],
+            "right_hand": ["right_hand_.*"],
+        },
+        action_joint_patterns=[
+            # left arm (7 DOF)
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+            "left_shoulder_yaw_joint", "left_elbow_joint",
+            "left_wrist_yaw_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
+            # right arm (7 DOF)
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint", "right_elbow_joint",
+            "right_wrist_yaw_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+            # DEX3 hands
+            "left_hand_.*", "right_hand_.*",
+        ],
+        hand_type="dex3",
     ),
 }
 

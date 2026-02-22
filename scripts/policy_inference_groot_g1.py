@@ -228,9 +228,9 @@ except Exception as exc:
     ) from exc
 
 
-# Joint patterns for G1 action space - DEX3 hands only
-# This config is used for non-Inspire scenes (locomanipulation_g1, etc.)
-# Inspire scenes use their native action config with L_*/R_* patterns
+# Default joint patterns for G1 action space - DEX3 hands (fallback only)
+# Prefer using setup.action_joint_patterns from InferenceSetup config.
+# This constant is kept for backward compatibility with legacy setups.
 DEX3_ACTION_JOINT_PATTERNS = [
     # waist (3 DOF)
     "waist_yaw_joint",
@@ -282,6 +282,7 @@ def build_flat_observation(
     action_joint_ids: list = None,
     joint_to_53dof_mapping: dict = None,
     extra_camera_rgbs: dict = None,
+    primary_camera_name: str = "cam_left_high",
 ) -> dict:
     """
     Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
@@ -291,7 +292,7 @@ def build_flat_observation(
     2. unitree_g1: Uses "state.left_arm", "state.right_arm", etc.
 
     Args:
-        camera_rgb: Primary camera image (B, H, W, C) uint8 — used as cam_left_high
+        camera_rgb: Primary camera image (B, H, W, C) uint8 — keyed by primary_camera_name
         joint_pos: Joint positions (B, num_joints) float32
         group_joint_ids: Dict mapping group names to joint indices
         state_dims: Dict mapping state keys to expected dimensions
@@ -301,6 +302,7 @@ def build_flat_observation(
         action_joint_ids: Joint indices for action space (for new_embodiment)
         joint_to_53dof_mapping: Dict mapping DOF indices to robot joint indices (for padding)
         extra_camera_rgbs: Optional dict of additional camera images {cam_name: (B, H, W, C)}
+        primary_camera_name: Name for the primary camera in the video dict (default: "cam_left_high")
 
     Returns:
         Flat observation dictionary
@@ -313,7 +315,7 @@ def build_flat_observation(
     if video_horizon > 1:
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
 
-    video_dict = {"cam_left_high": video_obs}
+    video_dict = {primary_camera_name: video_obs}
 
     # Add extra cameras if provided (for multi-camera models like Dex3 28-DOF)
     if extra_camera_rgbs:
@@ -399,19 +401,28 @@ def main():
     if hasattr(env_cfg, 'curriculum'):
         env_cfg.curriculum = None
 
-    # Use scene's native action config for Inspire hands scene (it has proper joint patterns)
-    # Only override for DEX3 scenes
-    if "inspire" not in scene_name:
+    # Action config: use setup.action_joint_patterns if provided, otherwise auto-detect
+    if setup.action_joint_patterns:
+        # Config-driven: use exact joint patterns from setup
+        env_cfg.actions = G1Gr00tActionsCfg()
+        env_cfg.actions.joint_pos.joint_names = setup.action_joint_patterns
+    elif setup.hand_type == "inspire" or "inspire" in scene_name:
+        # Inspire hands: use scene's native action config (it has proper L_*/R_* joint patterns)
+        pass
+    else:
+        # Fallback: DEX3 default patterns
         env_cfg.actions = G1Gr00tActionsCfg()
 
-    # Fix root link for manipulation tasks (robot doesn't walk)
-    if hasattr(env_cfg.scene, 'robot') and hasattr(env_cfg.scene.robot, 'spawn'):
-        if hasattr(env_cfg.scene.robot.spawn, 'articulation_props'):
-            env_cfg.scene.robot.spawn.articulation_props.fix_root_link = True
+    # Fix root link (from setup config — True for manipulation, False for locomotion)
+    if setup.fix_root_link:
+        if hasattr(env_cfg.scene, 'robot') and hasattr(env_cfg.scene.robot, 'spawn'):
+            if hasattr(env_cfg.scene.robot.spawn, 'articulation_props'):
+                env_cfg.scene.robot.spawn.articulation_props.fix_root_link = True
 
-    # Disable lower body policy if present
-    if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
-        env_cfg.observations.lower_body_policy = None
+    # Disable lower body policy (from setup config — True for tabletop manipulation)
+    if setup.disable_lower_body:
+        if hasattr(env_cfg, 'observations') and hasattr(env_cfg.observations, 'lower_body_policy'):
+            env_cfg.observations.lower_body_policy = None
 
     # Scene layout — loaded from inference_setups.py based on --setup argument.
     # Edit inference_setups.py to add/modify object positions; no changes needed here.
@@ -573,7 +584,7 @@ def main():
     for i, name in enumerate(all_joint_names):
         print(f"  [{i}] {name}", flush=True)
 
-    # Resolve joint groups for G1
+    # Resolve joint groups — config-driven or auto-detect
     group_joint_ids: dict[str, list[int]] = {}
     group_joint_names: dict[str, list[str]] = {}
 
@@ -581,118 +592,114 @@ def main():
         ids, resolved = robot.find_joints(names, preserve_order=True)
         return ids, resolved
 
-    group_joint_ids["left_leg"], group_joint_names["left_leg"] = _resolve([
-        "left_hip_yaw_joint", "left_hip_roll_joint", "left_hip_pitch_joint",
-        "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
-    ])
-    group_joint_ids["right_leg"], group_joint_names["right_leg"] = _resolve([
-        "right_hip_yaw_joint", "right_hip_roll_joint", "right_hip_pitch_joint",
-        "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
-    ])
-    group_joint_ids["waist"], group_joint_names["waist"] = _resolve([
-        "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint"
-    ])
-    # GROOT unitree_g1 left_arm order (from training data):
-    # pitch, roll, yaw, elbow, wrist_yaw, wrist_roll, wrist_pitch
-    group_joint_ids["left_arm"], group_joint_names["left_arm"] = _resolve([
-        "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
-        "left_elbow_joint", "left_wrist_yaw_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
-    ])
-    group_joint_ids["right_arm"], group_joint_names["right_arm"] = _resolve([
-        "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
-        "right_elbow_joint", "right_wrist_yaw_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
-    ])
+    if setup.joint_groups:
+        # Config-driven: use exact joint groups from setup
+        for group_name, joint_patterns in setup.joint_groups.items():
+            group_joint_ids[group_name], group_joint_names[group_name] = _resolve(joint_patterns)
+        print(f"[INFO] Joint groups from config: {list(setup.joint_groups.keys())}", flush=True)
+    else:
+        # Auto-detect: G1-specific defaults (backward compat)
+        group_joint_ids["left_leg"], group_joint_names["left_leg"] = _resolve([
+            "left_hip_yaw_joint", "left_hip_roll_joint", "left_hip_pitch_joint",
+            "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+        ])
+        group_joint_ids["right_leg"], group_joint_names["right_leg"] = _resolve([
+            "right_hip_yaw_joint", "right_hip_roll_joint", "right_hip_pitch_joint",
+            "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+        ])
+        group_joint_ids["waist"], group_joint_names["waist"] = _resolve([
+            "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint"
+        ])
+        group_joint_ids["left_arm"], group_joint_names["left_arm"] = _resolve([
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+            "left_elbow_joint", "left_wrist_yaw_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
+        ])
+        group_joint_ids["right_arm"], group_joint_names["right_arm"] = _resolve([
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+            "right_elbow_joint", "right_wrist_yaw_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+        ])
+
+        # Hands: detect type from setup config or robot joint names
+        hand_type = setup.hand_type
+        if not hand_type:
+            # Auto-detect from joint names
+            hand_names = robot.data.joint_names
+            if any(n.startswith("left_hand_") for n in hand_names):
+                hand_type = "dex3"
+            elif any(n.startswith("L_") for n in hand_names):
+                hand_type = "inspire"
+
+        if hand_type == "dex3":
+            hand_names = robot.data.joint_names
+            left_hand_dex3 = [n for n in hand_names if n.startswith("left_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
+            right_hand_dex3 = [n for n in hand_names if n.startswith("right_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
+            group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_dex3)
+            group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_dex3)
+        else:
+            # Inspire hands — must use EXACT training order
+            group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve([
+                "L_index_proximal_joint", "L_index_intermediate_joint",
+                "L_middle_proximal_joint", "L_middle_intermediate_joint",
+                "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
+                "L_ring_proximal_joint", "L_ring_intermediate_joint",
+                "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
+                "L_thumb_intermediate_joint", "L_thumb_distal_joint",
+            ])
+            group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve([
+                "R_index_proximal_joint", "R_index_intermediate_joint",
+                "R_middle_proximal_joint", "R_middle_intermediate_joint",
+                "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
+                "R_ring_proximal_joint", "R_ring_intermediate_joint",
+                "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
+                "R_thumb_intermediate_joint", "R_thumb_distal_joint",
+            ])
 
     # Debug: Print resolved joint IDs
     print(f"[DEBUG] Group joint IDs:", flush=True)
     for k, v in group_joint_ids.items():
         print(f"  {k}: {v} -> {group_joint_names.get(k, [])}", flush=True)
 
-    # Hands: resolve in EXACT training config order (g1_inspire_53dof.py)
-    # Order matters — the 53 DOF action vector slots 29-40 (left) and 41-52 (right)
-    # are assigned positionally. Using wildcards risks alphabetical reordering.
-    #
-    # Training order (from g1_inspire_53dof.py JOINT_INDEX_RANGES):
-    #   left  [29-40]: index_proximal, index_intermediate, middle_proximal, middle_intermediate,
-    #                  pinky_proximal, pinky_intermediate, ring_proximal, ring_intermediate,
-    #                  thumb_proximal_yaw, thumb_proximal_pitch, thumb_intermediate, thumb_distal
-    #   right [41-52]: same pattern with R_ prefix
-    #
-    # DEX3 fallback uses left_hand_*/right_hand_* patterns (alphabetical is fine for those).
-    hand_names = robot.data.joint_names
-    left_hand_dex3 = [n for n in hand_names if n.startswith("left_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
-    right_hand_dex3 = [n for n in hand_names if n.startswith("right_hand_") and any(f in n for f in ["index", "middle", "thumb"])]
-
-    if left_hand_dex3:
-        # DEX3 hands — order is acceptable
-        group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve(left_hand_dex3)
-        group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve(right_hand_dex3)
+    # Build action joint patterns — config-driven or auto-detect
+    if setup.action_joint_patterns:
+        dynamic_action_patterns = list(setup.action_joint_patterns)
+        print(f"[INFO] Action joint patterns from config: {len(dynamic_action_patterns)} patterns", flush=True)
     else:
-        # Inspire hands — must use EXACT training order, not alphabetical wildcards
-        group_joint_ids["left_hand"], group_joint_names["left_hand"] = _resolve([
-            "L_index_proximal_joint", "L_index_intermediate_joint",
-            "L_middle_proximal_joint", "L_middle_intermediate_joint",
-            "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
-            "L_ring_proximal_joint", "L_ring_intermediate_joint",
-            "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
-            "L_thumb_intermediate_joint", "L_thumb_distal_joint",
-        ])
-        group_joint_ids["right_hand"], group_joint_names["right_hand"] = _resolve([
-            "R_index_proximal_joint", "R_index_intermediate_joint",
-            "R_middle_proximal_joint", "R_middle_intermediate_joint",
-            "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
-            "R_ring_proximal_joint", "R_ring_intermediate_joint",
-            "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
-            "R_thumb_intermediate_joint", "R_thumb_distal_joint",
-        ])
+        # Auto-detect from hand type
+        hand_type = setup.hand_type
+        if not hand_type:
+            hand_names = robot.data.joint_names
+            if any(n.startswith("left_hand_") for n in hand_names):
+                hand_type = "dex3"
+            else:
+                hand_type = "inspire"
 
-    # Build dynamic action joint patterns based on detected hand type
-    # Base patterns for body joints
-    dynamic_action_patterns = [
-        # waist (3 DOF)
-        "waist_yaw_joint",
-        "waist_pitch_joint",
-        "waist_roll_joint",
-        # left arm (7 DOF)
-        "left_shoulder_pitch_joint",
-        "left_shoulder_roll_joint",
-        "left_shoulder_yaw_joint",
-        "left_elbow_joint",
-        "left_wrist_yaw_joint",
-        "left_wrist_roll_joint",
-        "left_wrist_pitch_joint",
-        # right arm (7 DOF)
-        "right_shoulder_pitch_joint",
-        "right_shoulder_roll_joint",
-        "right_shoulder_yaw_joint",
-        "right_elbow_joint",
-        "right_wrist_yaw_joint",
-        "right_wrist_roll_joint",
-        "right_wrist_pitch_joint",
-    ]
+        dynamic_action_patterns = [
+            "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+            "left_shoulder_yaw_joint", "left_elbow_joint",
+            "left_wrist_yaw_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint",
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint", "right_elbow_joint",
+            "right_wrist_yaw_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+        ]
 
-    # Add hand joints based on what's available — explicit order to match training
-    if not left_hand_dex3:
-        # Inspire hands — explicit order matching training config (g1_inspire_53dof.py)
-        dynamic_action_patterns.extend([
-            "L_index_proximal_joint", "L_index_intermediate_joint",
-            "L_middle_proximal_joint", "L_middle_intermediate_joint",
-            "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
-            "L_ring_proximal_joint", "L_ring_intermediate_joint",
-            "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
-            "L_thumb_intermediate_joint", "L_thumb_distal_joint",
-            "R_index_proximal_joint", "R_index_intermediate_joint",
-            "R_middle_proximal_joint", "R_middle_intermediate_joint",
-            "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
-            "R_ring_proximal_joint", "R_ring_intermediate_joint",
-            "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
-            "R_thumb_intermediate_joint", "R_thumb_distal_joint",
-        ])
-    elif left_hand_dex3:
-        # DEX3 hands (left_hand_*, right_hand_*)
-        dynamic_action_patterns.extend([
-            "left_hand_.*", "right_hand_.*",
-        ])
+        if hand_type == "inspire":
+            dynamic_action_patterns.extend([
+                "L_index_proximal_joint", "L_index_intermediate_joint",
+                "L_middle_proximal_joint", "L_middle_intermediate_joint",
+                "L_pinky_proximal_joint", "L_pinky_intermediate_joint",
+                "L_ring_proximal_joint", "L_ring_intermediate_joint",
+                "L_thumb_proximal_yaw_joint", "L_thumb_proximal_pitch_joint",
+                "L_thumb_intermediate_joint", "L_thumb_distal_joint",
+                "R_index_proximal_joint", "R_index_intermediate_joint",
+                "R_middle_proximal_joint", "R_middle_intermediate_joint",
+                "R_pinky_proximal_joint", "R_pinky_intermediate_joint",
+                "R_ring_proximal_joint", "R_ring_intermediate_joint",
+                "R_thumb_proximal_yaw_joint", "R_thumb_proximal_pitch_joint",
+                "R_thumb_intermediate_joint", "R_thumb_distal_joint",
+            ])
+        else:
+            dynamic_action_patterns.extend(["left_hand_.*", "right_hand_.*"])
 
     # Action joint mapping
     action_joint_ids, action_joint_names = robot.find_joints(dynamic_action_patterns, preserve_order=True)
@@ -925,6 +932,7 @@ def main():
                     action_joint_ids=action_joint_ids,
                     joint_to_53dof_mapping=joint_to_53dof_mapping,
                     extra_camera_rgbs=extra_camera_rgbs if extra_camera_rgbs else None,
+                    primary_camera_name=primary_cam.name,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
