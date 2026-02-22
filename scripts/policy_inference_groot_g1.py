@@ -893,22 +893,22 @@ def main():
                 obs_data[f"cam_{cam_name}_shape"] = list(cam_rgb.shape)
                 obs_data[f"cam_{cam_name}_min_max"] = [int(cam_rgb.min()), int(cam_rgb.max())]
 
-        # Add state data
+        # Add state data (all DOF, not just first 10)
         if "state" in observation:
             for k, v in observation["state"].items():
                 arr = np.asarray(v)
                 obs_data[f"state_{k}_shape"] = list(arr.shape)
-                obs_data[f"state_{k}_sample"] = arr[0, 0, :10].tolist() if arr.ndim >= 3 else arr.flatten()[:10].tolist()
+                obs_data[f"state_{k}_all"] = arr[0, 0, :].tolist() if arr.ndim >= 3 else arr.flatten().tolist()
 
-        # Add action data if available
+        # Add action data (all DOF for first timestep)
         if action_dict:
             for k, v in action_dict.items():
                 arr = np.asarray(v)
                 obs_data[f"action_{k}_shape"] = list(arr.shape)
                 if arr.ndim >= 3:
-                    obs_data[f"action_{k}_step0"] = arr[0, 0, :10].tolist()
+                    obs_data[f"action_{k}_step0_all"] = arr[0, 0, :].tolist()
                 else:
-                    obs_data[f"action_{k}_sample"] = arr.flatten()[:10].tolist()
+                    obs_data[f"action_{k}_all"] = arr.flatten().tolist()
 
         with open(debug_dir / f"obs_{frame_idx:04d}_step_{step:06d}.json", "w") as f:
             json.dump(obs_data, f, indent=2)
