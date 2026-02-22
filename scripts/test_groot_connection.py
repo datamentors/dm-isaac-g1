@@ -4,16 +4,16 @@
 This script tests the ZeroMQ connection to the GROOT server running
 on the DGX Spark server (192.168.1.237:5555).
 
+Configured for the fine-tuned Dex3 28-DOF model with 4 cameras:
+  - cam_left_high, cam_right_high, cam_left_wrist, cam_right_wrist
+  - 28 DOF: left arm(7) + right arm(7) + left Dex3(7) + right Dex3(7)
+
 Usage:
     python scripts/test_groot_connection.py
-
-Expected output:
-    - Server health check status
-    - Test inference with dummy observation
-    - Action prediction shape and values
 """
 
 import sys
+import time
 from pathlib import Path
 
 # Add src to path for development
@@ -24,11 +24,17 @@ import numpy as np
 from dm_isaac_g1.core.config import load_config
 from dm_isaac_g1.inference.client import GrootClient
 
+# Dex3 28-DOF camera and joint layout
+CAMERA_KEYS = ["cam_left_high", "cam_right_high", "cam_left_wrist", "cam_right_wrist"]
+IMAGE_SIZE = (480, 640)  # H, W matching training data
+NUM_DOF = 28
+
 
 def main():
     """Test GROOT server connection."""
     print("=" * 60)
     print("GROOT Inference Server Connection Test")
+    print("Model: Dex3 28-DOF (4 cameras)")
     print("=" * 60)
 
     # Load config
@@ -43,108 +49,122 @@ def main():
     try:
         is_healthy = client.health_check()
         if is_healthy:
-            print("   ✓ Server is responding")
+            print("   OK - Server is responding")
         else:
-            print("   ✗ Server not responding")
+            print("   FAIL - Server not responding")
             print("\n   Make sure the GROOT server is running on Spark:")
             print("   ssh nvidia@192.168.1.237")
-            print("   docker exec -it groot-server bash")
-            print("   cd /workspace/gr00t && python gr00t/eval/run_gr00t_server.py \\")
-            print("       --model-path /workspace/gr00t/checkpoints/groot-g1-inspire-9datasets \\")
-            print("       --embodiment-tag new_embodiment --port 5555")
+            print("   docker start groot-server")
             sys.exit(1)
     except Exception as e:
-        print(f"   ✗ Connection error: {e}")
+        print(f"   FAIL - Connection error: {e}")
         sys.exit(1)
 
-    # Test inference
-    print("\n2. Test Inference...")
+    # Test inference with 4 cameras + 28 DOF
+    print("\n2. Test Inference (28 DOF, 4 cameras)...")
     try:
-        # Create dummy 53 DOF observation (G1+Inspire)
-        # Legs(12) + Waist(3) + Arms(14) + Hands(24) = 53
-        observation = np.zeros(53, dtype=np.float32)
+        # Create dummy 28 DOF observation (G1+Dex3)
+        # Left arm(7) + Right arm(7) + Left Dex3(7) + Right Dex3(7) = 28
+        observation = np.zeros(NUM_DOF, dtype=np.float32)
+        observation[0] = 0.2   # left shoulder pitch
+        observation[7] = 0.2   # right shoulder pitch
 
-        # Set some reasonable initial pose
-        # Waist slightly forward
-        observation[14] = 0.1  # waist_pitch
+        # Create 4 camera images (480x640 matching training)
+        images = {
+            key: np.random.randint(0, 255, (*IMAGE_SIZE, 3), dtype=np.uint8)
+            for key in CAMERA_KEYS
+        }
 
-        # Arms in natural position
-        observation[15] = 0.2  # left_shoulder_pitch
-        observation[22] = 0.2  # right_shoulder_pitch
+        print(f"   Observation: {observation.shape} ({NUM_DOF} DOF)")
+        print(f"   Cameras: {len(images)} x {IMAGE_SIZE[0]}x{IMAGE_SIZE[1]}")
 
-        # Create dummy image (GROOT requires video input)
-        image = np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8)
-
-        print(f"   Input observation shape: {observation.shape}")
-        print(f"   Input image shape: {image.shape}")
-
-        # Get action with receding horizon (predict 16, execute 1)
+        t0 = time.time()
         action = client.get_action(
             observation=observation,
-            image=image,
-            task="Stand ready for manipulation task",
+            images=images,
+            task="Stack the blocks on the table",
             action_horizon=16,
             execute_steps=1,
         )
+        latency = time.time() - t0
 
-        print(f"   ✓ Got action prediction!")
+        print(f"   OK - Got action prediction in {latency:.2f}s")
         print(f"   Action shape: {action.shape if hasattr(action, 'shape') else type(action)}")
 
         if isinstance(action, np.ndarray):
             print(f"   Action range: [{action.min():.4f}, {action.max():.4f}]")
             print(f"   Action mean: {action.mean():.4f}")
 
-            # Show action breakdown
-            print("\n   Action breakdown (53 DOF):")
-            print(f"   - Left leg  (0-5):   {action[0:6]}")
-            print(f"   - Right leg (6-11):  {action[6:12]}")
-            print(f"   - Waist    (12-14):  {action[12:15]}")
-            print(f"   - Left arm (15-21):  {action[15:22]}")
-            print(f"   - Right arm(22-28):  {action[22:29]}")
-            print(f"   - Left hand(29-40):  {action[29:41]}")
-            print(f"   - Right hand(41-52): {action[41:53]}")
+            # Show Dex3 28-DOF action breakdown
+            print(f"\n   Action breakdown ({NUM_DOF} DOF):")
+            print(f"   - Left arm  (0-6):   {np.array2string(action[:7], precision=4)}")
+            print(f"   - Right arm (7-13):  {np.array2string(action[7:14], precision=4)}")
+            print(f"   - Left Dex3 (14-20): {np.array2string(action[14:21], precision=4)}")
+            print(f"   - Right Dex3(21-27): {np.array2string(action[21:28], precision=4)}")
 
     except Exception as e:
-        print(f"   ✗ Inference error: {e}")
+        print(f"   FAIL - Inference error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
 
     # Test with full trajectory
-    print("\n3. Test Full Trajectory...")
+    print("\n3. Test Full Trajectory (16-step horizon)...")
     try:
+        t0 = time.time()
         result = client.get_action(
             observation=observation,
-            image=image,
+            images=images,
             task="Pick up the red block from the table",
             action_horizon=16,
             execute_steps=8,
             return_full_trajectory=True,
         )
+        latency = time.time() - t0
 
-        print(f"   ✓ Got trajectory prediction!")
+        print(f"   OK - Got trajectory in {latency:.2f}s")
         if isinstance(result, dict):
-            print(f"   - Action shape: {result['action'].shape if hasattr(result['action'], 'shape') else type(result['action'])}")
-            print(f"   - Trajectory shape: {result['trajectory'].shape if hasattr(result['trajectory'], 'shape') else type(result['trajectory'])}")
+            act = result["action"]
+            traj = result["trajectory"]
+            print(f"   - Execute action: shape={act.shape}")
+            print(f"   - Full trajectory: shape={traj.shape}")
             print(f"   - Horizon: {result.get('action_horizon', 'N/A')}")
         else:
             print(f"   - Result type: {type(result)}")
 
     except Exception as e:
-        print(f"   ✗ Trajectory error: {e}")
+        print(f"   FAIL - Trajectory error: {e}")
         import traceback
         traceback.print_exc()
+
+    # Latency test
+    print("\n4. Latency Test (3 consecutive inferences)...")
+    try:
+        latencies = []
+        for i in range(3):
+            obs = np.random.randn(NUM_DOF).astype(np.float32) * 0.1
+            imgs = {
+                key: np.random.randint(0, 255, (*IMAGE_SIZE, 3), dtype=np.uint8)
+                for key in CAMERA_KEYS
+            }
+            t0 = time.time()
+            client.get_action(observation=obs, images=imgs, task="Stack blocks")
+            dt = time.time() - t0
+            latencies.append(dt)
+            print(f"   Inference {i+1}: {dt:.2f}s")
+
+        avg = sum(latencies) / len(latencies)
+        print(f"   Average latency: {avg:.2f}s")
+
+    except Exception as e:
+        print(f"   FAIL - Latency test error: {e}")
 
     # Clean up
     client.close()
 
     print("\n" + "=" * 60)
-    print("Connection test completed successfully!")
+    print("Connection test completed!")
     print("=" * 60)
-    print("\nNext steps:")
-    print("1. Set up Isaac Sim environment on workstation")
-    print("2. Run: dm-g1 infer benchmark --env Isaac-Stack-RgyBlock-G129-Inspire-Joint")
-    print("3. Or test with: python scripts/test_isaac_sim.py")
 
 
 if __name__ == "__main__":

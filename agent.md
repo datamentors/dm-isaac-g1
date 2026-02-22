@@ -347,6 +347,7 @@ python gr00t/experiment/launch_finetune.py \
   --output-dir /workspace/checkpoints/test_run \
   --max-steps 100 \
   --save-steps 50 \
+  --save-total-limit 2 \
   --global-batch-size 8
 ```
 
@@ -369,9 +370,10 @@ nohup python gr00t/experiment/launch_finetune.py \
   --output-dir /workspace/checkpoints/groot_TASK_NAME \
   --max-steps 5000 \
   --save-steps 1000 \
+  --save-total-limit 2 \
   --global-batch-size 8 \
   --learning-rate 1e-4 \
-  --dataloader-num-workers 4 \
+  --dataloader-num-workers 0 \
   > /tmp/finetune_TASK.log 2>&1 &
 ```
 
@@ -383,17 +385,20 @@ tail -f /tmp/finetune_TASK.log
 
 ## Disk Space Management
 
+### Checkpoint Disk Budget
+Each checkpoint is **~26 GB** (model weights + optimizer state). Always use `--save-total-limit 2` to auto-rotate and keep only the last 2 checkpoints (~52 GB max). Without this flag, a 10,000-step run with save-steps=1000 creates 260 GB of checkpoints.
+
 ### Check Disk Usage
 ```bash
 df -h /workspace
 du -sh /workspace/*
+du -sh /workspace/checkpoints/*/checkpoint-*  # per-checkpoint sizes
 ```
 
 ### Safe Cleanup Targets
 - `/root/.cache/uv` - Python package cache
 - `/root/.cache/pip` - Pip cache
 - `/opt/conda/pkgs` - Conda package cache (`conda clean --all -y`)
-- Intermediate checkpoints (keep only final)
 - Test training outputs
 - Old HuggingFace model caches in `/root/.cache/huggingface/hub/`
 
@@ -416,6 +421,109 @@ git lfs install
 git clone https://huggingface.co/datasets/unitreerobotics/DATASET_NAME
 ```
 
+## Isaac-GR00T Upstream Patches
+
+GR00T N1.6 has known bugs in its LeRobot v3.0 support (HuggingFace datasets use this format). These patches are applied directly to `/workspace/Isaac-GR00T/` on the workstation and must be re-applied after any `git pull` of the upstream GR00T repo.
+
+**Tracking**: Before pulling upstream GR00T updates, always check if these bugs have been fixed: https://github.com/NVIDIA/Isaac-GR00T/issues
+
+### Patch 1: Video Backend — torchcodec default (data_config.py)
+
+**File**: `gr00t/configs/data/data_config.py`
+**Change**: `video_backend: str = "torchcodec"` (was `"ffmpeg"`)
+**Why**: The default `ffmpeg` backend uses a subprocess per frame (`ffmpeg -vf select=eq(n,idx)`) — 512+ subprocesses per batch. Extremely slow for AV1 video. `torchcodec` decodes AV1 efficiently in-process.
+**GR00T Issue**: https://github.com/NVIDIA/Isaac-GR00T/issues/342 (open)
+**Note**: requires `conda-forge ffmpeg` + `torchcodec==0.4.0+cu128` (see Dockerfile)
+
+### Patch 2: Video Frame Seek — pyav bulk decoder (video_utils.py)
+
+**File**: `gr00t/utils/video_utils.py`
+**Change**: Added `"pyav"` case to `get_frames_by_indices` and replaced ffmpeg subprocess in `get_episode_frames_bulk` with pyav sequential seek.
+**Why**: fallback for when torchcodec is unavailable; pyav handles AV1 natively.
+**GR00T Issue**: https://github.com/NVIDIA/Isaac-GR00T/issues/508 (open PR for similar)
+
+### Patch 3: Parquet File Offset Bug (lerobot_episode_loader.py)
+
+**File**: `gr00t/data/dataset/lerobot_episode_loader.py`
+**Change** (around line 320): Replace the `file_offset` subtraction with direct iloc indexing:
+
+```python
+# BEFORE (BUGGY):
+file_offset = int(full_df["index"].iloc[0]) if "index" in full_df.columns else 0
+local_from = _from_idx - file_offset  # WRONG: _from_idx is local, not global
+local_to = _to_idx - file_offset
+original_df = full_df.iloc[local_from:local_to].reset_index(drop=True)
+
+# AFTER (FIXED):
+# V3 COMPAT: dataset_from_index/to_index are local row offsets within each parquet file
+# (they reset to 0 for each new file chunk). Use directly as iloc indices.
+original_df = full_df.iloc[_from_idx:_to_idx].reset_index(drop=True)
+```
+
+**Why**: In LeRobot v3.0 datasets with multiple parquet files per chunk, `dataset_from_index` is a LOCAL offset within each file (resets to 0 for each new file). But `full_df["index"]` is a GLOBAL sequence number (e.g. 335446 for file-001). Subtracting them gives a massive negative offset → empty slice → `iloc[0]` IndexError.
+**Symptom**: `IndexError: single positional indexer is out-of-bounds` at step ~245 of training
+**GR00T Issue**: Not filed upstream — discovered by Datamentors (2026-02-21)
+
+### Patch 4: Video Timestamp File Offset (lerobot_episode_loader.py)
+
+**File**: `gr00t/data/dataset/lerobot_episode_loader.py`
+**Change** (around line 414): Fix `file_offset` for video seek:
+
+```python
+# BEFORE (BUGGY):
+file_offset = 0
+...
+# file_offset computed from parquet index — wrong for video
+
+# AFTER (FIXED):
+file_offset = 0
+if _vid_from_ts is not None:
+    file_offset = int(round(_vid_from_ts * self.fps))
+```
+
+**Why**: Video chunks in LeRobot v3.0 store multiple episodes per MP4. The start frame within the video file is `from_timestamp * fps`, not any parquet-derived offset.
+
+### Re-applying Patches After GR00T Update
+
+If `/workspace/Isaac-GR00T` is updated, check if the bugs are fixed upstream first. If not, re-apply:
+
+```bash
+# Check if patches are needed
+grep -n "file_offset" /workspace/Isaac-GR00T/gr00t/data/dataset/lerobot_episode_loader.py
+# If you see "local_from = _from_idx - file_offset", Patch 3 needs re-applying
+
+# Check video backend default
+grep "video_backend" /workspace/Isaac-GR00T/gr00t/configs/data/data_config.py
+# If "ffmpeg", Patch 1 needs re-applying
+```
+
+---
+
+## Library Management Rules (MANDATORY)
+
+**These rules are non-negotiable. Violating them makes the environment unreproducible.**
+
+1. **uv is the ONLY approved Python package manager** — use `uv pip install --system` inside conda env. Never use bare `pip install` for Python packages.
+2. **conda install** is ONLY permitted for non-Python system libraries (e.g. `conda-forge ffmpeg` for `.so` files). Always add a comment explaining why conda is needed.
+3. **No version changes without explicit approval** — even "obvious" version downgrades (e.g. `transformers`) must be asked first. Version mismatches cascade across the entire stack.
+4. **Dockerfile is the source of truth** — every package installed on the workstation must be reflected in [Dockerfile.unitree](environments/workstation/Dockerfile.unitree) and [requirements-groot.txt](environments/workstation/requirements-groot.txt) before the next container rebuild.
+5. **Pin exact versions** — no `>=` ranges for critical packages. Ranges cause reproducibility failures when upstream changes.
+
+### Critical Version Pins (DO NOT CHANGE WITHOUT APPROVAL)
+
+| Package | Pinned Version | Why |
+|---------|---------------|-----|
+| `transformers` | `==4.51.3` | GR00T's own pin; 4.52+ renames `_prepare_input_images` in Eagle3_VL; 4.57+ breaks `_attn_implementation_autoset` |
+| `tokenizers` | `==0.21.1` | Required by transformers 4.51.3 (4.22+ breaks it) |
+| `torch` | `==2.7.0+cu128` | ABI-matched to flash-attn, torchcodec, Isaac Sim |
+| `torchcodec` | `==0.4.0+cu128` | ABI-matched to torch 2.7.0; 0.10.0 has symbol mismatch |
+| `flash-attn` | `==2.8.3` | Compiled against torch 2.7.0+cu128+CUDA12.8 |
+| `av` | `==15.0.0` | 14.x has memory leak with video decoding (GR00T issue #303) |
+
+**Community confirmation on transformers==4.51.3**: Multiple GR00T users (issues #513, #525) confirm 4.51.3 is the only working version. NVIDIA's GR00T `pyproject.toml` pins exactly this version.
+
+---
+
 ## Common Issues & Solutions
 
 ### Issue: SSH Permission Denied
@@ -432,6 +540,34 @@ git clone https://huggingface.co/datasets/unitreerobotics/DATASET_NAME
 
 ### Issue: HuggingFace rate limiting (429)
 **Solution**: Use git LFS clone instead of `huggingface-cli download`
+
+### Issue: `AttributeError: _prepare_input_images` during training
+**Solution**: You have transformers > 4.51.3. Downgrade: `conda run -n unitree_sim_env uv pip install transformers==4.51.3 tokenizers==0.21.1`
+
+### Issue: Training OOM at first step
+**Solution**: Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` and reduce `--global-batch-size` (try 16 then 8).
+
+### Issue: Training stuck at step 0 for >10 minutes
+**Cause 1**: AV1 video decode deadlock — check that `video_backend = "torchcodec"` in `data_config.py` (Patch 1 above).
+**Cause 2**: Torch inductor compilation — normal wait of 5-15 min on first run. Check `ps aux | grep inductor`.
+
+### Issue: `IndexError: single positional indexer is out-of-bounds` in training
+**Cause**: LeRobot v3.0 multi-file parquet offset bug. Apply Patch 3 above to `lerobot_episode_loader.py`.
+
+### Issue: DataLoader worker killed by signal: Killed
+**Cause**: System RAM OOM from workers caching large video frames. Set `--dataloader-num-workers 0` on machines with limited RAM (e.g. 48 GB). Workers fork the main process and duplicate memory.
+
+### Issue: Training OOM at specific step (deterministic)
+**Cause**: Outlier episode with many frames (e.g. 6,791 frames × 4 cameras × 480×640 pixels). Add swap space on the host and reduce batch size to 8. The memory spike is transient and drops after the episode is processed.
+
+### Issue: Disk full during training / incomplete checkpoint
+**Cause**: Each checkpoint is ~26 GB. Without rotation, checkpoints fill the disk. Always use `--save-total-limit 2` to keep only the last 2 checkpoints.
+
+### Issue: `torchcodec` fails with `libavutil.so not found`
+**Solution**: Install conda-forge FFmpeg first: `conda run -n unitree_sim_env conda install -c conda-forge ffmpeg -y`, then reinstall torchcodec.
+
+### Issue: `undefined symbol` with torchcodec
+**Cause**: ABI mismatch — installed torchcodec 0.10.x instead of 0.4.0+cu128. Fix: `conda run -n unitree_sim_env uv pip install torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128`
 
 ## Modality Config Template
 

@@ -3,6 +3,11 @@
 Supports both synchronous and asynchronous communication with the
 GROOT inference server running on the Spark server (192.168.1.237).
 
+Current Model: Dex3 28-DOF with 4 cameras
+  - Cameras: cam_left_high, cam_right_high, cam_left_wrist, cam_right_wrist
+  - State: 28 DOF (left arm 7 + right arm 7 + left Dex3 7 + right Dex3 7)
+  - Action: 28 DOF, 16-step prediction horizon
+
 GR00T N1.6 Action Chunking:
 ---------------------------
 GR00T 1.6 uses Flow Matching with a 32-layer Diffusion Transformer (DiT) to
@@ -25,7 +30,7 @@ Protocol:
 The GROOT server uses ZeroMQ REQ/REP pattern with msgpack serialization.
 The message format is:
 - Request: {'endpoint': 'get_action', 'data': {'observation': ..., 'options': ...}}
-- Response: dict with action arrays keyed by body part (left_arm, right_arm, etc.)
+- Response: {'action': array of shape (batch, horizon, dof)}
 """
 
 import io
@@ -88,10 +93,16 @@ class GrootClient:
         ```python
         client = GrootClient(host="192.168.1.237", port=5555)
         if client.health_check():
+            images = {
+                "cam_left_high": left_high_img,
+                "cam_right_high": right_high_img,
+                "cam_left_wrist": left_wrist_img,
+                "cam_right_wrist": right_wrist_img,
+            }
             action = client.get_action(
-                observation=robot_state,
-                image=camera_image,
-                task="Fold the towel"
+                observation=robot_state,  # 28 DOF for Dex3
+                images=images,
+                task="Stack the blocks"
             )
         ```
     """
@@ -156,6 +167,7 @@ class GrootClient:
     def get_action(
         self,
         observation: np.ndarray,
+        images: Optional[dict[str, np.ndarray]] = None,
         image: Optional[np.ndarray] = None,
         task: Optional[str] = None,
         action_horizon: int = 16,
@@ -168,8 +180,12 @@ class GrootClient:
         allows configuring the action horizon at runtime for optimal performance.
 
         Args:
-            observation: Robot state observation (53 DOF for G1+Inspire).
-            image: Optional RGB image from robot camera (H, W, 3).
+            observation: Robot state observation (28 DOF for G1+Dex3).
+            images: Dict mapping camera names to RGB images (H, W, 3).
+                    Expected keys: cam_left_high, cam_right_high,
+                    cam_left_wrist, cam_right_wrist.
+            image: Deprecated. Single RGB image sent as cam_left_high only.
+                   Use `images` dict instead for multi-camera models.
             task: Optional task description for language-conditioned control.
             action_horizon: Number of steps to predict (8-16 recommended).
                            Single-step (1) causes jittering - avoid for production.
@@ -178,8 +194,8 @@ class GrootClient:
             return_full_trajectory: If True, return full predicted trajectory.
 
         Returns:
-            Action array (53 DOF) or dict with trajectory if requested.
-            If execute_steps > 1, returns array of shape (execute_steps, 53).
+            Action array (28 DOF) or dict with trajectory if requested.
+            If execute_steps > 1, returns array of shape (execute_steps, 28).
 
         Raises:
             zmq.ZMQError: If request fails.
@@ -194,7 +210,7 @@ class GrootClient:
 
         # Build observation dict for GROOT server
         # The new_embodiment config expects:
-        # - video: {'cam_left_high': image}
+        # - video: {camera_name: image_array} for each camera
         # - state: {'observation.state': state_vector}
         # - language: {'task': [[task_string]]}
         obs_dict = {
@@ -202,24 +218,31 @@ class GrootClient:
             "language": {"task": [[task]]} if task else {"task": [["Complete the task"]]},
         }
 
-        # Prepare 53 DOF observation as single state vector
-        # G1+Inspire: legs(12) + waist(3) + arms(14) + hands(24) = 53
+        # Prepare observation as single state vector
+        # Dex3 28-DOF: left arm(7) + right arm(7) + left Dex3(7) + right Dex3(7)
         if observation.ndim == 1:
             observation = observation.reshape(1, 1, -1)
         elif observation.ndim == 2:
             observation = observation.reshape(1, observation.shape[0], observation.shape[1])
 
-        # The new_embodiment config expects 'observation.state' as a single tensor
         obs_dict["state"]["observation.state"] = observation.astype(np.float32)
 
-        # Add image if provided (required for GROOT VLA model)
-        if image is not None:
+        # Add camera images (required for GROOT VLA model)
+        # Prefer `images` dict; fall back to legacy single `image` param
+        if images is not None:
+            video_dict = {}
+            for cam_name, img in images.items():
+                if img.dtype != np.uint8:
+                    img = (img * 255).astype(np.uint8)
+                if img.ndim == 3:
+                    img = img.reshape(1, 1, *img.shape)
+                video_dict[cam_name] = img
+            obs_dict["video"] = video_dict
+        elif image is not None:
             if image.dtype != np.uint8:
                 image = (image * 255).astype(np.uint8)
-            # Reshape to (batch, seq, H, W, C) for GROOT
             if image.ndim == 3:
                 image = image.reshape(1, 1, *image.shape)
-            # Use the camera key expected by the new_embodiment config
             obs_dict["video"] = {"cam_left_high": image}
 
         # Build request
@@ -364,6 +387,7 @@ class GrootClientAsync:
     async def get_action(
         self,
         observation: np.ndarray,
+        images: Optional[dict[str, np.ndarray]] = None,
         image: Optional[np.ndarray] = None,
         task: Optional[str] = None,
         action_horizon: int = 16,
@@ -372,14 +396,15 @@ class GrootClientAsync:
         """Get action from the GROOT model asynchronously.
 
         Args:
-            observation: Robot state observation.
-            image: Optional RGB image.
+            observation: Robot state observation (28 DOF for Dex3).
+            images: Dict mapping camera names to RGB images.
+            image: Deprecated. Single RGB image. Use `images` instead.
             task: Optional task description.
             action_horizon: Number of steps to predict (8-16 recommended).
             execute_steps: Number of steps to return for execution.
 
         Returns:
-            Action array. Shape (53,) if execute_steps=1, else (execute_steps, 53).
+            Action array. Shape (28,) if execute_steps=1, else (execute_steps, 28).
         """
         import asyncio
         loop = asyncio.get_event_loop()
@@ -387,6 +412,7 @@ class GrootClientAsync:
             None,
             lambda: self._sync_client.get_action(
                 observation=observation,
+                images=images,
                 image=image,
                 task=task,
                 action_horizon=action_horizon,

@@ -1,21 +1,46 @@
 """
-Inference Setup Configurations for GR00T G1 Inference
+Inference Setup Configurations for GR00T Policy Inference
 
-This module defines named experimental setups (camera + scene layout) that can be
-selected when running policy_inference_groot_g1.py via --setup <name>.
+This module defines named experimental setups that can be selected when running
+policy_inference_groot_g1.py via --setup <name>.
 
-Each setup is an InferenceSetup dataclass with:
-  - camera_parent: robot link the camera is attached to (None = use scene default d435_link)
-  - camera_pos: (x, y, z) offset from camera_parent link origin
-  - camera_rot: (w, x, y, z) ROS-convention quaternion
-  - object_pos: (x, y, z) initial position of the apple/object in world frame
-  - plate_pos:  (x, y, z) initial position of the plate in world frame
-  - description: human-readable explanation of the setup
+Each setup is an InferenceSetup dataclass that fully describes the inference
+environment: cameras, scene, DOF layout, language command, and object placement.
+Setups are robot-agnostic — the same config system supports G1 with Inspire hands,
+G1 with Dex3 hands, or any future robot/hand combination.
 
 Adding a new setup:
   1. Add an InferenceSetup instance to SETUPS dict below.
   2. Run inference with --setup <your_setup_name>.
-  3. No other changes needed.
+  3. No other changes needed — the script reads all parameters from the setup.
+
+=============================================================================
+CAMERA CONFIGURATION
+=============================================================================
+
+Cameras are defined as a list of CameraSpec entries.  The first camera in the
+list is used as the PRIMARY observation camera (mapped to "cam_left_high" by
+default — the training-data key for the main camera).
+
+Additional cameras are spawned in Isaac Sim and their images are passed to the
+model as extra_camera_rgbs.
+
+Special handling:
+  - "DUPLICATE_PRIMARY" as prim_path: the primary camera image is duplicated
+    under a different name (e.g. cam_right_high = same head camera view).
+  - camera_parent=None → use d435_link (Unitree default head camera)
+  - camera_parent="__world__" → world-fixed camera
+  - camera_parent="<link_name>" → attach to named robot link
+
+=============================================================================
+DOF LAYOUT
+=============================================================================
+
+The dof_layout field maps DOF index ranges to body part groups, enabling the
+script to correctly build state/action vectors for any DOF configuration:
+
+  28 DOF (Dex3):   arms(14) + dex3_hands(14)
+  53 DOF (Inspire): legs(12) + waist(3) + arms(14) + inspire_hands(24)
 
 =============================================================================
 SCENE COORDINATE SYSTEM — CRITICAL REFERENCE
@@ -33,43 +58,143 @@ Object reach zone (on table surface, reachable by arm):
   Y:  0.35 to 0.55   (in front of robot — toward table center)
   Z:  0.84 to 0.87   (table surface + object height)
 
-Default scene cylinder position (from base_scene_pickplace_cylindercfg.py):
-  pos = [-0.35, 0.40, 0.84]  ← this is the canonical "on table" position
-
 Camera (d435_link/front_cam):
   Parent: d435_link on robot head
   ROS quaternion: (0.5, -0.5, 0.5, -0.5) = forward-facing in robot frame
   Because robot is rotated 90° around X, "forward" in robot frame = +Y in world frame
-  The camera is already forward-facing relative to the robot — it looks toward the table.
 
 =============================================================================
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
 @dataclass
+class CameraSpec:
+    """Specification for a single camera in the inference setup.
+
+    Attributes:
+        name: Training-data camera name (e.g., "cam_left_high", "cam_left_wrist").
+              This name is used as the key in the video observation dict sent to the model.
+        prim_path: USD prim path template. Use {ENV_REGEX_NS} for env regex namespace.
+                   Special value "DUPLICATE_PRIMARY" means this camera duplicates
+                   the primary camera's image (no extra sensor spawned).
+        camera_parent: Camera mount point:
+                       None       → use d435_link (Unitree default head camera)
+                       "__world__" → world-fixed camera
+                       "<link>"   → attach to named robot link
+        pos: (x, y, z) position offset from camera_parent.
+        rot: (w, x, y, z) quaternion, ROS convention.
+        focal_length: Camera focal length in mm.
+        horizontal_aperture: Horizontal aperture in mm.
+    """
+    name: str
+    prim_path: str = ""                          # empty → use d435_link default
+    camera_parent: Optional[str] = None          # None → d435_link
+    pos: tuple = (0.0, 0.0, 0.0)
+    rot: tuple = (0.5, -0.5, 0.5, -0.5)         # default: Unitree d435 forward-facing
+    focal_length: float = 7.6
+    horizontal_aperture: float = 20.0
+
+    @property
+    def is_duplicate(self) -> bool:
+        return self.prim_path == "DUPLICATE_PRIMARY"
+
+
+@dataclass
 class InferenceSetup:
-    """Complete camera + scene layout for one inference experiment."""
+    """Complete inference configuration: cameras, scene, DOF layout, objects.
+
+    This dataclass is robot/hand/DOF-agnostic. The script reads all parameters
+    from the setup and configures itself accordingly.
+    """
 
     description: str
 
-    # Camera configuration
-    # camera_parent=None → use d435_link (the scene's built-in head camera)
-    camera_parent: Optional[str]    # Robot link name (relative to Robot prim), or None
-    camera_pos: tuple               # (x, y, z) offset from camera_parent link origin
-    camera_rot: tuple               # (w, x, y, z) quaternion, ROS convention
+    # ----- Cameras -----
+    # List of CameraSpec objects. First entry = primary camera ("cam_left_high").
+    # Additional entries are extra cameras spawned in Isaac Sim.
+    # If empty, a default d435_link camera is used (backward compat).
+    cameras: list = field(default_factory=list)
 
-    # Camera optics (defaults match Unitree D435 specs)
+    # Legacy single-camera fields (used when cameras list is empty)
+    camera_parent: Optional[str] = None
+    camera_pos: tuple = (0.0, 0.0, 0.0)
+    camera_rot: tuple = (0.5, -0.5, 0.5, -0.5)
     focal_length: float = 7.6
-    horizontal_aperture: float = 20.0  # ~75° horizontal FOV
+    horizontal_aperture: float = 20.0
+
+    # ----- Scene -----
+    # Scene name from AVAILABLE_SCENES. If set, overrides --scene CLI arg.
+    scene: Optional[str] = None
+
+    # Language command. If set, overrides --language CLI arg.
+    language: Optional[str] = None
 
     # Scene layout — initial world positions (x, y, z)
-    # Default: on the table surface, reachable by the left arm
-    object_pos: tuple = (-0.35, 0.40, 0.87)   # Apple: on table, left of center
-    plate_pos: tuple = (0.15, 0.50, 0.865)    # Plate: on table, right side away from hands
-    plate_radius: float = 0.06                 # Plate radius in meters (0.06 = 12cm diameter)
+    object_pos: tuple = (-0.35, 0.40, 0.87)
+    plate_pos: tuple = (0.15, 0.50, 0.865)
+    plate_radius: float = 0.06
+
+    # ----- DOF Layout -----
+    # Maps body part name → (start_idx, end_idx) in the flat state/action vector.
+    # If empty, the script auto-detects from statistics.json (backward compat).
+    # Example for 28 DOF Dex3:
+    #   {"left_arm": (0,7), "right_arm": (7,14), "left_hand": (14,21), "right_hand": (21,28)}
+    dof_layout: dict = field(default_factory=dict)
+
+    def get_cameras(self) -> list:
+        """Return camera list, building from legacy fields if needed."""
+        if self.cameras:
+            return self.cameras
+        # Build single-camera list from legacy fields
+        return [CameraSpec(
+            name="cam_left_high",
+            camera_parent=self.camera_parent,
+            pos=self.camera_pos,
+            rot=self.camera_rot,
+            focal_length=self.focal_length,
+            horizontal_aperture=self.horizontal_aperture,
+        )]
+
+    def get_primary_camera(self) -> CameraSpec:
+        """Return the primary (first non-duplicate) camera."""
+        for cam in self.get_cameras():
+            if not cam.is_duplicate:
+                return cam
+        # Fallback: legacy fields
+        return CameraSpec(
+            name="cam_left_high",
+            camera_parent=self.camera_parent,
+            pos=self.camera_pos,
+            rot=self.camera_rot,
+            focal_length=self.focal_length,
+            horizontal_aperture=self.horizontal_aperture,
+        )
+
+    def get_extra_cameras(self) -> list:
+        """Return extra cameras (everything except the primary, excluding duplicates that reference primary)."""
+        all_cams = self.get_cameras()
+        if len(all_cams) <= 1:
+            return []
+        # Everything after the first camera, but only physical cameras (not duplicates)
+        return [c for c in all_cams[1:] if not c.is_duplicate]
+
+    def get_duplicate_cameras(self) -> list:
+        """Return cameras that duplicate the primary camera image."""
+        return [c for c in self.get_cameras() if c.is_duplicate]
+
+
+# =============================================================================
+# Unitree D435 head camera defaults (shared by many setups)
+# =============================================================================
+_D435_HEAD = CameraSpec(
+    name="cam_left_high",
+    camera_parent=None,  # d435_link
+    pos=(0.0, 0.0, 0.0),
+    rot=(0.5, -0.5, 0.5, -0.5),
+)
 
 
 # =============================================================================
@@ -77,6 +202,10 @@ class InferenceSetup:
 # =============================================================================
 
 SETUPS: dict[str, InferenceSetup] = {
+
+    # =========================================================================
+    # G1 + Inspire hands (53 DOF) — Pick & Place
+    # =========================================================================
 
     # -------------------------------------------------------------------------
     "default": InferenceSetup(
@@ -90,7 +219,7 @@ SETUPS: dict[str, InferenceSetup] = {
         camera_pos=(0.0, 0.0, 0.0),
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.35, 0.40, 0.87),
-        plate_pos=(0.15, 0.50, 0.865),  # Further right — away from right hand start
+        plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
     ),
 
@@ -152,6 +281,21 @@ SETUPS: dict[str, InferenceSetup] = {
     ),
 
     # -------------------------------------------------------------------------
+    "training_matched": InferenceSetup(
+        description=(
+            "World-fixed camera at shoulder height (-0.15, 0.20, 1.05), 45 deg forward tilt. "
+            "d435_link head is at Z=1.234; shoulder ~Z=1.05. Moved forward Y=0.20 to sit "
+            "in front of torso like real cam_left_high. Same rotation (0.3827,-0.9239,0,0)."
+        ),
+        camera_parent="__world__",
+        camera_pos=(-0.15, 0.20, 1.05),
+        camera_rot=(0.3827, -0.9239, 0.0, 0.0),
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
+    ),
+
+    # -------------------------------------------------------------------------
     "option_b_worldcam": InferenceSetup(
         description=(
             "World-fixed camera — side-left view. "
@@ -161,7 +305,6 @@ SETUPS: dict[str, InferenceSetup] = {
         ),
         camera_parent="__world__",
         camera_pos=(-0.80, 0.40, 1.00),
-        # Same rotation as option_a: cam-Z=+X, cam-up=+Z — verified working
         camera_rot=(0.5, -0.5, 0.5, -0.5),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
@@ -177,7 +320,6 @@ SETUPS: dict[str, InferenceSetup] = {
         ),
         camera_parent="__world__",
         camera_pos=(-0.15, 1.30, 1.10),
-        # cam-Z=-Y, cam-X=-X, cam-Y=-Z: R cols=[-X,-Z,-Y], quat=(0,0,0.7071,-0.7071)
         camera_rot=(0.0, 0.0, 0.7071, -0.7071),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
@@ -193,11 +335,68 @@ SETUPS: dict[str, InferenceSetup] = {
         ),
         camera_parent="__world__",
         camera_pos=(-0.10, 0.45, 1.80),
-        # cam-Z=-Z, derived from forward-facing quat pitched down 90deg: (0,-1,0,0)
         camera_rot=(0.0, -1.0, 0.0, 0.0),
         object_pos=(-0.35, 0.40, 0.87),
         plate_pos=(0.15, 0.50, 0.865),
         plate_radius=0.06,
+    ),
+
+    # =========================================================================
+    # G1 + Dex3 hands (28 DOF) — Block Stacking
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 4 cameras (cam_left_high, cam_right_high, cam_left_wrist, cam_right_wrist)
+    # 28 DOF: left_arm(7) + right_arm(7) + left_dex3(7) + right_dex3(7)
+    # Scene: stack_g1_dex3 (block stacking with Dex3 hands)
+    # Model: groot-g1-dex3-28dof (checkpoint-10000)
+    "dex3_stack": InferenceSetup(
+        description=(
+            "G1 Dex3 28-DOF block stacking with 4 cameras. "
+            "Head camera (d435_link) = cam_left_high + cam_right_high (duplicate). "
+            "Wrist cameras on hand_camera_base_link = cam_left_wrist + cam_right_wrist."
+        ),
+        cameras=[
+            # Primary: head camera → cam_left_high
+            CameraSpec(
+                name="cam_left_high",
+                camera_parent=None,  # d435_link
+                pos=(0.0, 0.0, 0.0),
+                rot=(0.5, -0.5, 0.5, -0.5),
+            ),
+            # Duplicate head camera → cam_right_high (same image, different name)
+            CameraSpec(
+                name="cam_right_high",
+                prim_path="DUPLICATE_PRIMARY",
+            ),
+            # Left wrist camera → cam_left_wrist
+            CameraSpec(
+                name="cam_left_wrist",
+                prim_path="{ENV_REGEX_NS}/Robot/left_hand_camera_base_link/left_wrist_cam",
+                camera_parent="left_hand_camera_base_link",
+                pos=(-0.04012, 0.07441, 0.15711),
+                rot=(0.50809, 0.00539, 0.86024, 0.0424),
+            ),
+            # Right wrist camera → cam_right_wrist
+            CameraSpec(
+                name="cam_right_wrist",
+                prim_path="{ENV_REGEX_NS}/Robot/right_hand_camera_base_link/right_wrist_cam",
+                camera_parent="right_hand_camera_base_link",
+                pos=(-0.04012, -0.07441, 0.15711),
+                rot=(0.50809, -0.00539, 0.86024, -0.0424),
+            ),
+        ],
+        scene="stack_g1_dex3",
+        language="Stack the blocks",
+        object_pos=(-0.35, 0.40, 0.87),
+        plate_pos=(0.15, 0.50, 0.865),
+        plate_radius=0.06,
+        dof_layout={
+            "left_arm": (0, 7),
+            "right_arm": (7, 14),
+            "left_hand": (14, 21),
+            "right_hand": (21, 28),
+        },
     ),
 }
 
@@ -216,7 +415,18 @@ def list_setups() -> str:
     for name, setup in SETUPS.items():
         lines.append(f"  {name}")
         lines.append(f"    {setup.description}")
-        lines.append(f"    camera_parent={setup.camera_parent}, pos={setup.camera_pos}, rot={setup.camera_rot}")
+        cams = setup.get_cameras()
+        if len(cams) > 1:
+            cam_names = [c.name for c in cams]
+            lines.append(f"    cameras: {cam_names}")
+        else:
+            primary = setup.get_primary_camera()
+            lines.append(f"    camera_parent={primary.camera_parent}, pos={primary.pos}, rot={primary.rot}")
+        if setup.scene:
+            lines.append(f"    scene: {setup.scene}")
+        if setup.dof_layout:
+            total_dof = max(end for _, end in setup.dof_layout.values())
+            lines.append(f"    dof: {total_dof} ({', '.join(f'{k}:{e-s}' for k, (s, e) in setup.dof_layout.items())})")
         lines.append(f"    object_pos={setup.object_pos}, plate_pos={setup.plate_pos}")
         lines.append("")
     return "\n".join(lines)

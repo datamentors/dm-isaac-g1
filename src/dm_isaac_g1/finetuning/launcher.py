@@ -6,25 +6,33 @@ GROOT N1.6 Fine-tuning Launcher
 This module provides utilities for launching fine-tuning jobs on the GROOT model.
 The actual training is done using NVIDIA's Isaac-GR00T framework.
 
-Usage:
+Usage (single dataset):
     On the workstation with Isaac-GR00T installed:
 
     python -m dm_isaac_g1.finetuning.launcher \\
         --base-model nvidia/GR00T-N1.6-3B \\
-        --dataset /workspace/datasets/my_dataset \\
-        --config configs/g1_inspire_53dof.py \\
+        --datasets /workspace/datasets/my_dataset \\
+        --config /workspace/Isaac-GR00T/my_config.py \\
+        --output /workspace/checkpoints/my_model
+
+Usage (multiple datasets — uses launch_multi_finetune.py):
+    python -m dm_isaac_g1.finetuning.launcher \\
+        --datasets /workspace/datasets/ds1 /workspace/datasets/ds2 \\
+        --config /workspace/Isaac-GR00T/my_config.py \\
         --output /workspace/checkpoints/my_model
 
 Note:
     This launcher is a thin wrapper around the Isaac-GR00T fine-tuning system.
     The Isaac-GR00T repository must be installed at /workspace/Isaac-GR00T/
+    Single dataset → launch_finetune.py
+    Multiple datasets → launch_multi_finetune.py (accepts --dataset-paths nargs+)
 """
 
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -35,23 +43,26 @@ class FinetuneArgs:
     base_model: str = "nvidia/GR00T-N1.6-3B"
     """Path or HuggingFace ID of base model."""
 
-    dataset: str = ""
-    """Path to dataset in LeRobot format."""
+    datasets: List[str] = field(default_factory=list)
+    """One or more dataset paths in LeRobot format."""
 
     config: str = ""
-    """Path to modality config file."""
+    """Path to modality config file (copied to /workspace/Isaac-GR00T/ first)."""
 
     output: str = "./checkpoints/groot_finetuned"
     """Output directory for checkpoints."""
 
     # Training settings
-    max_steps: int = 5000
+    max_steps: int = 10000
     """Maximum training steps."""
 
-    save_steps: int = 1000
+    save_steps: int = 2000
     """Save checkpoint every N steps."""
 
-    batch_size: int = 8
+    save_total_limit: int = 2
+    """Keep only the last N checkpoints (auto-deletes older ones to save disk)."""
+
+    batch_size: int = 32
     """Global batch size (across all GPUs)."""
 
     learning_rate: float = 1e-4
@@ -90,16 +101,30 @@ class FinetuneArgs:
 def build_finetune_command(args: FinetuneArgs) -> list[str]:
     """Build the command to launch fine-tuning via Isaac-GR00T.
 
+    Uses launch_multi_finetune.py when multiple datasets are given,
+    launch_finetune.py for a single dataset.
+
     Args:
         args: Fine-tuning arguments
 
     Returns:
         Command as list of strings
     """
+    if not args.datasets:
+        raise ValueError("At least one dataset path must be provided in args.datasets")
+
+    multi = len(args.datasets) > 1
+    script = (
+        "/workspace/Isaac-GR00T/gr00t/experiment/launch_multi_finetune.py"
+        if multi
+        else "/workspace/Isaac-GR00T/gr00t/experiment/launch_finetune.py"
+    )
+    dataset_flag = "--dataset-paths" if multi else "--dataset-path"
+
     cmd = [
-        "python", "/workspace/Isaac-GR00T/gr00t/experiment/launch_finetune.py",
+        "python", script,
         "--base-model-path", args.base_model,
-        "--dataset-path", args.dataset,
+        dataset_flag, *args.datasets,
         "--embodiment-tag", args.embodiment_tag,
         "--output-dir", args.output,
         "--max-steps", str(args.max_steps),
@@ -108,6 +133,7 @@ def build_finetune_command(args: FinetuneArgs) -> list[str]:
         "--learning-rate", str(args.learning_rate),
         "--num-gpus", str(args.num_gpus),
         "--dataloader-num-workers", str(args.num_workers),
+        "--save-total-limit", str(args.save_total_limit),
     ]
 
     if args.config:
@@ -165,24 +191,26 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Launch GROOT fine-tuning",
+        description="Launch GROOT fine-tuning (single or multi-dataset)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
     # Required
     parser.add_argument("--base-model", default="nvidia/GR00T-N1.6-3B",
                        help="Base model path or HuggingFace ID")
-    parser.add_argument("--dataset", required=True,
-                       help="Dataset path")
+    parser.add_argument("--datasets", nargs="+", required=True,
+                       help="One or more dataset paths (space-separated)")
     parser.add_argument("--config", required=True,
-                       help="Modality config file path")
+                       help="Modality config file path on the workstation")
     parser.add_argument("--output", default="./checkpoints/groot_finetuned",
                        help="Output directory")
 
     # Training
-    parser.add_argument("--max-steps", type=int, default=5000)
-    parser.add_argument("--save-steps", type=int, default=1000)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--max-steps", type=int, default=10000)
+    parser.add_argument("--save-steps", type=int, default=2000)
+    parser.add_argument("--save-total-limit", type=int, default=2,
+                       help="Keep only the last N checkpoints")
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -203,11 +231,12 @@ def main():
 
     ft_args = FinetuneArgs(
         base_model=args.base_model,
-        dataset=args.dataset,
+        datasets=args.datasets,
         config=args.config,
         output=args.output,
         max_steps=args.max_steps,
         save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         num_gpus=args.num_gpus,

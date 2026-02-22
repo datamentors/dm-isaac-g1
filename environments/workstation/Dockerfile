@@ -70,6 +70,17 @@ RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovn
     rm /tmp/turbovnc.deb
 ENV PATH="/opt/TurboVNC/bin:${PATH}"
 
+# Install Google Chrome and XFCE terminal for VNC desktop
+RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O /tmp/chrome.deb && \
+    apt-get update && apt-get install -y --no-install-recommends /tmp/chrome.deb xfce4-terminal && \
+    rm /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
+
+# Desktop shortcuts for VNC
+RUN mkdir -p /root/Desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=Google Chrome\nExec=google-chrome --no-sandbox --disable-gpu\nIcon=google-chrome\nTerminal=false\n' > /root/Desktop/chrome.desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nTerminal=false\n' > /root/Desktop/terminal.desktop && \
+    chmod +x /root/Desktop/*.desktop
+
 # Install AWS CLI v2 for ECR image push
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \

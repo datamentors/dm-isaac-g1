@@ -3,6 +3,12 @@
 .env.local
 *.env
 
+# Debug frames and inference outputs (kept outside repo)
+debug_frames/
+*.png
+*.jpg
+*.jpeg
+
 # Python
 __pycache__/
 *.py[cod]

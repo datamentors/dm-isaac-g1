@@ -341,3 +341,83 @@ To monitor:
 ssh datamentors@192.168.1.205
 docker exec isaac-sim bash -c 'tail -50 /tmp/finetune_teleop.log'
 ```
+
+---
+
+## Session: 2026-02-21 — Dex3 28 DOF Fine-tuning
+
+### Objective
+Fine-tune GR00T N1.6 on native Dex3 28-DOF datasets (BlockStacking + ToastedBread) from HuggingFace. These are in LeRobot v3.0 format (AV1 video + chunked parquet).
+
+### Datasets
+| Dataset | HF Repo | Episodes | Format |
+|---------|---------|---------|--------|
+| G1_Dex3_BlockStacking_Dataset | unitreerobotics/G1_Dex3_BlockStacking_Dataset | 301 | LeRobot v3.0 |
+| G1_Dex3_ToastedBread_Dataset | unitreerobotics/G1_Dex3_ToastedBread_Dataset | 418 | LeRobot v3.0 |
+
+**Location on workstation**: `/workspace/datasets/dex3_raw/`
+
+### Modality Config
+Created `/workspace/Isaac-GR00T/g1_dex3_28dof_config.py`:
+- State: `observation.state` (28 DOF: 7 left arm + 7 right arm + 7 left Dex3 + 7 right Dex3)
+- Action: `action` (28 DOF), 16-step chunk
+- Video: `cam_left_high`, `cam_right_high`, `cam_left_wrist`, `cam_right_wrist`
+- Language: `task`
+- Embodiment: `NEW_EMBODIMENT`
+
+### Bugs Encountered and Fixed
+
+All bugs are in Isaac-GR00T's LeRobot v3.0 compatibility code (never tested with real v3.0 datasets before). See `agent.md` → "Isaac-GR00T Upstream Patches" for full patch details and re-application instructions.
+
+| Bug | File | Symptom | Fix |
+|-----|------|---------|-----|
+| Wrong video backend (ffmpeg subprocess per frame) | `data_config.py` | Training stuck at step 0 | Set `video_backend = "torchcodec"` |
+| transformers 4.57.6 incompatible | conda env | `AttributeError: _prepare_input_images` | Downgraded to `transformers==4.51.3 tokenizers==0.21.1` |
+| Parquet file_offset bug | `lerobot_episode_loader.py` | `IndexError: out-of-bounds` at step ~245 | Use `_from_idx:_to_idx` directly (local offsets, not global) |
+| Video timestamp seek | `lerobot_episode_loader.py` | Wrong frames loaded | Use `from_timestamp * fps` for video file offset |
+| CUDA OOM at first step | training launch | `torch.OutOfMemoryError` | Added `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, reduced batch to 16 |
+| Worker OOM kill | training launch | `signal: Killed` at step ~111 | Reduced `--dataloader-num-workers` from 4 to 2 |
+| Multi-file parquet metadata bug | `lerobot_episode_loader.py` | `IndexError` at ep 396 (data_file_index wrong) | Patch 3b: fall back to episode_index filter when iloc exceeds file length |
+| System RAM OOM at step 1252 | training launch | OOM killer at outlier episode (6791 frames) | Reduced batch to 8, workers to 0, added 32 GB swap |
+| Disk full at step 4000 | checkpoint save | 0 bytes free (3 checkpoints × 26 GB) | Added `--save-total-limit 2` to auto-rotate checkpoints |
+
+### Key Decisions
+- **transformers==4.51.3** is the community-confirmed working version (GR00T issues #513, #525). NVIDIA's own `pyproject.toml` pins this exact version.
+- **batch-size 8** — needed due to 48 GB system RAM limit and outlier episodes with 6791 frames (4 cameras × 480×640 = ~25 GB peak)
+- **0 dataloader workers** — workers fork the process and duplicate memory; with only 48 GB RAM this causes OOM
+- **save-total-limit 2** — each checkpoint is ~26 GB (model + optimizer); without rotation, disk fills up after 3-4 saves
+- **32 GB swap** added to host (`/swapfile2`) to absorb transient memory spikes from outlier episodes
+
+### Training Command (Final Working)
+```bash
+docker exec -d dm-workstation bash -c 'cd /workspace/Isaac-GR00T && conda run --no-capture-output -n unitree_sim_env bash -c "
+PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+python gr00t/experiment/launch_multi_finetune.py \
+  --base-model-path nvidia/GR00T-N1.6-3B \
+  --dataset-paths /workspace/datasets/dex3_raw/G1_Dex3_BlockStacking_Dataset \
+                  /workspace/datasets/dex3_raw/G1_Dex3_ToastedBread_Dataset \
+  --embodiment-tag NEW_EMBODIMENT \
+  --modality-config-path /workspace/Isaac-GR00T/g1_dex3_28dof_config.py \
+  --output-dir /workspace/checkpoints/groot_g1_dex3_28dof \
+  --max-steps 10000 \
+  --save-steps 1000 \
+  --save-total-limit 2 \
+  --global-batch-size 8 \
+  --learning-rate 1e-4 \
+  --num-gpus 1 \
+  --dataloader-num-workers 0
+" > /tmp/finetune_dex3_28dof.log 2>&1'
+```
+
+### Environment Changes (registered in Dockerfile)
+| Change | Why | Dockerfile Location |
+|--------|-----|-------------------|
+| `transformers==4.51.3` + `tokenizers==0.21.1` | GR00T's required version; later versions break Eagle3_VL | requirements-groot.txt |
+| `conda-forge ffmpeg` | Provides `libavutil.so.5x` needed by torchcodec | Dockerfile.unitree groot stage |
+| `torchcodec==0.4.0+cu128` | AV1 video decoder for LeRobot v3.0 datasets | Dockerfile.unitree groot stage |
+| All pip installs → `uv pip install --system` | Mandatory package manager policy | Dockerfile.unitree |
+
+### Status
+Training in progress — target 10000 steps, output `/workspace/checkpoints/groot_g1_dex3_28dof/`
+Upload target: `datamentorshf/groot-g1-dex3-28dof` on HuggingFace

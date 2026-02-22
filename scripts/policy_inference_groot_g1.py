@@ -4,54 +4,41 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-G1 Robot Policy Inference with GR00T N1.6
+GR00T Policy Inference with Isaac Sim
 
-This script runs the Unitree G1 robot in Isaac Sim with GR00T policy inference.
-It uses nested dictionary format for observations as required by the GR00T server.
+Config-driven inference for humanoid robots (G1 + Inspire, G1 + Dex3, etc.)
+using GR00T N1.6 VLA models. Supports multiple robots, DOF layouts, camera
+configurations, and scenes — all controlled via inference_setups.py.
 
-Camera and Scene Configuration:
-    Camera/scene setups are defined in inference_setups.py (same directory).
-    Select a setup with --setup <name>.  Default: "default" (d435_link top-down).
+Setup Configuration:
+    Each setup in inference_setups.py defines everything needed for inference:
+    - Cameras (single or multi-camera, including wrist cameras)
+    - Scene (pick-place, block stacking, etc.)
+    - DOF layout (28-DOF Dex3, 53-DOF Inspire, etc.)
+    - Language command
+    - Object placement
 
-    Available setups (run with --list_setups to print all):
-      default     Original d435_link camera (top-down view, not training-matched)
-      option_a    Torso chest camera, forward-facing ~15° pitch (matches cam_left_high)
-      option_a_v2 Same as option_a but 30° pitch (more table visible)
-      option_a_v3 Higher mount, 20° pitch, objects further forward
-      option_a_left  Apple placed further left
-
-    Add new setups in inference_setups.py without touching this script.
+    Run with --list_setups to see all available setups.
+    Add new setups in inference_setups.py — no changes needed here.
 
 Usage:
-    # Ensure GROOT server is running with NEW_EMBODIMENT tag
-    # On the DGX Spark:
-    #   docker exec -d groot-inference bash -c 'cd /workspace/gr00t && \
-    #     python gr00t/eval/run_gr00t_server.py \
-    #       --model-path /workspace/checkpoints/groot-g1-inspire-9datasets \
-    #       --embodiment-tag NEW_EMBODIMENT --port 5555'
-
-    # Run with default (original) setup:
+    # Dex3 28-DOF block stacking (4 cameras, scene auto-selected):
     PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
-    GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
-    conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
+    GR00T_STATS=/workspace/checkpoints/groot_g1_dex3_28dof/checkpoint-10000/statistics.json \
+    python scripts/policy_inference_groot_g1.py \
         --server 192.168.1.237:5555 \
-        --scene pickplace_g1_inspire \
-        --language "Pick up the red apple and place it on the plate" \
-        --action_scale 1.0 \
+        --setup dex3_stack \
         --enable_cameras
 
-    # Run with Option A (training-matched forward-facing camera):
+    # Inspire 53-DOF pick-place (single camera):
     PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
     GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
-    conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \
+    python scripts/policy_inference_groot_g1.py \
         --server 192.168.1.237:5555 \
+        --setup default \
         --scene pickplace_g1_inspire \
-        --setup option_a \
         --language "Pick up the red apple and place it on the plate" \
-        --action_scale 1.0 \
-        --enable_cameras \
-        --save_debug_frames \
-        --debug_dir /tmp/groot_debug_option_a
+        --enable_cameras
 """
 
 import argparse
@@ -73,6 +60,11 @@ _unitree_sim_path = "/workspace/unitree_sim_isaaclab"
 if os.path.exists(_unitree_sim_path) and _unitree_sim_path not in sys.path:
     sys.path.insert(0, _unitree_sim_path)
 
+# Set PROJECT_ROOT so scene configs can resolve USD asset paths (e.g. PackingTable.usd).
+# Scene configs use os.environ.get("PROJECT_ROOT") to build asset paths.
+if not os.environ.get("PROJECT_ROOT") and os.path.exists(_unitree_sim_path):
+    os.environ["PROJECT_ROOT"] = _unitree_sim_path
+
 from isaaclab.app import AppLauncher
 
 # Available scenes for G1 robot
@@ -85,6 +77,7 @@ AVAILABLE_SCENES = {
     "stack_g1_inspire": "tasks.g1_tasks.stack_rgyblock_g1_29dof_inspire.stack_rgyblock_g1_29dof_inspire_joint_env_cfg.StackRgyBlockG129InspireBaseFixEnvCfg",
     # G1 with DEX3 hands (from unitree_sim_isaaclab)
     "pickplace_g1_dex3": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_dex3.pickplace_cylinder_g1_29dof_dex3_joint_env_cfg.PickPlaceG129DEX3JointEnvCfg",
+    "stack_g1_dex3": "tasks.g1_tasks.stack_rgyblock_g1_29dof_dex3.stack_rgyblock_g1_29dof_dex3_joint_env_cfg.StackRgyBlockG129DEX3BaseFixEnvCfg",
     # IsaacLab locomotion tasks (simplified robot, no d435_link)
     "locomotion_g1_flat": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg.G1FlatEnvCfg",
     "locomotion_g1_rough": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg.G1RoughEnvCfg",
@@ -93,9 +86,8 @@ AVAILABLE_SCENES = {
 # CLI arguments
 parser = argparse.ArgumentParser(description="G1 Robot with GR00T N1.6 Policy Inference")
 parser.add_argument("--server", type=str, required=True, help="ZMQ server endpoint, e.g. 192.168.1.237:5555")
-parser.add_argument("--scene", type=str, default="locomanipulation_g1",
-                    choices=list(AVAILABLE_SCENES.keys()),
-                    help=f"Scene/environment to use. Available: {', '.join(AVAILABLE_SCENES.keys())}")
+parser.add_argument("--scene", type=str, default="pickplace_g1_inspire",
+                    help=f"Scene/environment to use (can be overridden by setup). Available: {', '.join(AVAILABLE_SCENES.keys())}")
 parser.add_argument("--api_token", type=str, default=None, help="Optional API token for the inference server.")
 parser.add_argument("--language", type=str, default="Pick up the red apple and place it on the plate", help="Language command for the task.")
 parser.add_argument("--video_h", type=int, default=480, help="Camera image height.")
@@ -141,7 +133,7 @@ if unknown:
     print(f"[WARN] Ignoring unknown args: {unknown}", flush=True)
 
 # Import inference setups (must happen after path setup above, before AppLauncher)
-from inference_setups import get_setup, list_setups, SETUPS  # noqa: E402
+from inference_setups import get_setup, list_setups, SETUPS, CameraSpec  # noqa: E402
 
 # Handle --list_setups early exit (no Isaac Sim needed)
 if args_cli.list_setups:
@@ -289,16 +281,17 @@ def build_flat_observation(
     state_horizon: int = 1,
     action_joint_ids: list = None,
     joint_to_53dof_mapping: dict = None,
+    extra_camera_rgbs: dict = None,
 ) -> dict:
     """
     Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
 
     Supports two formats:
-    1. new_embodiment: Uses "observation.state" as concatenated 53-DOF vector
+    1. new_embodiment (28 or 53 DOF): Uses "observation.state" as concatenated vector
     2. unitree_g1: Uses "state.left_arm", "state.right_arm", etc.
 
     Args:
-        camera_rgb: Camera image (B, H, W, C) uint8
+        camera_rgb: Primary camera image (B, H, W, C) uint8 — used as cam_left_high
         joint_pos: Joint positions (B, num_joints) float32
         group_joint_ids: Dict mapping group names to joint indices
         state_dims: Dict mapping state keys to expected dimensions
@@ -306,7 +299,8 @@ def build_flat_observation(
         video_horizon: Temporal horizon for video (usually 1)
         state_horizon: Temporal horizon for state (usually 1)
         action_joint_ids: Joint indices for action space (for new_embodiment)
-        joint_to_53dof_mapping: Dict mapping 53 DOF indices to robot joint indices (for padding)
+        joint_to_53dof_mapping: Dict mapping DOF indices to robot joint indices (for padding)
+        extra_camera_rgbs: Optional dict of additional camera images {cam_name: (B, H, W, C)}
 
     Returns:
         Flat observation dictionary
@@ -314,11 +308,22 @@ def build_flat_observation(
     batch_size = camera_rgb.shape[0]
     observation = {}
 
-    # Video: nested dict format {"video": {"cam_left_high": (B, T, H, W, C)}}
+    # Video: nested dict format {"video": {"cam_name": (B, T, H, W, C)}}
     video_obs = camera_rgb[:, None, ...]  # Add time dimension
     if video_horizon > 1:
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
-    observation["video"] = {"cam_left_high": video_obs}
+
+    video_dict = {"cam_left_high": video_obs}
+
+    # Add extra cameras if provided (for multi-camera models like Dex3 28-DOF)
+    if extra_camera_rgbs:
+        for cam_name, cam_rgb in extra_camera_rgbs.items():
+            cam_obs = cam_rgb[:, None, ...]
+            if video_horizon > 1:
+                cam_obs = np.repeat(cam_obs, video_horizon, axis=1)
+            video_dict[cam_name] = cam_obs
+
+    observation["video"] = video_dict
 
     # Check if using new_embodiment format (observation.state as single key)
     if "observation.state" in state_dims:
@@ -326,14 +331,12 @@ def build_flat_observation(
         # Use nested dict format {"state": {"observation.state": (B, T, D)}}
         state_dim = state_dims["observation.state"]
 
-        # Build 53 DOF state vector with proper joint mapping
+        # Build state vector with proper joint mapping
         if joint_to_53dof_mapping is not None:
-            # Use the mapping to construct 53 DOF state
             vals = np.zeros((batch_size, state_dim), dtype=np.float32)
             for dof_idx, robot_joint_idx in joint_to_53dof_mapping.items():
                 if robot_joint_idx is not None and robot_joint_idx < joint_pos.shape[1]:
                     vals[:, dof_idx] = joint_pos[:, robot_joint_idx]
-                # else: leave as zero (for missing hand joints)
         elif action_joint_ids is not None and len(action_joint_ids) >= state_dim:
             # Use action joint ordering for state
             vals = joint_pos[:, action_joint_ids[:state_dim]]
@@ -382,9 +385,13 @@ def main():
     setup = get_setup(args_cli.setup)
     print(f"[INFO] Inference setup '{args_cli.setup}': {setup.description}", flush=True)
 
-    # Load environment configuration dynamically based on --scene argument
-    print(f"[INFO] Loading scene: {args_cli.scene}", flush=True)
-    EnvCfgClass = load_env_cfg_class(args_cli.scene)
+    # Apply setup overrides for scene and language
+    scene_name = setup.scene or args_cli.scene
+    language_cmd = setup.language or args_cli.language
+
+    # Load environment configuration dynamically
+    print(f"[INFO] Loading scene: {scene_name}", flush=True)
+    EnvCfgClass = load_env_cfg_class(scene_name)
     env_cfg = EnvCfgClass()
     env_cfg.scene.num_envs = 1
 
@@ -394,7 +401,7 @@ def main():
 
     # Use scene's native action config for Inspire hands scene (it has proper joint patterns)
     # Only override for DEX3 scenes
-    if args_cli.scene != "pickplace_g1_inspire":
+    if "inspire" not in scene_name:
         env_cfg.actions = G1Gr00tActionsCfg()
 
     # Fix root link for manipulation tasks (robot doesn't walk)
@@ -439,34 +446,25 @@ def main():
         ),
     )
 
-    # Camera — configured from the selected inference setup.
-    #
-    # Three modes depending on setup.camera_parent:
-    #   None           → use d435_link (scene's built-in head camera, Unitree default)
-    #   "__world__"    → world-fixed camera; pos/rot are absolute world coordinates
-    #                    (camera doesn't move with robot — stable across all steps)
-    #   "<link_name>"  → attach to named robot link (moves with that link)
-    #
-    # World-fixed camera note: prim path outside Robot hierarchy so it never moves.
-    # Position (x,y,z) is absolute world position; rot is world-frame orientation.
-    if setup.camera_parent is None:
-        # Default: use the scene's built-in d435_link camera
-        camera_prim = "{ENV_REGEX_NS}/Robot/d435_link/front_cam"
-        cam_pos = (0.0, 0.0, 0.0)
-        cam_rot = (0.5, -0.5, 0.5, -0.5)
-    elif setup.camera_parent == "__world__":
-        # World-fixed camera: placed at absolute world position, never moves
-        camera_prim = "{ENV_REGEX_NS}/inference_cam_world"
-        cam_pos = setup.camera_pos    # absolute world position (x, y, z)
-        cam_rot = setup.camera_rot    # world-frame orientation (w, x, y, z)
-    else:
-        # Robot-link-attached camera
-        camera_prim = f"{{ENV_REGEX_NS}}/Robot/{setup.camera_parent}/inference_cam"
-        cam_pos = setup.camera_pos
-        cam_rot = setup.camera_rot
+    # Camera setup — config-driven from InferenceSetup
+    # Supports single camera (legacy) and multi-camera (new CameraSpec list)
+    primary_cam = setup.get_primary_camera()
+    extra_cam_specs = setup.get_extra_cameras()
+    duplicate_cam_specs = setup.get_duplicate_cameras()
 
-    print(f"[INFO] Camera prim: {camera_prim}", flush=True)
-    print(f"[INFO] Camera pos={cam_pos}, rot={cam_rot}", flush=True)
+    def _resolve_camera_prim(cam_spec):
+        """Resolve prim path and offset for a CameraSpec."""
+        if cam_spec.prim_path:
+            return cam_spec.prim_path, cam_spec.pos, cam_spec.rot
+        if cam_spec.camera_parent is None:
+            return "{ENV_REGEX_NS}/Robot/d435_link/front_cam", (0.0, 0.0, 0.0), (0.5, -0.5, 0.5, -0.5)
+        if cam_spec.camera_parent == "__world__":
+            return "{ENV_REGEX_NS}/inference_cam_world", cam_spec.pos, cam_spec.rot
+        return f"{{ENV_REGEX_NS}}/Robot/{cam_spec.camera_parent}/inference_cam", cam_spec.pos, cam_spec.rot
+
+    # Primary camera (front_camera)
+    camera_prim, cam_pos, cam_rot = _resolve_camera_prim(primary_cam)
+    print(f"[INFO] Primary camera '{primary_cam.name}': prim={camera_prim}, pos={cam_pos}, rot={cam_rot}", flush=True)
 
     env_cfg.scene.front_camera = CameraCfg(
         prim_path=camera_prim,
@@ -475,9 +473,9 @@ def main():
         width=args_cli.video_w,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=setup.focal_length,
+            focal_length=primary_cam.focal_length,
             focus_distance=400.0,
-            horizontal_aperture=setup.horizontal_aperture,
+            horizontal_aperture=primary_cam.horizontal_aperture,
             clipping_range=(0.1, 1.0e5),
         ),
         offset=CameraCfg.OffsetCfg(
@@ -486,6 +484,36 @@ def main():
             convention="ros",
         ),
     )
+
+    # Extra cameras (wrist cameras, etc.) — spawned as additional scene sensors
+    extra_camera_names = []
+    for i, cam_spec in enumerate(extra_cam_specs):
+        attr_name = f"extra_cam_{i}"
+        extra_camera_names.append((attr_name, cam_spec.name))
+        ecam_prim, ecam_pos, ecam_rot = _resolve_camera_prim(cam_spec)
+        print(f"[INFO] Extra camera '{cam_spec.name}': prim={ecam_prim}, pos={ecam_pos}, rot={ecam_rot}", flush=True)
+        setattr(env_cfg.scene, attr_name, CameraCfg(
+            prim_path=ecam_prim,
+            update_period=0.02,
+            height=args_cli.video_h,
+            width=args_cli.video_w,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=cam_spec.focal_length,
+                focus_distance=400.0,
+                horizontal_aperture=cam_spec.horizontal_aperture,
+                clipping_range=(0.1, 1.0e5),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=ecam_pos,
+                rot=ecam_rot,
+                convention="ros",
+            ),
+        ))
+
+    # Log duplicate cameras (these reuse primary image under a different name)
+    for cam_spec in duplicate_cam_specs:
+        print(f"[INFO] Duplicate camera '{cam_spec.name}': copies primary '{primary_cam.name}'", flush=True)
 
     env_cfg.sim.device = args_cli.device
     if args_cli.device == "cpu":
@@ -497,6 +525,12 @@ def main():
     robot = env.scene["robot"]
     camera = env.scene["front_camera"]
 
+    # Retrieve extra camera sensors
+    extra_cameras = {}
+    for attr_name, cam_name in extra_camera_names:
+        extra_cameras[cam_name] = env.scene[attr_name]
+        print(f"[INFO] Extra camera sensor '{cam_name}' ready", flush=True)
+
     print(f"[INFO] Environment created with action dim: {env_action_dim}", flush=True)
 
     # Debug: Print robot and object positions
@@ -507,7 +541,7 @@ def main():
         obj_pos = obj.data.root_pos_w.detach().cpu().numpy()
         print(f"[DEBUG] Object position (world): {obj_pos[0]}", flush=True)
     # Camera info (from selected setup)
-    print(f"[DEBUG] Camera setup: {args_cli.setup}, parent={setup.camera_parent}, pos={setup.camera_pos}", flush=True)
+    print(f"[DEBUG] Camera setup: {args_cli.setup}, primary={primary_cam.name}, extras={[c.name for c in extra_cam_specs]}", flush=True)
 
     # Print camera world pose so we can hardcode it for the world-fixed camera setup.
     # This gives the exact pos/quat of d435_link/front_cam in world frame at step 0,
@@ -710,41 +744,63 @@ def main():
     state_dims = {k: len(v["min"]) for k, v in stats[embodiment_key]["state"].items()}
     print(f"[INFO] State dimensions: {state_dims}", flush=True)
 
-    # Build 53 DOF mapping: maps each position in 53 DOF state to robot joint index
-    # 53 DOF layout: left_leg(0-5), right_leg(6-11), waist(12-14), left_arm(15-21),
-    #                right_arm(22-28), left_inspire_hand(29-40), right_inspire_hand(41-52)
-    joint_to_53dof_mapping = {}
-    dof_offset = 0
+    # Determine DOF layout — prefer setup config, fallback to statistics.json auto-detect
+    total_state_dim = state_dims.get("observation.state", 53)
 
-    # Map body parts to their 53 DOF index ranges
-    body_part_ranges = [
-        ("left_leg", 0, 6),
-        ("right_leg", 6, 12),
-        ("waist", 12, 15),
-        ("left_arm", 15, 22),
-        ("right_arm", 22, 29),
-        ("left_hand", 29, 41),  # Inspire hands - may be missing in Isaac Sim
-        ("right_hand", 41, 53),
-    ]
+    if setup.dof_layout:
+        # Config-driven DOF layout (from InferenceSetup)
+        body_part_ranges = [
+            (part_name, start, end)
+            for part_name, (start, end) in setup.dof_layout.items()
+        ]
+        config_total = max(end for _, _, end in body_part_ranges)
+        print(f"[INFO] Using config DOF layout: {config_total} DOF ({', '.join(f'{n}:{e-s}' for n, s, e in body_part_ranges)})", flush=True)
+    elif total_state_dim == 28:
+        # Auto-detect: 28 DOF Dex3 layout (arms + hands only, no legs/waist)
+        body_part_ranges = [
+            ("left_arm", 0, 7),
+            ("right_arm", 7, 14),
+            ("left_hand", 14, 21),
+            ("right_hand", 21, 28),
+        ]
+        print(f"[INFO] Auto-detected 28-DOF Dex3 mapping (arms + Dex3 hands)", flush=True)
+    else:
+        # Auto-detect: 53 DOF Inspire layout (full body)
+        body_part_ranges = [
+            ("left_leg", 0, 6),
+            ("right_leg", 6, 12),
+            ("waist", 12, 15),
+            ("left_arm", 15, 22),
+            ("right_arm", 22, 29),
+            ("left_hand", 29, 41),
+            ("right_hand", 41, 53),
+        ]
+        print(f"[INFO] Auto-detected 53-DOF Inspire mapping (full body)", flush=True)
 
+    joint_to_dof_mapping = {}
     for part_name, start_idx, end_idx in body_part_ranges:
         robot_joint_ids = group_joint_ids.get(part_name, [])
         for i, dof_idx in enumerate(range(start_idx, end_idx)):
             if i < len(robot_joint_ids):
-                joint_to_53dof_mapping[dof_idx] = robot_joint_ids[i]
+                joint_to_dof_mapping[dof_idx] = robot_joint_ids[i]
             else:
-                joint_to_53dof_mapping[dof_idx] = None  # Will be padded with zeros
+                joint_to_dof_mapping[dof_idx] = None
 
-    # Count mapped vs missing joints
-    mapped_count = sum(1 for v in joint_to_53dof_mapping.values() if v is not None)
-    missing_count = sum(1 for v in joint_to_53dof_mapping.values() if v is None)
-    print(f"[INFO] 53 DOF mapping: {mapped_count} joints mapped, {missing_count} padded with zeros", flush=True)
+    # Backward compat alias
+    joint_to_53dof_mapping = joint_to_dof_mapping
+
+    # Build action DOF ranges from same layout (used for concatenated action format)
+    action_dof_ranges = {part_name: (start, end) for part_name, start, end in body_part_ranges}
+
+    mapped_count = sum(1 for v in joint_to_dof_mapping.values() if v is not None)
+    missing_count = sum(1 for v in joint_to_dof_mapping.values() if v is None)
+    print(f"[INFO] {total_state_dim} DOF mapping: {mapped_count} joints mapped, {missing_count} padded with zeros", flush=True)
     if missing_count > 0:
-        missing_indices = [k for k, v in joint_to_53dof_mapping.items() if v is None]
+        missing_indices = [k for k, v in joint_to_dof_mapping.items() if v is None]
         print(f"[INFO] Missing joint indices (padded): {missing_indices}", flush=True)
 
     # Run inference loop
-    print(f"[INFO] Starting inference with language command: '{args_cli.language}'", flush=True)
+    print(f"[INFO] Starting inference with language command: '{language_cmd}'", flush=True)
     print(f"[INFO] Action steps per inference: {args_cli.num_action_steps} (of 30 predicted)", flush=True)
     print(f"[INFO] Action scale: {args_cli.action_scale}", flush=True)
     sys.stdout.flush()
@@ -790,7 +846,7 @@ def main():
             "step": step,
             "frame_idx": frame_idx,
             "timestamp": datetime.now().isoformat(),
-            "language": args_cli.language,
+            "language": language_cmd,
             "camera_shape": list(rgb_np.shape),
             "camera_min_max": [int(rgb_np.min()), int(rgb_np.max())],
         }
@@ -824,11 +880,22 @@ def main():
 
             # Check if we need new actions from the server
             if action_buffer is None or action_step_idx >= args_cli.num_action_steps:
-                # Get camera image
+                # Get primary camera image
                 rgb = camera.data.output.get("rgb")
                 if rgb is None:
                     raise RuntimeError("Camera output not available. Run with --enable_cameras.")
                 rgb_np = rgb.detach().cpu().numpy().astype(np.uint8)
+
+                # Get extra camera images
+                extra_camera_rgbs = {}
+                for cam_name, cam_sensor in extra_cameras.items():
+                    ecam_rgb = cam_sensor.data.output.get("rgb")
+                    if ecam_rgb is not None:
+                        extra_camera_rgbs[cam_name] = ecam_rgb.detach().cpu().numpy().astype(np.uint8)
+
+                # Add duplicate cameras (copy primary image under different name)
+                for dup_cam in duplicate_cam_specs:
+                    extra_camera_rgbs[dup_cam.name] = rgb_np.copy()
 
                 # Build flat observation (for Gr00tSimPolicyWrapper)
                 observation = build_flat_observation(
@@ -836,11 +903,12 @@ def main():
                     joint_pos=joint_pos,
                     group_joint_ids=group_joint_ids,
                     state_dims=state_dims,
-                    language_cmd=args_cli.language,
+                    language_cmd=language_cmd,
                     video_horizon=video_horizon,
                     state_horizon=state_horizon,
                     action_joint_ids=action_joint_ids,
                     joint_to_53dof_mapping=joint_to_53dof_mapping,
+                    extra_camera_rgbs=extra_camera_rgbs if extra_camera_rgbs else None,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
@@ -879,23 +947,12 @@ def main():
             # This ensures the action tensor is the correct size for env.step().
             current_action_vec = joint_pos[:, :env_action_dim].copy()
 
-            # Action 53 DOF ranges (same as state)
-            action_53dof_ranges = {
-                "left_leg": (0, 6),
-                "right_leg": (6, 12),
-                "waist": (12, 15),
-                "left_arm": (15, 22),
-                "right_arm": (22, 29),
-                "left_hand": (29, 41),
-                "right_hand": (41, 53),
-            }
-
             def _get_action_at_timestep(key: str, timestep: int) -> np.ndarray | None:
                 """Get action value at specific timestep in trajectory.
 
                 Handles two formats:
                 1. Split format: action.left_arm, action.right_arm, etc.
-                2. Concatenated format: single 'action' key with 53 DOF
+                2. Concatenated format: single 'action' key with N DOF
                 """
                 # First try split format
                 possible_keys = [f"action.{key}", key]
@@ -907,14 +964,13 @@ def main():
                         elif arr.ndim == 2:
                             return arr
 
-                # Try concatenated 53 DOF format
-                if "action" in action_buffer and key in action_53dof_ranges:
+                # Try concatenated DOF format (action_dof_ranges is dynamic)
+                if "action" in action_buffer and key in action_dof_ranges:
                     arr = np.asarray(action_buffer["action"])
-                    if arr.ndim == 3 and arr.shape[1] > timestep and arr.shape[2] >= 53:
-                        start, end = action_53dof_ranges[key]
+                    start, end = action_dof_ranges[key]
+                    if arr.ndim == 3 and arr.shape[1] > timestep and arr.shape[2] >= end:
                         return arr[:, timestep, start:end]
-                    elif arr.ndim == 2 and arr.shape[1] >= 53:
-                        start, end = action_53dof_ranges[key]
+                    elif arr.ndim == 2 and arr.shape[1] >= end:
                         return arr[:, start:end]
 
                 return None
@@ -956,14 +1012,11 @@ def main():
                     # Absolute: use value directly (hands/waist)
                     current_action_vec[:, idxs] = arr
 
-            # Apply action groups
+            # Apply action groups — driven by DOF layout
             # Based on embodiment config: rep=ABSOLUTE, type=NON_EEF
             # ALL actions are absolute joint position targets (not deltas)
-            _apply_group("waist", relative=False)
-            _apply_group("left_arm", relative=False)  # ABSOLUTE - direct joint targets
-            _apply_group("right_arm", relative=False)  # ABSOLUTE - direct joint targets
-            _apply_group("left_hand", relative=False)
-            _apply_group("right_hand", relative=False)
+            for part_name in action_dof_ranges:
+                _apply_group(part_name, relative=False)
 
             # Debug: print first few steps
             if step_count < 10:
