@@ -698,10 +698,26 @@ def main():
     action_joint_ids, action_joint_names = robot.find_joints(dynamic_action_patterns, preserve_order=True)
     action_name_to_index = {name: i for i, name in enumerate(action_joint_names)}
 
+    # Build reverse mapping: robot joint index → action space index
+    # action_joint_ids[action_idx] = robot_joint_idx, so we need the inverse
+    robot_joint_to_action_idx = {robot_idx: action_idx for action_idx, robot_idx in enumerate(action_joint_ids)}
+
+    # Build group → action space indices mapping (for _apply_group)
+    group_action_ids: dict[str, list[int]] = {}
+    for group_name, robot_idxs in group_joint_ids.items():
+        action_idxs = []
+        for robot_idx in robot_idxs:
+            action_idx = robot_joint_to_action_idx.get(robot_idx)
+            if action_idx is not None:
+                action_idxs.append(action_idx)
+        group_action_ids[group_name] = action_idxs
+
     print(f"[DEBUG] Action joint mapping (len={len(action_joint_ids)}):", flush=True)
     for i, (idx, name) in enumerate(zip(action_joint_ids, action_joint_names)):
         print(f"  action[{i}] -> robot[{idx}] = {name}", flush=True)
-    print(f"[DEBUG] action_joint_ids type: {type(action_joint_ids)}, content[:5]: {action_joint_ids[:5] if hasattr(action_joint_ids, '__getitem__') else action_joint_ids}", flush=True)
+    print(f"[DEBUG] Group action IDs (indices into env action space):", flush=True)
+    for k, v in group_action_ids.items():
+        print(f"  {k}: {v}", flush=True)
 
     # Connect to GR00T server
     if ":" not in args_cli.server:
@@ -978,16 +994,15 @@ def main():
             def _apply_group(key: str, relative: bool):
                 """Apply action group to action vector.
 
+                Uses group_action_ids (indices into env action space, not robot joint indices).
                 For relative actions: target = trajectory_start_pos + delta[t]
-                    The delta at timestep t represents the cumulative change from the
-                    starting position of the trajectory.
                 For absolute actions: target = action_value directly
                 """
                 arr = _get_action_at_timestep(key, action_step_idx)
                 if arr is None:
                     return
-                # Use group_joint_ids (robot joint indices in env_action_dim space)
-                idxs = group_joint_ids.get(key, [])
+                # Use group_action_ids (indices into env_action_dim space)
+                idxs = group_action_ids.get(key, [])
                 if not idxs:
                     return
                 d = len(idxs)
@@ -999,17 +1014,15 @@ def main():
                         arr = np.pad(arr, ((0, 0), (0, d - arr.shape[1])), mode="constant")
 
                 if relative:
-                    # Relative: add scaled delta to TRAJECTORY START positions
-                    # Apply action_scale to dampen the robot's response
-                    ref_ids = group_joint_ids.get(key, [])
+                    ref_ids = group_action_ids.get(key, [])
                     if len(ref_ids) >= d:
-                        start_vals = trajectory_start_pos[:, ref_ids[:d]]
+                        start_vals = trajectory_start_pos[:, :env_action_dim][:, ref_ids[:d]]
                     else:
                         start_vals = np.zeros((1, d), dtype=np.float32)
                     target = start_vals + arr * args_cli.action_scale
                     current_action_vec[:, idxs] = target
                 else:
-                    # Absolute: use value directly (hands/waist)
+                    # Absolute: use value directly
                     current_action_vec[:, idxs] = arr
 
             # Apply action groups — driven by DOF layout
@@ -1020,12 +1033,15 @@ def main():
 
             # Debug: print first few steps
             if step_count < 10:
-                la_idxs = group_joint_ids.get("left_arm", [])
-                print(f"[DEBUG] Step {step_count}: current_joint_pos[left_arm] = {joint_pos[0, group_joint_ids['left_arm']]}", flush=True)
+                la_action_idxs = group_action_ids.get("left_arm", [])
+                la_robot_idxs = group_joint_ids.get("left_arm", [])
+                if la_robot_idxs:
+                    print(f"[DEBUG] Step {step_count}: current_joint_pos[left_arm] = {joint_pos[0, la_robot_idxs]}", flush=True)
                 arr = _get_action_at_timestep("left_arm", action_step_idx)
                 if arr is not None:
                     print(f"[DEBUG] Step {step_count}: ABSOLUTE target[{action_step_idx}] = {arr[0]}", flush=True)
-                print(f"[DEBUG] Step {step_count}: applied_target = {current_action_vec[0, la_idxs]}", flush=True)
+                if la_action_idxs:
+                    print(f"[DEBUG] Step {step_count}: applied_target = {current_action_vec[0, la_action_idxs]}", flush=True)
 
             # Clip to environment action dimension
             current_action_vec = current_action_vec[:, :env_action_dim]
@@ -1048,11 +1064,12 @@ def main():
 
             # Debug: print arm positions periodically
             if step_count % 50 == 0 and step_count <= 300:
-                left_arm_ids = group_joint_ids['left_arm']
-                print(f"[DEBUG] Step {step_count}: left_arm joints = {joint_pos[0, left_arm_ids]}", flush=True)
+                left_arm_ids = group_joint_ids.get('left_arm', [])
+                if left_arm_ids:
+                    print(f"[DEBUG] Step {step_count}: left_arm joints = {joint_pos[0, left_arm_ids]}", flush=True)
                 arr = _get_action_at_timestep("left_arm", action_step_idx)
                 if arr is not None:
-                    print(f"[DEBUG] Step {step_count}: action delta[{action_step_idx}] = {arr[0]}", flush=True)
+                    print(f"[DEBUG] Step {step_count}: action target[{action_step_idx}] = {arr[0]}", flush=True)
 
             if terminated.any() or truncated.any() or step_count >= args_cli.max_episode_steps:
                 print(f"[INFO] Episode ended at step {step_count}. Resetting...", flush=True)
