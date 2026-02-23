@@ -3,29 +3,28 @@
 """
 GROOT N1.6 Fine-tuning Launcher
 
-This module provides utilities for launching fine-tuning jobs on the GROOT model.
-The actual training is done using NVIDIA's Isaac-GR00T framework.
+Thin wrapper around Isaac-GR00T's launch_finetune.py using torchrun.
+Follows official NVIDIA fine-tuning conventions from:
+  examples/GR00T-WholeBodyControl/finetune_g1.sh
 
-Usage (single dataset):
-    On the workstation with Isaac-GR00T installed:
-
+Usage (UNITREE_G1, recommended):
     python -m dm_isaac_g1.finetuning.launcher \\
-        --base-model nvidia/GR00T-N1.6-3B \\
+        --datasets /workspace/datasets/groot/G1_Fold_Towel \\
+        --output /workspace/checkpoints/groot_g1_gripper
+
+    Uses the pre-registered UNITREE_G1 embodiment config automatically.
+    No --config needed.
+
+Usage (custom embodiment):
+    python -m dm_isaac_g1.finetuning.launcher \\
         --datasets /workspace/datasets/my_dataset \\
         --config /workspace/Isaac-GR00T/my_config.py \\
-        --output /workspace/checkpoints/my_model
-
-Usage (multiple datasets — uses launch_multi_finetune.py):
-    python -m dm_isaac_g1.finetuning.launcher \\
-        --datasets /workspace/datasets/ds1 /workspace/datasets/ds2 \\
-        --config /workspace/Isaac-GR00T/my_config.py \\
+        --embodiment-tag NEW_EMBODIMENT \\
         --output /workspace/checkpoints/my_model
 
 Note:
-    This launcher is a thin wrapper around the Isaac-GR00T fine-tuning system.
-    The Isaac-GR00T repository must be installed at /workspace/Isaac-GR00T/
-    Single dataset → launch_finetune.py
-    Multiple datasets → launch_multi_finetune.py (accepts --dataset-paths nargs+)
+    Isaac-GR00T must be installed at /workspace/Isaac-GR00T/
+    Uses torchrun for distributed training (matching official examples).
 """
 
 import subprocess
@@ -44,29 +43,35 @@ class FinetuneArgs:
     """Path or HuggingFace ID of base model."""
 
     datasets: List[str] = field(default_factory=list)
-    """One or more dataset paths in LeRobot format."""
+    """One or more dataset paths in LeRobot v2 format."""
 
     config: str = ""
-    """Path to modality config file (copied to /workspace/Isaac-GR00T/ first)."""
+    """Path to modality config file. Leave empty for pre-registered embodiments."""
 
     output: str = "./checkpoints/groot_finetuned"
     """Output directory for checkpoints."""
 
-    # Training settings
+    # Training settings (matching official finetune_g1.sh)
     max_steps: int = 10000
     """Maximum training steps."""
 
-    save_steps: int = 2000
+    save_steps: int = 1000
     """Save checkpoint every N steps."""
 
-    save_total_limit: int = 2
-    """Keep only the last N checkpoints (auto-deletes older ones to save disk)."""
+    save_total_limit: int = 5
+    """Keep only the last N checkpoints."""
 
-    batch_size: int = 32
-    """Global batch size (across all GPUs)."""
+    batch_size: int = 64
+    """Global batch size (across all GPUs). Official uses 1024 with 8 GPUs."""
 
     learning_rate: float = 1e-4
     """Learning rate."""
+
+    weight_decay: float = 1e-5
+    """Weight decay."""
+
+    warmup_ratio: float = 0.05
+    """Warmup ratio."""
 
     num_gpus: int = 1
     """Number of GPUs to use."""
@@ -88,7 +93,7 @@ class FinetuneArgs:
     """Fine-tune the diffusion action head."""
 
     # Optional
-    embodiment_tag: str = "NEW_EMBODIMENT"
+    embodiment_tag: str = "UNITREE_G1"
     """Embodiment tag for the dataset."""
 
     use_wandb: bool = False
@@ -97,12 +102,13 @@ class FinetuneArgs:
     resume_from: Optional[str] = None
     """Resume from checkpoint path."""
 
+    # Data augmentation (matching official finetune_g1.sh)
+    color_jitter: bool = True
+    """Apply color jitter augmentation."""
+
 
 def build_finetune_command(args: FinetuneArgs) -> list[str]:
-    """Build the command to launch fine-tuning via Isaac-GR00T.
-
-    Uses launch_multi_finetune.py when multiple datasets are given,
-    launch_finetune.py for a single dataset.
+    """Build the torchrun command to launch fine-tuning.
 
     Args:
         args: Fine-tuning arguments
@@ -113,42 +119,50 @@ def build_finetune_command(args: FinetuneArgs) -> list[str]:
     if not args.datasets:
         raise ValueError("At least one dataset path must be provided in args.datasets")
 
-    multi = len(args.datasets) > 1
-    script = (
-        "/workspace/Isaac-GR00T/gr00t/experiment/launch_multi_finetune.py"
-        if multi
-        else "/workspace/Isaac-GR00T/gr00t/experiment/launch_finetune.py"
-    )
-    dataset_flag = "--dataset-paths" if multi else "--dataset-path"
+    script = "/workspace/Isaac-GR00T/gr00t/experiment/launch_finetune.py"
 
+    # Use torchrun for distributed training (matching official approach)
     cmd = [
-        "python", script,
-        "--base-model-path", args.base_model,
-        dataset_flag, *args.datasets,
-        "--embodiment-tag", args.embodiment_tag,
-        "--output-dir", args.output,
-        "--max-steps", str(args.max_steps),
-        "--save-steps", str(args.save_steps),
-        "--global-batch-size", str(args.batch_size),
-        "--learning-rate", str(args.learning_rate),
-        "--num-gpus", str(args.num_gpus),
-        "--dataloader-num-workers", str(args.num_workers),
-        "--save-total-limit", str(args.save_total_limit),
+        "torchrun",
+        f"--nproc_per_node={args.num_gpus}",
+        "--master_port=29500",
+        script,
+        "--base_model_path", args.base_model,
+        "--dataset_path", args.datasets[0],
+        "--embodiment_tag", args.embodiment_tag,
+        "--output_dir", args.output,
+        "--max_steps", str(args.max_steps),
+        "--save_steps", str(args.save_steps),
+        "--global_batch_size", str(args.batch_size),
+        "--learning_rate", str(args.learning_rate),
+        "--weight_decay", str(args.weight_decay),
+        "--warmup_ratio", str(args.warmup_ratio),
+        "--num_gpus", str(args.num_gpus),
+        "--dataloader_num_workers", str(args.num_workers),
+        "--save_total_limit", str(args.save_total_limit),
     ]
 
     if args.config:
-        cmd.extend(["--modality-config-path", args.config])
+        cmd.extend(["--modality_config_path", args.config])
 
     if args.tune_llm:
-        cmd.append("--tune-llm")
+        cmd.append("--tune_llm")
     if args.tune_visual:
-        cmd.append("--tune-visual")
+        cmd.append("--tune_visual")
     if not args.tune_projector:
-        cmd.append("--no-tune-projector")
+        cmd.append("--no_tune_projector")
     if not args.tune_diffusion:
-        cmd.append("--no-tune-diffusion-model")
+        cmd.append("--no_tune_diffusion_model")
     if args.use_wandb:
-        cmd.append("--use-wandb")
+        cmd.append("--use_wandb")
+    if args.color_jitter:
+        cmd.extend([
+            "--color_jitter_params",
+            "brightness", "0.3",
+            "contrast", "0.4",
+            "saturation", "0.5",
+            "hue", "0.08",
+        ])
 
     return cmd
 
@@ -191,7 +205,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Launch GROOT fine-tuning (single or multi-dataset)",
+        description="Launch GROOT fine-tuning via torchrun",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -199,19 +213,20 @@ def main():
     parser.add_argument("--base-model", default="nvidia/GR00T-N1.6-3B",
                        help="Base model path or HuggingFace ID")
     parser.add_argument("--datasets", nargs="+", required=True,
-                       help="One or more dataset paths (space-separated)")
-    parser.add_argument("--config", required=True,
-                       help="Modality config file path on the workstation")
+                       help="Dataset path (first dataset used)")
+    parser.add_argument("--config", default="",
+                       help="Modality config file (empty for pre-registered embodiments)")
     parser.add_argument("--output", default="./checkpoints/groot_finetuned",
                        help="Output directory")
 
     # Training
     parser.add_argument("--max-steps", type=int, default=10000)
-    parser.add_argument("--save-steps", type=int, default=2000)
-    parser.add_argument("--save-total-limit", type=int, default=2,
-                       help="Keep only the last N checkpoints")
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--save-steps", type=int, default=1000)
+    parser.add_argument("--save-total-limit", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--weight-decay", type=float, default=1e-5)
+    parser.add_argument("--warmup-ratio", type=float, default=0.05)
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=4)
 
@@ -222,8 +237,9 @@ def main():
     parser.add_argument("--no-tune-diffusion", action="store_true")
 
     # Other
-    parser.add_argument("--embodiment-tag", default="NEW_EMBODIMENT")
+    parser.add_argument("--embodiment-tag", default="UNITREE_G1")
     parser.add_argument("--use-wandb", action="store_true")
+    parser.add_argument("--no-color-jitter", action="store_true")
     parser.add_argument("--dry-run", action="store_true",
                        help="Print command but don't execute")
 
@@ -239,6 +255,8 @@ def main():
         save_total_limit=args.save_total_limit,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        warmup_ratio=args.warmup_ratio,
         num_gpus=args.num_gpus,
         num_workers=args.num_workers,
         tune_llm=args.tune_llm,
@@ -247,6 +265,7 @@ def main():
         tune_diffusion=not args.no_tune_diffusion,
         embodiment_tag=args.embodiment_tag,
         use_wandb=args.use_wandb,
+        color_jitter=not args.no_color_jitter,
     )
 
     return launch_finetune(ft_args, dry_run=args.dry_run)
