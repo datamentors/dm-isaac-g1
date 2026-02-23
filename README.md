@@ -25,21 +25,28 @@ dm-g1 --help
 
 ## Trained Models
 
-| Model | HuggingFace | Datasets | Steps | Final Loss |
-|-------|-------------|----------|-------|------------|
-| **G1 Gripper Hospitality 7-Dataset** | [datamentorshf/groot-g1-gripper-hospitality-7ds](https://huggingface.co/datamentorshf/groot-g1-gripper-hospitality-7ds) | All 7 hospitality (1400 eps) | 10,000 | 0.055 |
-| G1 Gripper Fold Towel | [datamentorshf/groot-g1-gripper-fold-towel](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel) | G1_Fold_Towel (200 eps) | 6,000* | 0.029 |
-| G1 Gripper Fold Towel (Full) | datamentorshf/groot-g1-gripper-fold-towel-full | G1_Fold_Towel (200 eps) | 10,000** | (in progress) |
+### Current Models (UNITREE_G1 Gripper)
 
-\* Training interrupted at step 6123 due to disk pressure; checkpoint-6000 saved.
-\*\* Resumed from step 6000 checkpoint for 4000 additional steps.
+| Model | HuggingFace | Datasets | Steps | Final Loss | Status |
+|-------|-------------|----------|-------|------------|--------|
+| **G1 Gripper Hospitality 7-Dataset** | [datamentorshf/groot-g1-gripper-hospitality-7ds](https://huggingface.co/datamentorshf/groot-g1-gripper-hospitality-7ds) | All 7 hospitality merged (1400 eps) | 10,000 | 0.055 | Deployed to Spark |
+| G1 Gripper Fold Towel (Full) | [datamentorshf/groot-g1-gripper-fold-towel-full](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel-full) | G1_Fold_Towel (200 eps) | 10,000* | — | Uploaded |
+| G1 Gripper Fold Towel | [datamentorshf/groot-g1-gripper-fold-towel](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel) | G1_Fold_Towel (200 eps) | 6,000** | 0.029 | Uploaded |
 
-### Legacy Models (Inspire/Dex3 — deprecated)
+\* Trained in two phases: 6000 steps initial + 4000 steps resumed from checkpoint-6000.
+\*\* Training interrupted at step 6123 due to disk pressure; checkpoint-6000 saved.
 
-| Model | HuggingFace | Datasets | Steps |
-|-------|-------------|----------|-------|
-| G1 Loco-Manipulation | [datamentorshf/groot-g1-loco-manip](https://huggingface.co/datamentorshf/groot-g1-loco-manip) | LMPnPAppleToPlateDC | 5,000 |
-| G1 Teleop | [datamentorshf/groot-g1-teleop](https://huggingface.co/datamentorshf/groot-g1-teleop) | g1-pick-apple | 4,000 |
+See [FINETUNING_GUIDE.md](docs/FINETUNING_GUIDE.md) for reproduction steps for each model.
+
+### Legacy Models (deprecated)
+
+These models used experimental embodiment configurations (`NEW_EMBODIMENT` tag) and are **not recommended for production use**. They are kept for reference.
+
+| Model | HuggingFace | Embodiment | Datasets | Steps | Notes |
+|-------|-------------|------------|----------|-------|-------|
+| G1 Inspire 9-Dataset | [datamentorshf/groot-g1-inspire-9datasets](https://huggingface.co/datamentorshf/groot-g1-inspire-9datasets) | Inspire 53 DOF (`NEW_EMBODIMENT`) | 9 mixed datasets with joint remapping | ~10,000 | Experimental; no reproducible pipeline |
+| G1 Loco-Manipulation | [datamentorshf/groot-g1-loco-manip](https://huggingface.co/datamentorshf/groot-g1-loco-manip) | `UNITREE_G1` | LMPnPAppleToPlateDC (103 eps) | 5,000 | Simulated data only |
+| G1 Teleop | [datamentorshf/groot-g1-teleop](https://huggingface.co/datamentorshf/groot-g1-teleop) | Tri-finger (`NEW_EMBODIMENT`) | g1-pick-apple (311 eps) | 4,000 | Real robot teleop data |
 
 ## Datasets
 

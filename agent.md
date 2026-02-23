@@ -196,7 +196,7 @@ sshpass -p "$WORKSTATION_PASSWORD" ssh -o StrictHostKeyChecking=no datamentors@1
 docker exec -d dm-workstation bash -c "
   export DISPLAY=:1
   export PROJECT_ROOT=/workspace/unitree_sim_isaaclab
-  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+  export GR00T_STATS=/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json
   export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:\$PYTHONPATH
   cd /workspace/dm-isaac-g1
   conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \

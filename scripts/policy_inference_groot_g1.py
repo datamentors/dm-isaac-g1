@@ -32,7 +32,7 @@ Usage:
 
     # Inspire 53-DOF pick-place (single camera):
     PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH \
-    GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json \
+    GR00T_STATS=/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json \
     python scripts/policy_inference_groot_g1.py \
         --server 192.168.1.237:5555 \
         --setup default \

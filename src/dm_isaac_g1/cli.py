@@ -12,7 +12,7 @@ def main():
     """DM-ISAAC-G1: G1 Robot Training Suite.
 
     Fine-tuning, Inference, Imitation Learning, and Reinforcement Learning
-    for the Unitree G1 EDU 2 robot with Inspire Robotics Dexterous Hands.
+    for the Unitree G1 EDU 2 robot with UNITREE_G1 Gripper Hands.
     """
     pass
 
@@ -153,12 +153,12 @@ def status(host: Optional[str], port: Optional[int]):
 
 
 @infer.command()
-@click.option("--model", default="datamentorshf/groot-g1-inspire-9datasets", help="Model to load")
+@click.option("--model", default="datamentorshf/groot-g1-gripper-hospitality-7ds", help="Model to load")
 @click.option("--port", default=5555, type=int, help="Server port")
 def serve(model: str, port: int):
     """Start GROOT inference server on Spark.
 
-    Example: dm-g1 infer serve --model datamentorshf/groot-g1-inspire-9datasets
+    Example: dm-g1 infer serve --model datamentorshf/groot-g1-gripper-hospitality-7ds
     """
     from dm_isaac_g1.inference.server import GrootServerManager
 

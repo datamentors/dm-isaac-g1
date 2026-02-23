@@ -130,7 +130,7 @@ docker exec dm-workstation conda run -n unitree_sim_env python -c \
 |----------|-------|-------------|
 | `DISPLAY` | `:1` | Points Isaac Sim to TurboVNC display |
 | `PROJECT_ROOT` | `/workspace/unitree_sim_isaaclab` | Used by Unitree scene configs to locate USD assets. **Without this, scenes crash with `FileNotFoundError: USD file not found at path 'None/assets/...'`** |
-| `GR00T_STATS` | `/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json` | State normalization statistics for the GROOT model |
+| `GR00T_STATS` | `/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json` | State normalization statistics for the GROOT model |
 | `PYTHONPATH` | `/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:$PYTHONPATH` | Adds our scripts and GROOT framework to path |
 
 ### Why PROJECT_ROOT Matters
@@ -258,7 +258,7 @@ docker exec dm-workstation /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -d
 docker exec -d dm-workstation bash -c "
   export DISPLAY=:1
   export PROJECT_ROOT=/workspace/unitree_sim_isaaclab
-  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+  export GR00T_STATS=/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json
   export PYTHONPATH=/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:\$PYTHONPATH
   cd /workspace/dm-isaac-g1
   conda run --no-capture-output -n unitree_sim_env python scripts/policy_inference_groot_g1.py \

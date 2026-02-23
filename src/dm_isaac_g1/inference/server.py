@@ -32,7 +32,7 @@ class GrootServerManager:
     Example:
         ```python
         manager = GrootServerManager()
-        manager.start(model_path="datamentorshf/groot-g1-inspire-9datasets")
+        manager.start(model_path="datamentorshf/groot-g1-gripper-hospitality-7ds")
         status = manager.status()
         print(f"Server running: {status.running}")
         manager.stop()
@@ -124,9 +124,9 @@ class GrootServerManager:
 
     def start(
         self,
-        model_path: str = "datamentorshf/groot-g1-inspire-9datasets",
+        model_path: str = "datamentorshf/groot-g1-gripper-hospitality-7ds",
         port: int = 5555,
-        embodiment_tag: str = "NEW_EMBODIMENT",
+        embodiment_tag: str = "UNITREE_G1",
         background: bool = True,
     ) -> bool:
         """Start the GROOT inference server.
@@ -201,7 +201,7 @@ class GrootServerManager:
         import time
         time.sleep(2)  # Wait for process to fully terminate
 
-        model = model_path or "datamentorshf/groot-g1-inspire-9datasets"
+        model = model_path or "datamentorshf/groot-g1-gripper-hospitality-7ds"
         return self.start(model_path=model, port=port)
 
     def get_logs(self, lines: int = 50) -> str:

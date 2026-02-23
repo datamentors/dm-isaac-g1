@@ -34,7 +34,7 @@ x-common-env: &common-env
   HF_TOKEN: ${HF_TOKEN}
   HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN}
   WANDB_API_KEY: ${WANDB_API_KEY}
-  GR00T_STATS: /workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+  GR00T_STATS: /workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json
 
 x-common-volumes: &common-volumes
   - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1

@@ -101,8 +101,8 @@ response = {
 ### Files to Check
 
 - Action provider: `/workspace/unitree_sim_isaaclab/action_provider/action_provider_groot.py`
-- Model config: `/workspace/checkpoints/groot-g1-inspire-9datasets/processor_config.json`
-- Statistics: `/workspace/checkpoints/groot-g1-inspire-9datasets/statistics.json`
+- Model config: `/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor_config.json`
+- Statistics: `/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/statistics.json`
 - Training config: `/workspace/Isaac-GR00T/g1_inspire_unified_config.py`
 
 ### Next Steps

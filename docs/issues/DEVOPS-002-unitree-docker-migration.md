@@ -215,7 +215,7 @@ sshpass -p "$WORKSTATION_PASSWORD" ssh datamentors@192.168.1.205 "
     /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true
     export DISPLAY=:1
     export PYTHONPATH=/workspace/dm-isaac-g1/src:/home/code/Isaac-GR00T:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_assets:/home/code/unitree_sim_isaaclab:\$PYTHONPATH
-    export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
+    export GR00T_STATS=/workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json
     cd /workspace/dm-isaac-g1
     python scripts/policy_inference_groot_g1.py \
       --server 192.168.1.237:5555 \

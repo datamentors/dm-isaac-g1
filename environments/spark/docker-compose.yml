@@ -30,9 +30,9 @@ services:
       - torch-cache:/workspace/.cache/torch
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - GROOT_MODEL_PATH=${GROOT_MODEL_PATH:-/workspace/checkpoints/groot-g1-inspire-9datasets}
+      - GROOT_MODEL_PATH=${GROOT_MODEL_PATH:-/workspace/checkpoints/groot-g1-gripper-hospitality-7ds}
       - GROOT_PORT=${GROOT_PORT:-5555}
-      - GROOT_EMBODIMENT=${GROOT_EMBODIMENT:-NEW_EMBODIMENT}
+      - GROOT_EMBODIMENT=${GROOT_EMBODIMENT:-UNITREE_G1}
       - NVIDIA_VISIBLE_DEVICES=all
       - GITHUB_TOKEN=${GITHUB_TOKEN}
     shm_size: '32gb'

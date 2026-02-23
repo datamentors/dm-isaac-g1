@@ -1,392 +1,232 @@
 # GROOT N1.6 Inference Guide
 
-This guide covers running GROOT inference for G1+Inspire robot manipulation in Isaac Sim.
+Deploying and running GROOT N1.6 models fine-tuned with the UNITREE_G1 gripper embodiment.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────┐     ZMQ      ┌─────────────────┐
-│   Isaac Sim     │◄────────────►│  GROOT Server   │
+│   Robot/Client   │◄────────────►│  GROOT Server   │
 │   (Blackwell)   │   Port 5555  │    (Spark)      │
 │ 192.168.1.205   │              │ 192.168.1.237   │
 └─────────────────┘              └─────────────────┘
         │                                │
         ▼                                ▼
    Observations                    Fine-tuned
-   (camera, state)                 GROOT Model
+   (ego_view + state)              GROOT Model
         │                                │
         └───────► Actions ◄──────────────┘
-                (16-step trajectory)
+              (30-step trajectory)
 ```
 
 ## Prerequisites
 
-1. **GROOT Server** running on Spark (192.168.1.237)
-2. **Isaac Sim** running on Blackwell (192.168.1.205)
-3. **Fine-tuned model** checkpoint with statistics.json
-4. **VNC access** to visualize the simulation
+1. **GROOT Server** running on Spark (192.168.1.237) in `groot-server` container
+2. **Fine-tuned model** — currently `groot-g1-gripper-hospitality-7ds`
+3. Network access between client and Spark on port 5555
+
+## Current Deployment
+
+| | |
+|---|---|
+| **Server** | Spark (192.168.1.237), `groot-server` container |
+| **Model** | [datamentorshf/groot-g1-gripper-hospitality-7ds](https://huggingface.co/datamentorshf/groot-g1-gripper-hospitality-7ds) |
+| **Embodiment** | `UNITREE_G1` (pre-registered in Isaac-GR00T) |
+| **Port** | 5555 (ZMQ) |
+| **Action horizon** | 30 steps |
+| **State** | 31 DOF flat vector |
+| **Action** | 23 DOF flat vector (arms RELATIVE, grippers/waist/nav ABSOLUTE) |
+| **Camera** | 1 ego-view (`observation.images.ego_view`) |
 
 ## Quick Start
 
-### 1. Start GROOT Server (on Spark)
+### 1. Start/Restart GROOT Server (on Spark)
 
 ```bash
 # SSH to Spark
 ssh nvidia@192.168.1.237
 
-# Start inference container
-cd /home/nvidia/dm-groot-inference
-docker compose up -d
+# Check server health
+docker exec groot-server bash -c 'curl -s http://localhost:5555/health || echo "not running"'
 
-# Or start manually
-docker exec -it groot-inference bash
-cd /workspace/gr00t
+# Restart if needed
+docker restart groot-server
+
+# Or manually start with a different model
+docker exec -it groot-server bash
+cd /workspace/Isaac-GR00T
 python gr00t/eval/run_gr00t_server.py \
-    --model-path /workspace/checkpoints/groot-g1-inspire-9datasets \
-    --embodiment-tag NEW_EMBODIMENT \
+    --model-path /workspace/checkpoints/groot-g1-gripper-hospitality-7ds \
+    --embodiment-tag UNITREE_G1 \
     --port 5555
 ```
 
-### 2. Start Isaac Sim (on Blackwell)
+### 2. Switch Models on Spark
 
 ```bash
-# SSH to workstation
-ssh datamentors@192.168.1.205
+# Download a different model from HuggingFace
+docker exec groot-server bash -c "
+    huggingface-cli download datamentorshf/groot-g1-gripper-fold-towel-full \
+        --local-dir /workspace/checkpoints/groot-g1-gripper-fold-towel-full
+"
 
-# Enter Isaac Sim container
-docker exec -it isaac-sim bash
-
-# Set environment
-export PYTHONPATH=/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:$PYTHONPATH
-export GR00T_STATS=/workspace/checkpoints/groot-g1-inspire-9datasets/statistics.json
-
-# Run inference
-/isaac-sim/python.sh /workspace/IsaacLab/scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --language "pick up the red block" \
-    --enable_cameras \
-    --num_action_steps 16 \
-    --action_scale 0.1
+# Update the model path in .env or docker-compose.yml and restart
+docker restart groot-server
 ```
 
-### 3. Visualize the Simulation
-
-There are several ways to view Isaac Sim:
-
-**Option A: Isaac Sim WebRTC Streaming (Recommended)**
-```bash
-# Run inference WITHOUT --headless flag
-/isaac-sim/python.sh /workspace/IsaacLab/scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --language "pick up the red block" \
-    --enable_cameras
-
-# Then open in browser:
-# http://192.168.1.205:48010/streaming/webrtc-client
-```
-
-**Option B: VNC with TurboVNC (Recommended for debugging)**
-
-VNC provides the most reliable way to view Isaac Sim with full GUI interaction.
+### 3. Test Connection
 
 ```bash
-# 1. Enter the container
-docker exec -it dm-workstation bash
-
-# 2. Start TurboVNC server (only needed once per container session)
-/opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24
-
-# 3. Set DISPLAY environment variable (CRITICAL!)
-export DISPLAY=:1
-
-# 4. Run inference WITHOUT --headless flag
-cd /workspace/dm-isaac-g1
-export PYTHONPATH=/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:$PYTHONPATH
-export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene pickplace_g1_inspire \
-    --language "pick up the apple" \
-    --enable_cameras \
-    --save_debug_frames
-
-# 5. Connect VNC client to 192.168.1.205:5901
-#    On Mac: open vnc://192.168.1.205:5901
+# From workstation
+docker exec dm-workstation bash -c "
+    python -c \"
+from gr00t.policy.server_client import PolicyClient
+client = PolicyClient(host='192.168.1.237', port=5555, strict=False)
+config = client.get_modality_config()
+print('Connected! Modality config:', list(config.keys()))
+\"
+"
 ```
 
-**One-liner for VNC Inference (from host):**
-```bash
-docker exec dm-workstation bash -c '
-  /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null || true
-  export DISPLAY=:1
-  cd /workspace/dm-isaac-g1
-  export PYTHONPATH=/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:$PYTHONPATH
-  export GR00T_STATS=/workspace/checkpoints/groot_g1_inspire_9datasets/processor/statistics.json
-  /isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene pickplace_g1_inspire \
-    --language "pick up the apple" \
-    --enable_cameras
-'
-```
+## Observation Format (UNITREE_G1)
 
-**Option C: X11 Forwarding (if on local network)**
-```bash
-# On host machine
-xhost +local:
-
-# In container with DISPLAY already set
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py ...
-```
-
-**Important**: Do NOT use `--headless` flag if you want to see the simulation.
-
-## Inference Script Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--server` | required | GROOT server endpoint (host:port) |
-| `--scene` | locomanipulation_g1 | Scene/environment to use (see below) |
-| `--language` | "pick up the object" | Task instruction |
-| `--num_action_steps` | 30 | Steps to execute per inference |
-| `--action_scale` | 1.0 | Scale factor for actions (use 1.0 for absolute) |
-| `--video_h` | 64 | Camera image height |
-| `--video_w` | 64 | Camera image width |
-| `--max_episode_steps` | 1000 | Max steps before reset |
-
-## Available Scenes
-
-Use the `--scene` argument to select different simulation environments:
-
-| Scene | Description | Best For |
-|-------|-------------|----------|
-| `locomanipulation_g1` | G1 robot with table and object (default) | Pick-and-place tasks |
-| `fixed_base_ik_g1` | G1 upper body with fixed base, IK control | Manipulation without locomotion |
-| `pickplace_g1_inspire` | G1 with Inspire hands, packing table scene | Dexterous manipulation |
-| `locomotion_g1_flat` | G1 on flat terrain | Walking/locomotion only |
-| `locomotion_g1_rough` | G1 on rough terrain | Locomotion over obstacles |
-
-### Example: Different Scenes
-
-```bash
-# Default pick-and-place scene
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene locomanipulation_g1 \
-    --language "pick up the red ball"
-
-# G1 with Inspire hands (dexterous manipulation)
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene pickplace_g1_inspire \
-    --language "grasp the object"
-
-# Fixed base for upper body manipulation only
-/isaac-sim/python.sh scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --scene fixed_base_ik_g1 \
-    --language "reach for the apple"
-```
-
-## Action Configuration
-
-**Important**: Based on the embodiment config (`rep=ABSOLUTE`, `type=NON_EEF`), all actions are **absolute joint position targets**, not deltas. Use `--action_scale 1.0` for direct joint targets.
-
-## Observation Format
-
-The inference script sends observations to GROOT in flat dictionary format:
+The UNITREE_G1 embodiment expects observations as a flat dictionary:
 
 ```python
 observation = {
-    # Camera image: (B, T, H, W, C) uint8
-    "video.ego_view": np.ndarray,
+    # Camera image: (B, T, H, W, C) uint8 — 1 ego-view
+    "video.ego_view": np.ndarray,  # shape (1, 1, 480, 640, 3)
 
-    # State vectors: (B, T, D) float32
-    "state.left_leg": np.ndarray,    # (B, T, 6)
-    "state.right_leg": np.ndarray,   # (B, T, 6)
-    "state.waist": np.ndarray,       # (B, T, 3)
-    "state.left_arm": np.ndarray,    # (B, T, 7)
-    "state.right_arm": np.ndarray,   # (B, T, 7)
-    "state.left_hand": np.ndarray,   # (B, T, 12)
-    "state.right_hand": np.ndarray,  # (B, T, 12)
+    # State: (B, T, 31) float32 — flat vector
+    "state.observation.state": np.ndarray,
 
     # Language: list of strings
-    "annotation.human.task_description": ["task"] * B,
+    "annotation.human.task_description": ["fold the towel"],
 }
 ```
 
-## Action Format
+State vector layout (31 DOF):
+| Index | Component | DOF |
+|-------|-----------|-----|
+| 0-5 | Left Leg | 6 |
+| 6-11 | Right Leg | 6 |
+| 12-14 | Waist | 3 |
+| 15-21 | Left Arm | 7 |
+| 22-28 | Right Arm | 7 |
+| 29 | Left Gripper | 1 |
+| 30 | Right Gripper | 1 |
 
-GROOT returns a 16-step action trajectory:
+## Action Format (UNITREE_G1)
+
+GROOT returns a 30-step action trajectory:
 
 ```python
 action = {
-    # Each action: (B, 16, D) float32
-    "action.waist": np.ndarray,      # (B, 16, 3)
-    "action.left_arm": np.ndarray,   # (B, 16, 7)
-    "action.right_arm": np.ndarray,  # (B, 16, 7)
-    "action.left_hand": np.ndarray,  # (B, 16, 12)
-    "action.right_hand": np.ndarray, # (B, 16, 12)
+    # Action: (B, 30, 23) float32 — flat vector
+    "action": np.ndarray,
 }
 ```
 
-### Action Application
+Action vector layout (23 DOF):
+| Index | Component | DOF | Representation |
+|-------|-----------|-----|----------------|
+| 0-2 | Waist | 3 | ABSOLUTE |
+| 3-9 | Left Arm | 7 | RELATIVE |
+| 10-16 | Right Arm | 7 | RELATIVE |
+| 17 | Left Gripper | 1 | ABSOLUTE |
+| 18 | Right Gripper | 1 | ABSOLUTE |
+| 19 | Base Height | 1 | ABSOLUTE |
+| 20-22 | Navigate (VX, VY, AngZ) | 3 | ABSOLUTE |
 
-Actions are applied as **relative deltas** from the trajectory start position:
-
-```python
-# For each timestep t in [0, 15]:
-target_position = trajectory_start_position + action_delta[t] * action_scale
-```
-
-This means:
-- `action[0]` = delta to reach first target
-- `action[15]` = delta to reach final target
-- All deltas are relative to the position when inference was called
-
-## Inference Loop
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                     Inference Loop                            │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  1. Get current joint positions                              │
-│  2. Capture camera image                                     │
-│  3. Build observation dict                                   │
-│  4. Send to GROOT server                     ◄─── Every 16   │
-│  5. Receive 16-step trajectory                    steps      │
-│  6. Execute steps 0-15:                                      │
-│     - target = start_pos + delta[t] * scale                 │
-│     - Send to robot                                          │
-│  7. Repeat from step 1                                       │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+**RELATIVE arms**: actions are deltas from the trajectory start position.
+**ABSOLUTE grippers/waist/nav**: actions are direct position/velocity targets.
 
 ## GROOT Server API
-
-### Connect to Server
 
 ```python
 from gr00t.policy.server_client import PolicyClient
 
-client = PolicyClient(
-    host="192.168.1.237",
-    port=5555,
-    api_token=None,  # Optional
-    strict=False
-)
-```
+# Connect
+client = PolicyClient(host="192.168.1.237", port=5555, strict=False)
 
-### Get Modality Config
+# Get modality config
+config = client.get_modality_config()
 
-```python
-modality_cfg = client.get_modality_config()
-# Returns dict with video, state, action modality configs
-```
-
-### Get Action
-
-```python
+# Get action
 action_dict, info = client.get_action(observation)
-# observation: flat dict with video, state, language
-# action_dict: flat dict with action trajectories
-```
 
-### Reset
-
-```python
+# Reset (call at episode boundaries)
 client.reset()
-# Call at episode start/end
 ```
+
+## Deploying a New Model
+
+After fine-tuning (see [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md)):
+
+```bash
+# 1. Upload model to HuggingFace (from workstation)
+mkdir -p /workspace/checkpoints/model-upload
+cp /workspace/checkpoints/<model>/checkpoint-10000/model-*.safetensors \
+   /workspace/checkpoints/<model>/checkpoint-10000/config.json \
+   /workspace/checkpoints/<model>/checkpoint-10000/generation_config.json \
+   /workspace/checkpoints/model-upload/
+
+huggingface-cli upload datamentorshf/<model-name> \
+    /workspace/checkpoints/model-upload . \
+    --repo-type model --private
+
+# 2. Download on Spark
+docker exec groot-server bash -c "
+    huggingface-cli download datamentorshf/<model-name> \
+        --local-dir /workspace/checkpoints/<model-name>
+"
+
+# 3. Update config and restart
+docker restart groot-server
+```
+
+## Available Models
+
+| Model | HuggingFace | Use Case |
+|-------|-------------|----------|
+| **groot-g1-gripper-hospitality-7ds** | [datamentorshf/groot-g1-gripper-hospitality-7ds](https://huggingface.co/datamentorshf/groot-g1-gripper-hospitality-7ds) | Multi-task (fold, clean, wipe, fruit, medicine, tools, pingpong) |
+| groot-g1-gripper-fold-towel-full | [datamentorshf/groot-g1-gripper-fold-towel-full](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel-full) | Towel folding specialist |
+| groot-g1-gripper-fold-towel | [datamentorshf/groot-g1-gripper-fold-towel](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel) | Towel folding (partial, 6000 steps) |
 
 ## Troubleshooting
 
-### Robot Not Moving
-
-1. Check GROOT server is running: `docker logs groot-inference`
-2. Verify network connectivity: `ping 192.168.1.237`
-3. Check action scale - try `--action_scale 1.0`
-
-### Robot Moving But Not Completing Task
-
-1. Verify camera is capturing: Check `--enable_cameras`
-2. Check language prompt matches training data
-3. Verify statistics.json matches model checkpoint
-
 ### Connection Refused
-
 ```bash
 # Check server is listening
-ssh nvidia@192.168.1.237 "netstat -tlpn | grep 5555"
+ssh nvidia@192.168.1.237 "docker exec groot-server netstat -tlpn | grep 5555"
 
-# Restart server if needed
-docker restart groot-inference
+# Check container is running
+ssh nvidia@192.168.1.237 "docker ps | grep groot-server"
+
+# Restart
+ssh nvidia@192.168.1.237 "docker restart groot-server"
 ```
 
-### Actions Look Wrong
+### Robot Not Moving / Wrong Actions
+1. Verify embodiment tag is `UNITREE_G1` (not `NEW_EMBODIMENT`)
+2. Check state vector is 31 DOF and action is 23 DOF
+3. Verify camera key is `ego_view` (not `cam_left_high`)
+4. Ensure language prompt matches training data tasks
 
-1. Check action format (absolute vs relative)
-2. Verify joint ordering matches training
-3. Enable debug logging in inference script
-
-## Example: Pick and Place
-
+### Model Loading Error
 ```bash
-# Start server with pick-place model
-docker exec -it groot-inference bash
-python gr00t/eval/run_gr00t_server.py \
-    --model-path /workspace/checkpoints/groot-g1-inspire-9datasets \
-    --embodiment-tag NEW_EMBODIMENT \
-    --port 5555
+# Check model files exist
+docker exec groot-server ls /workspace/checkpoints/groot-g1-gripper-hospitality-7ds/
 
-# Run simulation with pick-place task
-/isaac-sim/python.sh /workspace/IsaacLab/scripts/policy_inference_groot_g1.py \
-    --server 192.168.1.237:5555 \
-    --language "pick up the red block and place it on the table" \
-    --enable_cameras \
-    --num_action_steps 16 \
-    --action_scale 0.1 \
-    --max_episode_steps 2000
+# Re-download if needed
+docker exec groot-server bash -c "
+    huggingface-cli download datamentorshf/groot-g1-gripper-hospitality-7ds \
+        --local-dir /workspace/checkpoints/groot-g1-gripper-hospitality-7ds
+"
 ```
-
-## Server Response Format
-
-**Important**: The GROOT server returns responses in a list format:
-
-```python
-# Server returns:
-[{"action": {...}}, {}]
-
-# Extract first element:
-if isinstance(response, list):
-    response = response[0]
-```
-
-## Environment Variables
-
-```bash
-# Required
-export GR00T_STATS=/path/to/statistics.json
-export PYTHONPATH=/workspace/Isaac-GR00T:$PYTHONPATH
-
-# Optional
-export GROOT_SERVER_HOST=192.168.1.237
-export GROOT_SERVER_PORT=5555
-```
-
-## Files Reference
-
-| File | Location | Purpose |
-|------|----------|---------|
-| Inference script | `/workspace/IsaacLab/scripts/policy_inference_groot_g1.py` | Main inference loop |
-| GROOT server | `/workspace/gr00t/gr00t/eval/run_gr00t_server.py` | Model server |
-| Statistics | `/workspace/checkpoints/*/statistics.json` | State normalization |
-| Model checkpoint | `/workspace/checkpoints/*/checkpoint-*` | Fine-tuned weights |
 
 ## References
 
-- [INFERENCE_DEBUGGING.md](INFERENCE_DEBUGGING.md) - Debug action application issues
-- [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md) - Train your own model
+- [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md) — Train your own model
 - [Isaac-GR00T Repository](https://github.com/NVIDIA/Isaac-GR00T)
+- [GROOT N1.6 Model Card](https://huggingface.co/nvidia/GR00T-N1.6-3B)

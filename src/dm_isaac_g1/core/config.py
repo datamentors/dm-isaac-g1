@@ -32,7 +32,7 @@ class Config:
 
     # Model configuration
     groot_model_path: str = "nvidia/GR00T-N1.6-3B"
-    finetuned_model_path: str = "datamentorshf/groot-g1-inspire-9datasets"
+    finetuned_model_path: str = "datamentorshf/groot-g1-gripper-hospitality-7ds"
 
     # Training configuration
     num_envs: int = 4096

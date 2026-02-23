@@ -8,8 +8,8 @@ This document describes how to set up the GROOT N1.6 inference server on the DGX
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| Model files | ✅ Deployed | `/home/nvidia/GR00T/checkpoints/groot-g1-inspire-9datasets/` |
-| HuggingFace | ✅ Uploaded | `datamentorshf/groot-g1-inspire-9datasets` |
+| Model files | ✅ Deployed | `/home/nvidia/GR00T/checkpoints/groot-g1-gripper-hospitality-7ds/` |
+| HuggingFace | ✅ Uploaded | `datamentorshf/groot-g1-gripper-hospitality-7ds` |
 | Docker container | ✅ Running | `groot-server` |
 | Dependencies | ⚠️ Needs uv sync | Complex dependency resolution required |
 | Inference server | ⏳ Pending | Waiting on dependencies |
@@ -22,7 +22,7 @@ This document describes how to set up the GROOT N1.6 inference server on the DGX
 │                       192.168.1.237                              │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │                    /home/nvidia/GR00T/                      │ │
-│  │  ├── checkpoints/groot-g1-inspire-9datasets/  (10GB model)  │ │
+│  │  ├── checkpoints/groot-g1-gripper-hospitality-7ds/  (10GB model)  │ │
 │  │  ├── gr00t/                        (GROOT source code)      │ │
 │  │  └── inference_venv/               (Python environment)     │ │
 │  └────────────────────────────────────────────────────────────┘ │
@@ -39,8 +39,8 @@ This document describes how to set up the GROOT N1.6 inference server on the DGX
 ## Model Location
 
 The fine-tuned model is stored at:
-- **Spark server**: `/home/nvidia/GR00T/checkpoints/groot-g1-inspire-9datasets/`
-- **HuggingFace**: `datamentorshf/groot-g1-inspire-9datasets`
+- **Spark server**: `/home/nvidia/GR00T/checkpoints/groot-g1-gripper-hospitality-7ds/`
+- **HuggingFace**: `datamentorshf/groot-g1-gripper-hospitality-7ds`
 
 ## GR00T N1.6 Action Chunking
 
@@ -119,7 +119,7 @@ from gr00t.data.embodiment_tags import EmbodimentTag
 
 policy = Gr00tPolicy(
     embodiment_tag=EmbodimentTag.G1,
-    model_path="/workspace/gr00t/checkpoints/groot-g1-inspire-9datasets",
+    model_path="/workspace/gr00t/checkpoints/groot-g1-gripper-hospitality-7ds",
     device="cuda:0",
     strict=False,
 )

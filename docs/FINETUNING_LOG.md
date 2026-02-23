@@ -497,7 +497,8 @@ Learning rate: 1e-4
 Speed: ~1.17 it/s
 ```
 
-**Status**: In progress. Will upload to HuggingFace as `datamentorshf/groot-g1-gripper-fold-towel-full`.
+**Result**: Training completed successfully (4000 steps from checkpoint-6000).
+- Uploaded to HuggingFace as `datamentorshf/groot-g1-gripper-fold-towel-full`
 
 ### Key Learnings
 - **UNITREE_G1 is pre-registered** — no custom modality config needed
