@@ -419,5 +419,90 @@ python gr00t/experiment/launch_multi_finetune.py \
 | All pip installs → `uv pip install --system` | Mandatory package manager policy | Dockerfile.unitree |
 
 ### Status
-Training in progress — target 10000 steps, output `/workspace/checkpoints/groot_g1_dex3_28dof/`
-Upload target: `datamentorshf/groot-g1-dex3-28dof` on HuggingFace
+Dex3 training was superseded by UNITREE_G1 gripper approach below.
+
+---
+
+## Session: 2026-02-22/23 — UNITREE_G1 Gripper Fine-tuning
+
+### Objective
+Realign with official Isaac-GR00T UNITREE_G1 embodiment:
+- Use pre-registered `UNITREE_G1` tag (not `NEW_EMBODIMENT`)
+- 31 DOF state, 23 DOF action, 1 ego-view camera
+- Arms RELATIVE, grippers/waist/nav ABSOLUTE
+- 30-step action horizon
+
+### Datasets
+All 7 Unitree hospitality datasets (gripper hands, 1 DOF per hand):
+
+| Dataset | HF Repo | Episodes | Frames |
+|---------|---------|----------|--------|
+| G1_Fold_Towel | `unitreerobotics/G1_Fold_Towel` | 200 | 310,000 |
+| G1_Clean_Table | `unitreerobotics/G1_Clean_Table` | 200 | 196,000 |
+| G1_Wipe_Table | `unitreerobotics/G1_Wipe_Table` | 200 | 264,000 |
+| G1_Prepare_Fruit | `unitreerobotics/G1_Prepare_Fruit` | 200 | 123,000 |
+| G1_Pour_Medicine | `unitreerobotics/G1_Pour_Medicine` | 200 | 158,000 |
+| G1_Organize_Tools | `unitreerobotics/G1_Organize_Tools` | 200 | 182,000 |
+| G1_Pack_PingPong | `unitreerobotics/G1_Pack_PingPong` | 200 | 160,000 |
+
+### Data Pipeline
+1. Downloaded from HuggingFace
+2. Converted with `convert_to_groot.py` (per-body-part → flat vectors)
+3. Fixed video directory naming: `cam_left_high` → `observation.images.ego_view`
+4. Fixed `modality.json` original_key and `info.json` features key
+5. Generated stats with `EmbodimentTag.UNITREE_G1`
+
+### Training Run 1: G1_Fold_Towel Only (single dataset)
+```
+Base model: nvidia/GR00T-N1.6-3B
+Dataset: G1_Fold_Towel (200 episodes, 310k frames)
+Embodiment: UNITREE_G1
+Steps: 10,000 (target)
+Batch size: 64
+Learning rate: 1e-4
+Workers: 4
+Speed: ~1.17 it/s
+```
+
+**Result**: Training crashed at step **6123** (exit code 255, disk pressure — disk was 100% full).
+Last checkpoint: `checkpoint-6000` (loss 0.029).
+Uploaded to HuggingFace as `datamentorshf/groot-g1-gripper-fold-towel`.
+
+### Training Run 2: All 7 Hospitality Datasets (merged)
+```
+Base model: nvidia/GR00T-N1.6-3B
+Dataset: groot_merged (1400 episodes, 1.28M frames, 7 tasks)
+Embodiment: UNITREE_G1
+Steps: 10,000
+Batch size: 64
+Learning rate: 1e-4
+Workers: 4
+Speed: ~1.17 it/s
+```
+
+**Result**: Training completed successfully.
+- Final train loss: 0.0545
+- Duration: ~2.3 hours
+- Deployed to Spark inference server
+- Uploaded to HuggingFace as `datamentorshf/groot-g1-gripper-hospitality-7ds`
+
+### Training Run 3: G1_Fold_Towel Resume (from checkpoint-6000)
+```
+Base model: datamentorshf/groot-g1-gripper-fold-towel (checkpoint-6000)
+Dataset: G1_Fold_Towel (200 episodes)
+Embodiment: UNITREE_G1
+Additional steps: 4,000
+Batch size: 64
+Learning rate: 1e-4
+Speed: ~1.17 it/s
+```
+
+**Status**: In progress. Will upload to HuggingFace as `datamentorshf/groot-g1-gripper-fold-towel-full`.
+
+### Key Learnings
+- **UNITREE_G1 is pre-registered** — no custom modality config needed
+- **Video key must be `observation.images.ego_view`** — the conversion script previously created `cam_left_high` directory names, causing `AssertionError` at training load
+- **Disk management is critical** — checkpoints are ~22 GB each, always use `--save_total_limit 2`
+- **VM disk expansion** — added 1 TB disk, expanded LVM from 391 GB to 1.4 TB
+- **`generate_rel_stats` requires `EmbodimentTag` enum** — not a string
+- **batch_size 64** works fine with 1 camera (vs batch_size 8 needed with 4 cameras)

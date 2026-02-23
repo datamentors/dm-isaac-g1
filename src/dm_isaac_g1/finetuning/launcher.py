@@ -55,11 +55,11 @@ class FinetuneArgs:
     max_steps: int = 10000
     """Maximum training steps."""
 
-    save_steps: int = 1000
+    save_steps: int = 2000
     """Save checkpoint every N steps."""
 
-    save_total_limit: int = 5
-    """Keep only the last N checkpoints."""
+    save_total_limit: int = 2
+    """Keep only the last N checkpoints (~22 GB each with optimizer state)."""
 
     batch_size: int = 64
     """Global batch size (across all GPUs). Official uses 1024 with 8 GPUs."""
@@ -221,8 +221,8 @@ def main():
 
     # Training
     parser.add_argument("--max-steps", type=int, default=10000)
-    parser.add_argument("--save-steps", type=int, default=1000)
-    parser.add_argument("--save-total-limit", type=int, default=5)
+    parser.add_argument("--save-steps", type=int, default=2000)
+    parser.add_argument("--save-total-limit", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-5)

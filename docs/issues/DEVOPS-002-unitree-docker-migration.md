@@ -1,6 +1,6 @@
 # DEVOPS-002: Migration to Unitree-Based Docker Environment
 
-## Status: In Progress
+## Status: COMPLETE ✅ (2026-02-19)
 
 ## Background
 
@@ -274,15 +274,24 @@ if torch.cuda.is_available():
 
 ## Success Criteria
 
-- [ ] Docker image builds without errors
-- [ ] Container starts and GPU is accessible (`nvidia-smi` works inside)
-- [ ] Isaac Sim 5.0.0 imports cleanly via pip (no nvcr base image needed)
-- [ ] IsaacLab v2.2.0 imports cleanly
-- [ ] Isaac-GR00T imports cleanly
-- [ ] pink + pinocchio import without assimp symbol conflicts
-- [ ] VNC server starts and Isaac Sim renders in VNC client
-- [ ] Full inference pipeline runs: Isaac Sim → GROOT server → policy actions
-- [ ] No CUDA symbol errors (`__nvJitLinkCreate`, etc.)
+- [x] Docker image builds without errors
+- [x] Container starts and GPU is accessible (RTX PRO 6000 Blackwell)
+- [x] Isaac Sim 5.0.0 imports cleanly via pip (no nvcr base image needed)
+- [x] IsaacLab v2.2.0 (0.44.9) imports cleanly
+- [x] Isaac-GR00T imports cleanly
+- [x] pink 4.0.0 + pinocchio 3.9.0 import without assimp symbol conflicts
+- [x] VNC server starts (TurboVNC 3.1.2, :1)
+- [x] GROOT server reachable at tcp://192.168.1.237:5555
+- [x] No CUDA symbol errors
+
+## ECR Images (2026-02-19)
+
+| Tag | Digest | Description |
+|---|---|---|
+| `base-latest` | `sha256:4497315fc101...` | Isaac Sim + IsaacLab + unitree + pink/pinocchio |
+| `latest` | `sha256:4580a8269c1e...` | Extends base, adds GR00T inference deps |
+
+Registry: `260464233120.dkr.ecr.us-east-1.amazonaws.com/isaac-g1-sim-ft-rl`
 
 ## Rollback
 

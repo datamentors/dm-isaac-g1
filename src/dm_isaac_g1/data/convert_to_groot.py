@@ -162,10 +162,11 @@ def convert_parquet_file(
         if col in data:
             output_data[col] = data[col]
 
-    # Keep only the ego camera image reference
-    ego_key = f"observation.images.{ego_camera}"
-    if ego_key in data:
-        output_data[ego_key] = data[ego_key]
+    # Keep only the ego camera image reference, renamed to ego_view
+    ego_source_key = f"observation.images.{ego_camera}"
+    ego_output_key = "observation.images.ego_view"
+    if ego_source_key in data:
+        output_data[ego_output_key] = data[ego_source_key]
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_table = pa.table(output_data)
@@ -195,7 +196,7 @@ def generate_modality_json(output_path: Path, ego_camera: str):
         },
         "video": {
             "ego_view": {
-                "original_key": f"observation.images.{ego_camera}",
+                "original_key": "observation.images.ego_view",
             },
         },
         "annotation": {
@@ -221,9 +222,10 @@ def generate_info_json(
     ego_camera: str,
 ):
     """Generate info.json for converted dataset."""
-    ego_video_key = f"observation.images.{ego_camera}"
+    ego_source_key = f"observation.images.{ego_camera}"
+    ego_video_key = "observation.images.ego_view"
     source_features = source_info.get("features", {})
-    video_info = source_features.get(ego_video_key, {})
+    video_info = source_features.get(ego_source_key, {})
 
     new_info = {
         "codebase_version": "v2.1",
@@ -396,7 +398,7 @@ def convert_dataset(
                 if not src_cam_dir.exists():
                     continue
 
-            dst_cam_dir = output_path / "videos" / chunk_dir.name / ego_key
+            dst_cam_dir = output_path / "videos" / chunk_dir.name / "observation.images.ego_view"
             dst_cam_dir.mkdir(parents=True, exist_ok=True)
 
             for mp4 in sorted(src_cam_dir.glob("*.mp4")):

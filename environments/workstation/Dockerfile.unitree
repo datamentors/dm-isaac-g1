@@ -15,6 +15,8 @@
 # CUDA Compatibility:
 #   Workstation driver: 590.48.01 (CUDA 13.1 max)
 #   CUDA toolkit in image: 12.8.0
+#   Builder base: cuda:12.8.0-devel (has nvcc for compiling flash-attn + extensions)
+#   Runtime base: cuda:12.8.0-runtime (leaner, no nvcc needed at runtime)
 #   PyTorch build: cu128 — the correct index for PyTorch 2.7.x per
 #     https://pytorch.org/get-started/previous-versions/
 #   Isaac Sim 5.0.0: installed via pip from pypi.nvidia.com
@@ -23,8 +25,10 @@
 # ==============================
 # Stage 1: Builder
 # Heavy compilation happens here; artifacts copied to final stages.
+# Uses devel image (not runtime) so nvcc is available for building
+# flash-attn and other CUDA extension wheels.
 # ==============================
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
@@ -196,23 +200,38 @@ WORKDIR /home/code
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
 
 # ==============================
-# Stage 3: groot — extends base with GR00T inference deps
-# This is the image used for running inference against the GROOT server.
+# Stage 3: groot — extends base with GR00T inference + fine-tuning deps
+# This is the image used for inference and fine-tuning with GROOT.
+#
+# LIBRARY MANAGEMENT RULES — MANDATORY:
+#   1. ALL Python packages MUST be installed via:  uv pip install --system <pkg>
+#      Never use bare `pip install` or `conda install` for Python packages.
+#   2. conda install is ONLY permitted for non-Python system libraries
+#      (e.g. conda-forge ffmpeg for shared .so files). Add a comment explaining why.
+#   3. NO library version change may be made without explicit written approval.
+#      If a version change is needed, open a PR and get it reviewed first.
+#   4. All new dependencies MUST be added to requirements-groot.txt with exact
+#      pinned versions before being added to this Dockerfile.
+#   5. The Dockerfile is the single source of truth. Any package installed on the
+#      workstation manually must be reflected here before the next Docker build.
 #
 # GR00T extra deps (on top of what Isaac Sim + IsaacLab already provide):
-#   - gr00t package itself (editable install, source mounted at /workspace/Isaac-GR00T)
 #   - albumentations, av, diffusers, dm-tree, lmdb, msgpack, msgpack-numpy
 #   - peft, termcolor, tyro, datasets, gymnasium, omegaconf, pyzmq
 #   - deepspeed, wandb, einops, click, pandas, scipy
-#   - transformers (relaxed from ==4.51.3 to >=4.40.0)
-#   - flash-attn and torchcodec intentionally EXCLUDED (not needed for inference,
-#     flash-attn requires CUDA build toolchain, torchcodec unavailable on all platforms)
+#   - transformers==4.51.3 (GR00T's exact pin — DO NOT change without approval)
+#   - flash-attn: required by Eagle3_VL backbone for fine-tuning on CUDA 12.8.
+#     Built via uv pip install --system with --no-build-isolation (needs nvcc).
+#   - torchcodec==0.4.0+cu128: AV1-capable video decoder for LeRobot v3.0 datasets.
+#     Must be installed AFTER conda-forge ffmpeg (for libavutil.so shared libs).
 # ==============================
 FROM base AS groot
 
 SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
 
-# Install uv into the conda env for fast, reproducible dep resolution
+# Install uv — the ONLY approved Python package manager for this image.
+# uv is installed via pip once to bootstrap itself, then all subsequent
+# package installs MUST use: uv pip install --system <package>
 RUN pip install uv
 
 # Copy the groot requirements file
@@ -223,6 +242,32 @@ COPY requirements-groot.txt /tmp/requirements-groot.txt
 # uv picks up the active python directly — no --python flag needed.
 # --system allows uv to install into the conda env's site-packages.
 RUN uv pip install --system -r /tmp/requirements-groot.txt
+
+# flash-attn: built from source against PyTorch 2.7.0 + CUDA 12.8.
+# The base runtime image does not include nvcc, so we install cuda-nvcc
+# just for the compilation step. --no-build-isolation ensures it uses the
+# already-installed torch. The nvcc install adds ~500MB to this layer but
+# enables efficient attention for Eagle3_VL during GR00T fine-tuning.
+# If flash-attn is absent the model falls back to eager attention (slower, more VRAM).
+RUN apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-12-8 \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system flash-attn --no-build-isolation
+
+# conda-forge FFmpeg: provides libavutil.so.5x shared libs required by torchcodec.
+# The system FFmpeg in ubuntu22.04 doesn't expose these versioned .so files.
+# NOTE: conda install is used here ONLY because this installs native shared libraries
+# (.so files), not Python packages. This is the ONLY permitted use of conda install
+# in this stage. Python packages must always use: uv pip install --system
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    conda install -n unitree_sim_env -c conda-forge ffmpeg -y
+
+# torchcodec: AV1-capable video decoder required for LeRobot v3.0 datasets
+# (HuggingFace Dex3 and other recent datasets use AV1 codec in MP4 containers).
+# Must be installed AFTER conda-forge ffmpeg to find the correct libavutil.so.
+# cu128 wheel is ABI-matched to PyTorch 2.7.0+cu128 (avoids symbol mismatch).
+# Version 0.4.0 is pinned — DO NOT upgrade without testing ABI compatibility.
+RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128
 
 WORKDIR /home/code
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]

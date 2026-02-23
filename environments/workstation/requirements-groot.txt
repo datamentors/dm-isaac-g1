@@ -5,9 +5,16 @@
 #
 # NOT included (already provided or intentionally skipped):
 #   torch, torchvision, torchaudio  — already installed (2.7.0 cu128)
-#   flash-attn                      — requires CUDA build toolchain, not needed for inference
-#   torchcodec                      — not needed for inference
 #   pyzmq                           — already installed via unitree_sim_isaaclab requirements
+#
+# torchcodec: installed separately in Dockerfile (requires conda-forge ffmpeg + cu128 wheel)
+#   uv pip install --system torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128
+# Required for AV1 video decoding (LeRobot v3.0 datasets from HuggingFace use AV1 codec).
+#
+# flash-attn: installed separately in the groot Dockerfile stage via
+#   uv pip install --system flash-attn --no-build-isolation
+# (requires nvcc + gcc from the builder stage; needed for GR00T fine-tuning
+#  with Eagle3_VL backbone on CUDA 12.8 / PyTorch 2.7.0)
 #
 # Sources:
 #   https://github.com/NVIDIA/Isaac-GR00T/blob/main/pyproject.toml
@@ -29,8 +36,12 @@ msgpack-numpy==0.4.8
 pandas==2.2.3
 peft==0.17.1
 termcolor==3.2.0
-# transformers: relaxed from ==4.51.3 to avoid conflicts with Isaac Sim deps
-transformers>=4.40.0,<5.0.0
+# transformers: pinned to exactly 4.51.3 — GR00T N1.6 pyproject.toml pins this version.
+# Required for Eagle3_VL image processor (_prepare_input_images is in BaseImageProcessorFast at 4.51.3).
+# 4.52+ renames or removes this method; 4.57+ breaks _attn_implementation_autoset.
+# DO NOT upgrade without explicit approval and testing.
+transformers==4.51.3
+tokenizers==0.21.1
 tyro==0.9.17
 click==8.1.8
 datasets==3.6.0

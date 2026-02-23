@@ -2,6 +2,10 @@
 
 This document defines the standard workflows and best practices for working with the GROOT fine-tuning and G1 robot development environment.
 
+**Current embodiment**: UNITREE_G1 (gripper hands, 1 DOF per hand, 31 DOF state, 23 DOF action).
+**Embodiment tag**: `UNITREE_G1` (pre-registered in Isaac-GR00T, no custom modality config needed).
+**Camera**: 1 ego-view (`observation.images.ego_view`, mapped from `cam_left_high`).
+
 ---
 
 ## PyTorch + CUDA Compatibility Reference
@@ -275,118 +279,123 @@ docker compose down && docker compose up -d
 ### Workstation Container (/workspace)
 ```
 /workspace/
-├── Isaac-GR00T/           # GROOT fine-tuning framework
-│   ├── datasets/          # Datasets (must be in /workspace for container access)
-│   ├── scripts/           # Conversion and utility scripts
-│   └── *.py configs       # Modality configs (g1_fold_towel_config.py, etc.)
-├── checkpoints/           # Model checkpoints
-│   ├── groot_g1_full/     # Simulated training checkpoint
-│   ├── groot_g1_teleop/   # Real robot data checkpoint
-│   └── groot_g1_fold_towel/  # Hospitality task checkpoint
-└── IsaacLab/              # Isaac Lab for RL training
+├── Isaac-GR00T/              # GROOT fine-tuning framework
+├── dm-isaac-g1/              # This repo (mounted volume)
+├── datasets/
+│   ├── hospitality/          # Raw downloads from HuggingFace
+│   ├── groot/                # Converted to UNITREE_G1 format
+│   └── groot_merged/         # Merged 7-dataset training set
+├── checkpoints/              # Model checkpoints
+│   └── groot-g1-gripper-*/   # UNITREE_G1 gripper models
+├── logs/                     # Training logs
+├── unitree_sim_isaaclab/     # Unitree sim integration
+└── IsaacLab/                 # Isaac Lab for RL training
 ```
 
 ## Dataset Handling
 
-### GROOT Expected Format
+### GROOT Expected Format (UNITREE_G1)
 
-GROOT N1.6 expects datasets in LeRobot v2 format with specific field names:
-- `observation.state` - Concatenated state vector
-- `action` - Concatenated action vector (NOT `action.action`)
-- `observation.images.*` - Video frames
+GROOT N1.6 with UNITREE_G1 embodiment expects datasets in LeRobot v2 format:
+- `observation.state` - Flat 31 DOF float32 array
+- `action` - Flat 23 DOF float32 array
+- `observation.images.ego_view` - Ego-view camera video (mapped from cam_left_high)
+- `meta/modality.json` - Joint mapping for UNITREE_G1
+- `meta/stats.json` + `meta/relative_stats.json` - Normalization stats
 
 ### Converting Unitree Hospitality Datasets
 
-Unitree hospitality datasets (G1_Fold_Towel, G1_Clean_Table, etc.) use individual fields:
-- `observation.left_arm`, `observation.right_arm`, etc.
-- `action.left_arm`, `action.right_arm`, etc.
-
-Use the conversion script:
+Unitree hospitality datasets use per-body-part columns. Convert with:
 ```bash
-python /workspace/Isaac-GR00T/scripts/convert_g1_format.py \
-  --input /path/to/original_dataset \
-  --output /path/to/converted_dataset_GROOT
+python -m dm_isaac_g1.data.convert_to_groot \
+  --input /workspace/datasets/hospitality/G1_Fold_Towel \
+  --output /workspace/datasets/groot/G1_Fold_Towel \
+  --ego-camera cam_left_high
 ```
 
-### Required Meta Files
-
-Each dataset must have in `meta/`:
-1. `info.json` - Dataset info with features
-2. `modality.json` - Joint mapping for GROOT
-3. `episodes.jsonl` - Episode metadata
-4. `tasks.jsonl` - Task descriptions
-
-## Fine-tuning Workflow
-
-### 1. Validate Dataset Before Training
-
+Then generate stats:
 ```bash
-# Check info.json features
-cat /workspace/Isaac-GR00T/datasets/DATASET_NAME/meta/info.json | python3 -c "import json,sys; d=json.load(sys.stdin); print([k for k in d['features'].keys()])"
-
-# Check parquet columns
-python3 -c "
-import pyarrow.parquet as pq
-import glob
-files = sorted(glob.glob('/workspace/Isaac-GR00T/datasets/DATASET_NAME/data/chunk-000/*.parquet'))
-if files:
-    t = pq.read_table(files[0])
-    print('Columns:', t.column_names)
+conda run -n unitree_sim_env python -c "
+from gr00t.utils.generate_rel_stats import generate_rel_stats
+from gr00t.data.embodiment_tags import EmbodimentTag
+generate_rel_stats('/workspace/datasets/groot/G1_Fold_Towel', EmbodimentTag.UNITREE_G1)
 "
 ```
 
-### 2. Run Test Training First
+### Merging Multiple Datasets
 
-Always run a small test (100 steps) before full training:
 ```bash
-python gr00t/experiment/launch_finetune.py \
-  --base-model-path nvidia/GR00T-N1.6-3B \
-  --dataset-path /workspace/Isaac-GR00T/datasets/DATASET_GROOT \
-  --embodiment-tag NEW_EMBODIMENT \
-  --modality-config-path /workspace/Isaac-GR00T/config.py \
-  --output-dir /workspace/checkpoints/test_run \
-  --max-steps 100 \
-  --save-steps 50 \
-  --save-total-limit 2 \
-  --global-batch-size 8
+python /workspace/dm-isaac-g1/scripts/training/merge_datasets.py \
+  --input-dir /workspace/datasets/groot \
+  --output /workspace/datasets/groot_merged
 ```
 
-### 3. Clean Test Checkpoints
+## Fine-tuning Workflow
 
-Delete test checkpoints before full training to save disk space:
+### 1. Run Training (UNITREE_G1)
+
+Use the training scripts in `scripts/training/`:
+
 ```bash
-rm -rf /workspace/checkpoints/test_run
+# Single dataset
+bash /workspace/dm-isaac-g1/scripts/training/finetune_fold_towel.sh
+
+# All 7 datasets
+bash /workspace/dm-isaac-g1/scripts/training/finetune_hospitality_7ds.sh
+
+# Resume from checkpoint
+bash /workspace/dm-isaac-g1/scripts/training/finetune_resume.sh \
+    <base_checkpoint> <dataset_path> <output_dir> [steps]
 ```
 
-### 4. Run Full Training
-
+Or use the Python launcher:
 ```bash
-nohup python gr00t/experiment/launch_finetune.py \
-  --base-model-path nvidia/GR00T-N1.6-3B \
-  --dataset-path /workspace/Isaac-GR00T/datasets/DATASET_GROOT \
-  --embodiment-tag NEW_EMBODIMENT \
-  --modality-config-path /workspace/Isaac-GR00T/config.py \
-  --num-gpus 1 \
-  --output-dir /workspace/checkpoints/groot_TASK_NAME \
-  --max-steps 5000 \
-  --save-steps 1000 \
-  --save-total-limit 2 \
-  --global-batch-size 8 \
-  --learning-rate 1e-4 \
-  --dataloader-num-workers 0 \
-  > /tmp/finetune_TASK.log 2>&1 &
+python -m dm_isaac_g1.finetuning.launcher \
+  --datasets /workspace/datasets/groot/G1_Fold_Towel \
+  --output /workspace/checkpoints/groot-g1-gripper-fold-towel \
+  --embodiment-tag UNITREE_G1
 ```
 
-### 5. Monitor Training
+Or call Isaac-GR00T directly:
+```bash
+cd /workspace/Isaac-GR00T
+conda run --no-capture-output -n unitree_sim_env \
+torchrun --nproc_per_node=1 --master_port=29500 \
+    gr00t/experiment/launch_finetune.py \
+    --base_model_path nvidia/GR00T-N1.6-3B \
+    --dataset_path /workspace/datasets/groot/G1_Fold_Towel \
+    --embodiment_tag UNITREE_G1 \
+    --num_gpus 1 \
+    --output_dir /workspace/checkpoints/groot-g1-gripper-fold-towel \
+    --save_total_limit 2 \
+    --max_steps 10000 \
+    --save_steps 2000 \
+    --warmup_ratio 0.05 \
+    --weight_decay 1e-5 \
+    --learning_rate 1e-4 \
+    --global_batch_size 64 \
+    --dataloader_num_workers 4 \
+    --color_jitter_params brightness 0.3 contrast 0.4 saturation 0.5 hue 0.08 \
+    2>&1 | tee /workspace/logs/finetune.log
+```
+
+**Key differences from legacy Inspire/Dex3 training:**
+- Uses `UNITREE_G1` embodiment tag (NOT `NEW_EMBODIMENT`)
+- No `--modality-config-path` needed (pre-registered)
+- `torchrun` instead of bare `python` (matching official Isaac-GR00T examples)
+- `global_batch_size 64` (not 8 — more VRAM available with 1 camera)
+- `dataloader_num_workers 4` (safe with 1 camera vs 4)
+
+### 2. Monitor Training
 
 ```bash
-tail -f /tmp/finetune_TASK.log
+tail -f /workspace/logs/finetune.log
 ```
 
 ## Disk Space Management
 
 ### Checkpoint Disk Budget
-Each checkpoint is **~26 GB** (model weights + optimizer state). Always use `--save-total-limit 2` to auto-rotate and keep only the last 2 checkpoints (~52 GB max). Without this flag, a 10,000-step run with save-steps=1000 creates 260 GB of checkpoints.
+Each checkpoint is **~22 GB** (model weights + optimizer state) for UNITREE_G1 (smaller than Inspire/Dex3 due to fewer DOF). Always use `--save-total-limit 2` to auto-rotate and keep only the last 2 checkpoints (~44 GB max). Inference-only copies (model weights only) are ~9.2 GB.
 
 ### Check Disk Usage
 ```bash
@@ -569,7 +578,19 @@ grep "video_backend" /workspace/Isaac-GR00T/gr00t/configs/data/data_config.py
 ### Issue: `undefined symbol` with torchcodec
 **Cause**: ABI mismatch — installed torchcodec 0.10.x instead of 0.4.0+cu128. Fix: `conda run -n unitree_sim_env uv pip install torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128`
 
-## Modality Config Template
+## Embodiment Configuration
+
+### UNITREE_G1 (Pre-registered — no custom config needed)
+
+The `UNITREE_G1` embodiment tag is already registered in Isaac-GR00T. Just pass `--embodiment_tag UNITREE_G1` to the training script. It expects:
+- `observation.state` (31 DOF): flat array with legs, waist, arms, grippers
+- `action` (23 DOF): flat array with arms (RELATIVE), grippers/waist/nav (ABSOLUTE)
+- `observation.images.ego_view`: single ego camera
+- Action horizon: 30 steps
+
+### Custom Embodiment (NEW_EMBODIMENT — legacy)
+
+For custom embodiments, create a config file:
 
 ```python
 from gr00t.configs.data.embodiment_configs import register_modality_config
@@ -577,72 +598,57 @@ from gr00t.data.types import ModalityConfig, ActionConfig, ActionRepresentation,
 from gr00t.data.embodiment_tags import EmbodimentTag
 
 config = {
-    "video": ModalityConfig(
-        delta_indices=[0],
-        modality_keys=["cam_name"],
-    ),
-    "state": ModalityConfig(
-        delta_indices=[0],
-        modality_keys=["body", "left_arm", "right_arm", "left_gripper", "right_gripper"],
-    ),
+    "video": ModalityConfig(delta_indices=[0], modality_keys=["cam_name"]),
+    "state": ModalityConfig(delta_indices=[0], modality_keys=["observation.state"]),
     "action": ModalityConfig(
         delta_indices=list(range(0, 16)),
-        modality_keys=["body", "left_arm", "right_arm", "left_gripper", "right_gripper"],
-        action_configs=[
-            ActionConfig(rep=ActionRepresentation.ABSOLUTE, type=ActionType.NON_EEF, format=ActionFormat.DEFAULT),
-            # ... one per modality_key
-        ],
+        modality_keys=["action"],
+        action_configs=[ActionConfig(rep=ActionRepresentation.ABSOLUTE, type=ActionType.NON_EEF, format=ActionFormat.DEFAULT)],
     ),
-    "language": ModalityConfig(
-        delta_indices=[0],
-        modality_keys=["task"],
-    ),
+    "language": ModalityConfig(delta_indices=[0], modality_keys=["task"]),
 }
-
 register_modality_config(config, embodiment_tag=EmbodimentTag.NEW_EMBODIMENT)
 ```
 
 ## Trained Models
 
-| Model | HuggingFace Repo | Dataset | Steps |
-|-------|-----------------|---------|-------|
-| G1 Loco-Manipulation | [datamentorshf/groot-g1-loco-manip](https://huggingface.co/datamentorshf/groot-g1-loco-manip) | unitree_g1.LMPnPAppleToPlateDC | 5000 |
-| G1 Teleop | [datamentorshf/groot-g1-teleop](https://huggingface.co/datamentorshf/groot-g1-teleop) | g1-pick-apple | 4000 |
-| G1 Fold Towel | (training in progress) | G1_Fold_Towel | 5000 |
+### UNITREE_G1 Gripper (Current)
+
+| Model | HuggingFace Repo | Dataset | Steps | Embodiment | Status |
+|-------|-----------------|---------|-------|------------|--------|
+| **Hospitality 7-Dataset** | [datamentorshf/groot-g1-gripper-hospitality-7ds](https://huggingface.co/datamentorshf/groot-g1-gripper-hospitality-7ds) | All 7 hospitality (1400 eps) | 10,000 | UNITREE_G1 | Deployed to Spark |
+| Fold Towel | [datamentorshf/groot-g1-gripper-fold-towel](https://huggingface.co/datamentorshf/groot-g1-gripper-fold-towel) | G1_Fold_Towel (200 eps) | 6,000 | UNITREE_G1 | On HF |
+| Fold Towel (Full) | datamentorshf/groot-g1-gripper-fold-towel-full | G1_Fold_Towel (200 eps) | 10,000 | UNITREE_G1 | Training in progress |
+
+### Legacy (Inspire/Dex3 — deprecated)
+
+| Model | HuggingFace Repo | Dataset | Steps | Embodiment |
+|-------|-----------------|---------|-------|------------|
+| G1 Loco-Manipulation | [datamentorshf/groot-g1-loco-manip](https://huggingface.co/datamentorshf/groot-g1-loco-manip) | unitree_g1.LMPnPAppleToPlateDC | 5,000 | UNITREE_G1 |
+| G1 Teleop | [datamentorshf/groot-g1-teleop](https://huggingface.co/datamentorshf/groot-g1-teleop) | g1-pick-apple | 4,000 | NEW_EMBODIMENT |
 
 ---
 
-## Workstation Scripts Reference
+## Training Scripts
 
-Scripts that exist on the workstation container but should be migrated to this repo:
+All training scripts are in `scripts/training/`:
 
-### Data Preparation Scripts (`/workspace/scripts/`)
+| Script | Purpose |
+|--------|---------|
+| `finetune_fold_towel.sh` | Fine-tune on G1_Fold_Towel (200 episodes, 10000 steps) |
+| `finetune_hospitality_7ds.sh` | Fine-tune on all 7 hospitality datasets merged (1400 episodes) |
+| `finetune_resume.sh` | Resume training from a checkpoint |
+| `merge_datasets.py` | Merge multiple converted GR00T datasets into one |
 
-| Script | Purpose | Status |
-|--------|---------|--------|
-| `fix_episodes.py` | Create missing episodes.jsonl and tasks.jsonl | To migrate |
-| `split_parquet.py` | Split combined parquet into per-episode files | To migrate |
-| `compute_stats.py` | Compute normalization statistics for datasets | To migrate |
-| `fix_video_structure.py` | Restructure video directories for GROOT | To migrate |
-| `complete_split.py` | Complete partial parquet splits | To migrate |
-| `convert_to_inspire.py` | Convert datasets to Inspire format | ✅ In repo |
-| `combine_inspire_datasets.py` | Combine multiple datasets | ✅ In repo |
+### Finetuning Configs
 
-### Isaac-GR00T Scripts (`/workspace/Isaac-GR00T/`)
+Configs are in `src/dm_isaac_g1/finetuning/configs/`:
 
-| Script | Purpose | Status |
-|--------|---------|--------|
-| `download_dataset.py` | HuggingFace dataset downloader | To migrate |
-| `download_all_meta.py` | Download dataset metadata | To migrate |
-| `download_meta.py` | Download single dataset metadata | To migrate |
-| `g1_teleop_config.py` | Teleop dataset modality config | To migrate |
-| `g1_fold_towel_config.py` | Hospitality task modality config | To migrate |
-| `g1_inspire_simple_config.py` | Simple Inspire config | To migrate |
-| `g1_inspire_unified_config.py` | Full 53 DOF Inspire config | ✅ In repo |
-
-### Note on Script Migration
-
-See [RESTRUCTURING_PLAN.md](./RESTRUCTURING_PLAN.md) for the full plan to migrate these scripts into a proper Python package structure.
+| Config | Embodiment | DOF | Status |
+|--------|-----------|-----|--------|
+| `g1_gripper_unitree.py` | UNITREE_G1 (pre-registered) | 31 state / 23 action | **Current** |
+| `g1_inspire_53dof.py` | NEW_EMBODIMENT (custom) | 53 state / 53 action | Legacy |
+| `g1_dex3_28dof.py` | NEW_EMBODIMENT (custom) | 28 state / 28 action | Legacy |
 
 ---
 

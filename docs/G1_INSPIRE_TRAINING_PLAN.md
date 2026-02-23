@@ -1,5 +1,10 @@
 # G1 EDU 2 + Inspire Hands Training Plan
 
+> **DEPRECATED**: This plan was for the Inspire Robotics Dexterous Hands (53 DOF) with `NEW_EMBODIMENT` tag.
+> We have since switched to the **UNITREE_G1 gripper embodiment** (31 DOF state / 23 DOF action) which uses
+> the pre-registered `UNITREE_G1` tag in Isaac-GR00T. See [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md) for
+> the current workflow. This document is kept for historical reference.
+
 ## Overview
 
 This document outlines the comprehensive strategy for training a GROOT model for the **Unitree G1 EDU 2** robot with **Inspire Robotics Dexterous Hands**. It consolidates all available datasets, joint configurations, and training approaches.
