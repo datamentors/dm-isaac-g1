@@ -498,7 +498,9 @@ SETUPS: dict[str, InferenceSetup] = {
                 rot=(0.5, -0.5, 0.5, -0.5),
             ),
         ],
-        scene="pickplace_g1_gripper",
+        # No dedicated gripper scenes in unitree_sim_isaaclab — use inspire scene
+        # (same G1 body + d435_link camera; inspire hand joints are simply ignored)
+        scene="pickplace_g1_inspire",
         language="fold the towel",
         spawn_objects=False,  # Use scene's native objects
         dof_layout={
@@ -566,7 +568,7 @@ SETUPS: dict[str, InferenceSetup] = {
                 rot=(0.5, -0.5, 0.5, -0.5),
             ),
         ],
-        scene="pickplace_redblock_g1_gripper",
+        scene="pickplace_redblock_g1_inspire",
         language="pick up the red block",
         spawn_objects=False,
         dof_layout={

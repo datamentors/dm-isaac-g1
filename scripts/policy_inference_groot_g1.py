@@ -71,10 +71,9 @@ from isaaclab.app import AppLauncher
 # Uses unitree_sim_isaaclab scenes which have full robot USD with d435_link camera
 # See: https://github.com/unitreerobotics/unitree_sim_isaaclab
 AVAILABLE_SCENES = {
-    # G1 with Gripper hands (from unitree_sim_isaaclab) — matches UNITREE_G1 embodiment
-    "pickplace_g1_gripper": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_gripper.pickplace_cylinder_g1_29dof_gripper_joint_env_cfg.PickPlaceCylinderG129GripperJointEnvCfg",
-    "pickplace_redblock_g1_gripper": "tasks.g1_tasks.pick_place_redblock_g1_29dof_gripper.pickplace_redblock_g1_29dof_gripper_joint_env_cfg.PickPlaceRedblockG129GripperJointEnvCfg",
     # G1 with Inspire hands (from unitree_sim_isaaclab)
+    # NOTE: Also used for UNITREE_G1 gripper models — same G1 body + d435_link camera;
+    # inspire hand joints are simply ignored when using gripper_unitree setup.
     "pickplace_g1_inspire": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_inspire.pickplace_cylinder_g1_29dof_inspire_env_cfg.PickPlaceG129InspireBaseFixEnvCfg",
     "pickplace_redblock_g1_inspire": "tasks.g1_tasks.pick_place_redblock_g1_29dof_inspire.pickplace_redblock_g1_29dof_inspire_joint_env_cfg.PickPlaceG129InspireHandBaseFixEnvCfg",
     "stack_g1_inspire": "tasks.g1_tasks.stack_rgyblock_g1_29dof_inspire.stack_rgyblock_g1_29dof_inspire_joint_env_cfg.StackRgyBlockG129InspireBaseFixEnvCfg",
