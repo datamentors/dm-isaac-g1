@@ -474,6 +474,147 @@ SETUPS: dict[str, InferenceSetup] = {
             "right_hand_thumb_2_joint",   # training mean +0.43, sim range [-1.66, -0.09]
         ],
     ),
+
+    # =========================================================================
+    # G1 + Gripper (UNITREE_G1) — Hospitality tasks (Fold Towel, etc.)
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # 1 camera (ego_view via d435_link), 31 DOF state, 23 DOF action
+    # Mixed action format: arms RELATIVE, grippers/waist/nav ABSOLUTE
+    # Scene: pickplace_g1_gripper (pick-and-place with gripper hands)
+    # Model: groot-g1-gripper-hospitality-7ds (UNITREE_G1 embodiment)
+    "gripper_unitree": InferenceSetup(
+        description=(
+            "G1 Gripper (UNITREE_G1 embodiment) with 1 ego-view camera. "
+            "31 DOF state, 23 DOF mixed action (arms RELATIVE, grippers/waist/nav ABSOLUTE). "
+            "For hospitality models: fold towel, clean table, wipe table, etc."
+        ),
+        cameras=[
+            CameraSpec(
+                name="ego_view",       # UNITREE_G1 training key (NOT cam_left_high)
+                camera_parent=None,    # d435_link head camera
+                pos=(0.0, 0.0, 0.0),
+                rot=(0.5, -0.5, 0.5, -0.5),
+            ),
+        ],
+        scene="pickplace_g1_gripper",
+        language="fold the towel",
+        spawn_objects=False,  # Use scene's native objects
+        dof_layout={
+            "left_leg":   (0, 6),
+            "right_leg":  (6, 12),
+            "waist":      (12, 15),
+            "left_arm":   (15, 22),
+            "right_arm":  (22, 29),
+            "left_hand":  (29, 30),
+            "right_hand": (30, 31),
+        },
+        joint_groups={
+            "left_leg": [
+                "left_hip_yaw_joint", "left_hip_roll_joint", "left_hip_pitch_joint",
+                "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+            ],
+            "right_leg": [
+                "right_hip_yaw_joint", "right_hip_roll_joint", "right_hip_pitch_joint",
+                "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+            ],
+            "waist": [
+                "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
+            ],
+            "left_arm": [
+                "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+                "left_shoulder_yaw_joint", "left_elbow_joint",
+                "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            ],
+            "right_arm": [
+                "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+                "right_shoulder_yaw_joint", "right_elbow_joint",
+                "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+            ],
+            "left_hand": ["left_gripper_joint"],
+            "right_hand": ["right_gripper_joint"],
+        },
+        action_joint_patterns=[
+            # left arm (7 DOF) — RELATIVE
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+            "left_shoulder_yaw_joint", "left_elbow_joint",
+            "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            # right arm (7 DOF) — RELATIVE
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint", "right_elbow_joint",
+            "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+            # grippers (2 DOF) — ABSOLUTE
+            "left_gripper_joint", "right_gripper_joint",
+            # waist (3 DOF) — ABSOLUTE
+            "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
+        ],
+        hand_type="gripper",
+    ),
+
+    # -------------------------------------------------------------------------
+    "gripper_redblock": InferenceSetup(
+        description=(
+            "G1 Gripper (UNITREE_G1) pick-and-place red block scene. "
+            "Same config as gripper_unitree but with red block scene."
+        ),
+        cameras=[
+            CameraSpec(
+                name="ego_view",
+                camera_parent=None,
+                pos=(0.0, 0.0, 0.0),
+                rot=(0.5, -0.5, 0.5, -0.5),
+            ),
+        ],
+        scene="pickplace_redblock_g1_gripper",
+        language="pick up the red block",
+        spawn_objects=False,
+        dof_layout={
+            "left_leg":   (0, 6),
+            "right_leg":  (6, 12),
+            "waist":      (12, 15),
+            "left_arm":   (15, 22),
+            "right_arm":  (22, 29),
+            "left_hand":  (29, 30),
+            "right_hand": (30, 31),
+        },
+        joint_groups={
+            "left_leg": [
+                "left_hip_yaw_joint", "left_hip_roll_joint", "left_hip_pitch_joint",
+                "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+            ],
+            "right_leg": [
+                "right_hip_yaw_joint", "right_hip_roll_joint", "right_hip_pitch_joint",
+                "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+            ],
+            "waist": [
+                "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
+            ],
+            "left_arm": [
+                "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+                "left_shoulder_yaw_joint", "left_elbow_joint",
+                "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            ],
+            "right_arm": [
+                "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+                "right_shoulder_yaw_joint", "right_elbow_joint",
+                "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+            ],
+            "left_hand": ["left_gripper_joint"],
+            "right_hand": ["right_gripper_joint"],
+        },
+        action_joint_patterns=[
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+            "left_shoulder_yaw_joint", "left_elbow_joint",
+            "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+            "right_shoulder_yaw_joint", "right_elbow_joint",
+            "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+            "left_gripper_joint", "right_gripper_joint",
+            "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
+        ],
+        hand_type="gripper",
+    ),
 }
 
 

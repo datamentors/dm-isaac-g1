@@ -71,6 +71,9 @@ from isaaclab.app import AppLauncher
 # Uses unitree_sim_isaaclab scenes which have full robot USD with d435_link camera
 # See: https://github.com/unitreerobotics/unitree_sim_isaaclab
 AVAILABLE_SCENES = {
+    # G1 with Gripper hands (from unitree_sim_isaaclab) — matches UNITREE_G1 embodiment
+    "pickplace_g1_gripper": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_gripper.pickplace_cylinder_g1_29dof_gripper_joint_env_cfg.PickPlaceCylinderG129GripperJointEnvCfg",
+    "pickplace_redblock_g1_gripper": "tasks.g1_tasks.pick_place_redblock_g1_29dof_gripper.pickplace_redblock_g1_29dof_gripper_joint_env_cfg.PickPlaceRedblockG129GripperJointEnvCfg",
     # G1 with Inspire hands (from unitree_sim_isaaclab)
     "pickplace_g1_inspire": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_inspire.pickplace_cylinder_g1_29dof_inspire_env_cfg.PickPlaceG129InspireBaseFixEnvCfg",
     "pickplace_redblock_g1_inspire": "tasks.g1_tasks.pick_place_redblock_g1_29dof_inspire.pickplace_redblock_g1_29dof_inspire_joint_env_cfg.PickPlaceG129InspireHandBaseFixEnvCfg",
@@ -295,16 +298,22 @@ def build_flat_observation(
     extra_camera_rgbs: dict = None,
     primary_camera_name: str = "cam_left_high",
     negate_state_mask: np.ndarray = None,
+    embodiment_format: str = "new_embodiment",
 ) -> dict:
     """
-    Build observation in FLAT dictionary format for Gr00tSimPolicyWrapper.
+    Build observation dictionary for GROOT inference server.
 
-    Supports two formats:
-    1. new_embodiment (28 or 53 DOF): Uses "observation.state" as concatenated vector
-    2. unitree_g1: Uses "state.left_arm", "state.right_arm", etc.
+    Supports two server-side formats:
+
+    1. **new_embodiment** (28/53 DOF, Dex3/Inspire):
+       Nested dicts: {"video": {"cam_left_high": ...}, "state": {"observation.state": ...}}
+
+    2. **unitree_g1** (31 DOF state, gripper):
+       Flat dot-separated keys for Gr00tSimPolicyWrapper:
+       {"video.ego_view": ..., "state.left_arm": ..., "annotation.human.task_description": ...}
 
     Args:
-        camera_rgb: Primary camera image (B, H, W, C) uint8 — keyed by primary_camera_name
+        camera_rgb: Primary camera image (B, H, W, C) uint8
         joint_pos: Joint positions (B, num_joints) float32
         group_joint_ids: Dict mapping group names to joint indices
         state_dims: Dict mapping state keys to expected dimensions
@@ -312,67 +321,40 @@ def build_flat_observation(
         video_horizon: Temporal horizon for video (usually 1)
         state_horizon: Temporal horizon for state (usually 1)
         action_joint_ids: Joint indices for action space (for new_embodiment)
-        joint_to_53dof_mapping: Dict mapping DOF indices to robot joint indices (for padding)
+        joint_to_53dof_mapping: Dict mapping DOF indices to robot joint indices
         extra_camera_rgbs: Optional dict of additional camera images {cam_name: (B, H, W, C)}
-        primary_camera_name: Name for the primary camera in the video dict (default: "cam_left_high")
+        primary_camera_name: Camera key name (e.g., "cam_left_high" or "ego_view")
+        negate_state_mask: Sign mask for joints with flipped sim conventions
+        embodiment_format: "new_embodiment" (nested dicts) or "unitree_g1" (flat keys)
 
     Returns:
-        Flat observation dictionary
+        Observation dictionary matching the expected server format
     """
     batch_size = camera_rgb.shape[0]
     observation = {}
 
-    # Video: nested dict format {"video": {"cam_name": (B, T, H, W, C)}}
-    video_obs = camera_rgb[:, None, ...]  # Add time dimension
+    # --- Video ---
+    video_obs = camera_rgb[:, None, ...]  # Add time dimension (B, 1, H, W, C)
     if video_horizon > 1:
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
 
-    video_dict = {primary_camera_name: video_obs}
-
-    # Add extra cameras if provided (for multi-camera models like Dex3 28-DOF)
-    if extra_camera_rgbs:
-        for cam_name, cam_rgb in extra_camera_rgbs.items():
-            cam_obs = cam_rgb[:, None, ...]
-            if video_horizon > 1:
-                cam_obs = np.repeat(cam_obs, video_horizon, axis=1)
-            video_dict[cam_name] = cam_obs
-
-    observation["video"] = video_dict
-
-    # Check if using new_embodiment format (observation.state as single key)
-    if "observation.state" in state_dims:
-        # new_embodiment format: concatenated state vector
-        # Use nested dict format {"state": {"observation.state": (B, T, D)}}
-        state_dim = state_dims["observation.state"]
-
-        # Build state vector with proper joint mapping
-        if joint_to_53dof_mapping is not None:
-            vals = np.zeros((batch_size, state_dim), dtype=np.float32)
-            for dof_idx, robot_joint_idx in joint_to_53dof_mapping.items():
-                if robot_joint_idx is not None and robot_joint_idx < joint_pos.shape[1]:
-                    vals[:, dof_idx] = joint_pos[:, robot_joint_idx]
-        elif action_joint_ids is not None and len(action_joint_ids) >= state_dim:
-            # Use action joint ordering for state
-            vals = joint_pos[:, action_joint_ids[:state_dim]]
-        else:
-            # Pad robot joints to expected state_dim with zeros
-            robot_joints = joint_pos.shape[1]
-            if robot_joints < state_dim:
-                vals = np.zeros((batch_size, state_dim), dtype=np.float32)
-                vals[:, :robot_joints] = joint_pos
-            else:
-                vals = joint_pos[:, :state_dim]
-
-        # Apply sign negation for joints with flipped sim conventions
-        if negate_state_mask is not None:
-            vals = vals * negate_state_mask[:state_dim]
-
-        vals = vals[:, None, :]  # Add time dimension (B, 1, D)
-        if state_horizon > 1:
-            vals = np.repeat(vals, state_horizon, axis=1)
-        observation["state"] = {"observation.state": vals.astype(np.float32)}
+    if embodiment_format == "unitree_g1":
+        # Flat key format: "video.ego_view" → (B, T, H, W, C)
+        observation[f"video.{primary_camera_name}"] = video_obs
     else:
-        # unitree_g1 format: separate body part keys
+        # Nested dict format: {"video": {"cam_left_high": (B, T, H, W, C)}}
+        video_dict = {primary_camera_name: video_obs}
+        if extra_camera_rgbs:
+            for cam_name, cam_rgb in extra_camera_rgbs.items():
+                cam_obs = cam_rgb[:, None, ...]
+                if video_horizon > 1:
+                    cam_obs = np.repeat(cam_obs, video_horizon, axis=1)
+                video_dict[cam_name] = cam_obs
+        observation["video"] = video_dict
+
+    # --- State ---
+    if embodiment_format == "unitree_g1":
+        # Flat key format: "state.left_arm", "state.right_arm", etc.
         for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
             d = state_dims.get(key)
             if d is None:
@@ -381,18 +363,66 @@ def build_flat_observation(
             if len(ids) >= d:
                 vals = joint_pos[:, ids[:d]]
             else:
-                # Pad if needed
                 vals = np.zeros((batch_size, d), dtype=np.float32)
                 if len(ids) > 0:
                     vals[:, :len(ids)] = joint_pos[:, ids]
 
-            vals = vals[:, None, :]  # Add time dimension (B, 1, D)
+            vals = vals[:, None, :]  # (B, 1, D)
+            if state_horizon > 1:
+                vals = np.repeat(vals, state_horizon, axis=1)
+            observation[f"state.{key}"] = vals.astype(np.float32)
+    elif "observation.state" in state_dims:
+        # new_embodiment format: concatenated state vector
+        state_dim = state_dims["observation.state"]
+
+        if joint_to_53dof_mapping is not None:
+            vals = np.zeros((batch_size, state_dim), dtype=np.float32)
+            for dof_idx, robot_joint_idx in joint_to_53dof_mapping.items():
+                if robot_joint_idx is not None and robot_joint_idx < joint_pos.shape[1]:
+                    vals[:, dof_idx] = joint_pos[:, robot_joint_idx]
+        elif action_joint_ids is not None and len(action_joint_ids) >= state_dim:
+            vals = joint_pos[:, action_joint_ids[:state_dim]]
+        else:
+            robot_joints = joint_pos.shape[1]
+            if robot_joints < state_dim:
+                vals = np.zeros((batch_size, state_dim), dtype=np.float32)
+                vals[:, :robot_joints] = joint_pos
+            else:
+                vals = joint_pos[:, :state_dim]
+
+        if negate_state_mask is not None:
+            vals = vals * negate_state_mask[:state_dim]
+
+        vals = vals[:, None, :]
+        if state_horizon > 1:
+            vals = np.repeat(vals, state_horizon, axis=1)
+        observation["state"] = {"observation.state": vals.astype(np.float32)}
+    else:
+        # Fallback: separate body part keys in nested format
+        for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
+            d = state_dims.get(key)
+            if d is None:
+                continue
+            ids = group_joint_ids.get(key, [])
+            if len(ids) >= d:
+                vals = joint_pos[:, ids[:d]]
+            else:
+                vals = np.zeros((batch_size, d), dtype=np.float32)
+                if len(ids) > 0:
+                    vals[:, :len(ids)] = joint_pos[:, ids]
+
+            vals = vals[:, None, :]
             if state_horizon > 1:
                 vals = np.repeat(vals, state_horizon, axis=1)
             observation[f"state.{key}"] = vals.astype(np.float32)
 
-    # Language: nested dict format {"language": {"task": [[cmd], [cmd], ...]}}
-    observation["language"] = {"task": [[language_cmd]] * batch_size}
+    # --- Language ---
+    if embodiment_format == "unitree_g1":
+        # Flat key: "annotation.human.task_description" → tuple of strings
+        observation["annotation.human.task_description"] = (language_cmd,) * batch_size
+    else:
+        # Nested dict: {"language": {"task": [[cmd], ...]}}
+        observation["language"] = {"task": [[language_cmd]] * batch_size}
 
     return observation
 
@@ -797,8 +827,22 @@ def main():
     state_dims = {k: len(v["min"]) for k, v in stats[embodiment_key]["state"].items()}
     print(f"[INFO] State dimensions: {state_dims}", flush=True)
 
+    # Determine embodiment format from setup or auto-detect.
+    # UNITREE_G1 uses flat dot-separated keys (video.ego_view, state.left_arm, etc.)
+    # new_embodiment uses nested dicts ({"video": {...}, "state": {...}})
+    if setup.hand_type == "gripper":
+        embodiment_format = "unitree_g1"
+    elif embodiment_key == "unitree_g1":
+        embodiment_format = "unitree_g1"
+    else:
+        embodiment_format = "new_embodiment"
+    print(f"[INFO] Embodiment format: {embodiment_format}", flush=True)
+
     # Determine DOF layout — prefer setup config, fallback to statistics.json auto-detect
-    total_state_dim = state_dims.get("observation.state", 53)
+    if setup.dof_layout:
+        total_state_dim = max(end for _, end in setup.dof_layout.values())
+    else:
+        total_state_dim = state_dims.get("observation.state", 53)
 
     if setup.dof_layout:
         # Config-driven DOF layout (from InferenceSetup)
@@ -897,8 +941,28 @@ def main():
     # forward/raised. Setting the initial pose to training mean puts the robot
     # in a configuration the model expects, improving inference quality.
     state_stats = stats[embodiment_key]["state"].get("observation.state")
+    training_mean = None
+
     if state_stats and "mean" in state_stats:
+        # new_embodiment: single observation.state vector
         training_mean = np.array(state_stats["mean"], dtype=np.float32)
+    elif embodiment_format == "unitree_g1":
+        # UNITREE_G1: build training mean from split body-part stats
+        # Concatenate means in the same order as body_part_ranges
+        parts_mean = []
+        all_parts_present = True
+        for part_name, start_idx, end_idx in body_part_ranges:
+            part_stats = stats[embodiment_key]["state"].get(part_name)
+            if part_stats and "mean" in part_stats:
+                parts_mean.append(np.array(part_stats["mean"], dtype=np.float32))
+            else:
+                all_parts_present = False
+                break
+        if all_parts_present and parts_mean:
+            training_mean = np.concatenate(parts_mean)
+            print(f"[INFO] Built training mean from split body-part stats ({len(training_mean)} DOF)", flush=True)
+
+    if training_mean is not None:
         # Build initial action in ACTION SPACE (not robot joint space).
         # action_joint_ids maps action_idx -> robot_joint_idx, and
         # joint_to_dof_mapping maps dof_idx -> robot_joint_idx.
@@ -915,8 +979,9 @@ def main():
                     val *= float(negate_action_mask[action_idx])
                 init_action_env[:, action_idx] = val
         print(f"[INFO] Setting initial pose to training data mean ({len(training_mean)} DOF)", flush=True)
-        print(f"[INFO] Training mean (arms): L_sh_pitch={training_mean[0]:.3f}, L_sh_roll={training_mean[1]:.3f}, "
-              f"R_sh_pitch={training_mean[7]:.3f}, R_sh_roll={training_mean[8]:.3f}", flush=True)
+        if len(training_mean) > 13:
+            print(f"[INFO] Training mean (arms): L_sh_pitch={training_mean[0]:.3f}, L_sh_roll={training_mean[1]:.3f}, "
+                  f"R_sh_pitch={training_mean[7]:.3f}, R_sh_roll={training_mean[8]:.3f}", flush=True)
         for _ in range(100):
             obs, _, _, _, _ = env.step(init_action_env)
 
@@ -931,7 +996,7 @@ def main():
             hold_action[:, action_idx] = robot.data.joint_pos[:, robot_idx]
         obs, _, _, _, _ = env.step(hold_action)
     # Log achieved pose after init
-    if state_stats and "mean" in state_stats:
+    if training_mean is not None:
         settled = robot.data.joint_pos.cpu().numpy()[0]
         la_ids = group_joint_ids.get("left_arm", [])
         ra_ids = group_joint_ids.get("right_arm", [])
@@ -1040,7 +1105,7 @@ def main():
                 for dup_cam in duplicate_cam_specs:
                     extra_camera_rgbs[dup_cam.name] = rgb_np.copy()
 
-                # Build flat observation (for Gr00tSimPolicyWrapper)
+                # Build observation for server
                 observation = build_flat_observation(
                     camera_rgb=rgb_np,
                     joint_pos=joint_pos,
@@ -1054,6 +1119,7 @@ def main():
                     extra_camera_rgbs=extra_camera_rgbs if extra_camera_rgbs else None,
                     primary_camera_name=primary_cam.name,
                     negate_state_mask=negate_state_mask,
+                    embodiment_format=embodiment_format,
                 )
 
                 # Get actions from server (returns 30 steps, we use first timestep)
@@ -1160,11 +1226,17 @@ def main():
                     # Absolute: use value directly
                     current_action_vec[:, idxs] = arr
 
-            # Apply action groups — driven by DOF layout
-            # Based on embodiment config: rep=ABSOLUTE, type=NON_EEF
-            # ALL actions are absolute joint position targets (not deltas)
-            for part_name in action_dof_ranges:
-                _apply_group(part_name, relative=False)
+            # Apply action groups — driven by DOF layout and embodiment format.
+            # UNITREE_G1: arms are RELATIVE (deltas from trajectory start), everything else ABSOLUTE.
+            # new_embodiment: ALL actions are ABSOLUTE joint position targets.
+            if embodiment_format == "unitree_g1":
+                # UNITREE_G1 mixed action format
+                _RELATIVE_GROUPS = {"left_arm", "right_arm"}
+                for part_name in action_dof_ranges:
+                    _apply_group(part_name, relative=(part_name in _RELATIVE_GROUPS))
+            else:
+                for part_name in action_dof_ranges:
+                    _apply_group(part_name, relative=False)
 
             # Debug: print first few steps (arms + finger negation)
             if step_count < 10:
@@ -1174,7 +1246,9 @@ def main():
                     print(f"[DEBUG] Step {step_count}: current_joint_pos[left_arm] = {joint_pos[0, la_robot_idxs]}", flush=True)
                 arr = _get_action_at_timestep("left_arm", action_step_idx)
                 if arr is not None:
-                    print(f"[DEBUG] Step {step_count}: ABSOLUTE target[{action_step_idx}] = {arr[0]}", flush=True)
+                    is_rel = embodiment_format == "unitree_g1"
+                    label = "RELATIVE delta" if is_rel else "ABSOLUTE target"
+                    print(f"[DEBUG] Step {step_count}: {label}[{action_step_idx}] = {arr[0]}", flush=True)
                 if la_action_idxs:
                     print(f"[DEBUG] Step {step_count}: applied_target = {current_action_vec[0, la_action_idxs]}", flush=True)
                 # Log finger joints (before negation) for debugging sign convention
@@ -1235,7 +1309,7 @@ def main():
                 client.reset()
                 # Re-apply training mean initial pose on reset
                 # Use action space indexing (not robot joint space) — same as initial setup
-                if state_stats and "mean" in state_stats:
+                if training_mean is not None:
                     print("[INFO] Re-applying training mean initial pose after reset...", flush=True)
                     reset_action = robot.data.joint_pos[:, :env_action_dim].clone()
                     for action_idx, robot_idx in enumerate(action_joint_ids):
