@@ -112,18 +112,22 @@ def main():
         for part_name, dof in state_layout.items():
             state_values[part_name] = np.zeros(dof, dtype=np.float32)
 
-    # Build observation dict — UNITREE_G1 flat format
+    # Build observation dict — UNITREE_G1 nested dict format
+    # The server runs WITHOUT --use-sim-policy-wrapper, so it expects nested dicts:
+    #   {"video": {"ego_view": ...}, "state": {"left_arm": ...}, "language": {...}}
     # Camera: synthetic 480x640 gray image
     ego_view = np.full((1, 1, 480, 640, 3), 128, dtype=np.uint8)
 
     observation = {
-        "video.ego_view": ego_view,
-        "annotation.human.task_description": (args.language,),
+        "video": {"ego_view": ego_view},
+        "language": {"annotation.human.task_description": [[args.language]]},
     }
 
-    # Add state parts as flat keys
+    # Add state parts as nested dict
+    state_dict = {}
     for part_name, vals in state_values.items():
-        observation[f"state.{part_name}"] = vals.reshape(1, 1, -1).astype(np.float32)
+        state_dict[part_name] = vals.reshape(1, 1, -1).astype(np.float32)
+    observation["state"] = state_dict
 
     # Print observation summary
     print("[INFO] Observation dict:")

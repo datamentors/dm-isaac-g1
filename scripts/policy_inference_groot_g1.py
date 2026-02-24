@@ -334,27 +334,24 @@ def build_flat_observation(
     observation = {}
 
     # --- Video ---
+    # All formats use nested dict: {"video": {"cam_name": (B, T, H, W, C)}}
     video_obs = camera_rgb[:, None, ...]  # Add time dimension (B, 1, H, W, C)
     if video_horizon > 1:
         video_obs = np.repeat(video_obs, video_horizon, axis=1)
 
-    if embodiment_format == "unitree_g1":
-        # Flat key format: "video.ego_view" → (B, T, H, W, C)
-        observation[f"video.{primary_camera_name}"] = video_obs
-    else:
-        # Nested dict format: {"video": {"cam_left_high": (B, T, H, W, C)}}
-        video_dict = {primary_camera_name: video_obs}
-        if extra_camera_rgbs:
-            for cam_name, cam_rgb in extra_camera_rgbs.items():
-                cam_obs = cam_rgb[:, None, ...]
-                if video_horizon > 1:
-                    cam_obs = np.repeat(cam_obs, video_horizon, axis=1)
-                video_dict[cam_name] = cam_obs
-        observation["video"] = video_dict
+    video_dict = {primary_camera_name: video_obs}
+    if extra_camera_rgbs:
+        for cam_name, cam_rgb in extra_camera_rgbs.items():
+            cam_obs = cam_rgb[:, None, ...]
+            if video_horizon > 1:
+                cam_obs = np.repeat(cam_obs, video_horizon, axis=1)
+            video_dict[cam_name] = cam_obs
+    observation["video"] = video_dict
 
     # --- State ---
     if embodiment_format == "unitree_g1":
-        # Flat key format: "state.left_arm", "state.right_arm", etc.
+        # Nested dict: {"state": {"left_arm": (B,T,7), "right_arm": (B,T,7), ...}}
+        state_dict = {}
         for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
             d = state_dims.get(key)
             if d is None:
@@ -370,7 +367,8 @@ def build_flat_observation(
             vals = vals[:, None, :]  # (B, 1, D)
             if state_horizon > 1:
                 vals = np.repeat(vals, state_horizon, axis=1)
-            observation[f"state.{key}"] = vals.astype(np.float32)
+            state_dict[key] = vals.astype(np.float32)
+        observation["state"] = state_dict
     elif "observation.state" in state_dims:
         # new_embodiment format: concatenated state vector
         state_dim = state_dims["observation.state"]
@@ -398,7 +396,8 @@ def build_flat_observation(
             vals = np.repeat(vals, state_horizon, axis=1)
         observation["state"] = {"observation.state": vals.astype(np.float32)}
     else:
-        # Fallback: separate body part keys in nested format
+        # Fallback: separate body part keys in nested dict format
+        state_dict = {}
         for key in ["left_leg", "right_leg", "waist", "left_arm", "right_arm", "left_hand", "right_hand"]:
             d = state_dims.get(key)
             if d is None:
@@ -414,14 +413,17 @@ def build_flat_observation(
             vals = vals[:, None, :]
             if state_horizon > 1:
                 vals = np.repeat(vals, state_horizon, axis=1)
-            observation[f"state.{key}"] = vals.astype(np.float32)
+            state_dict[key] = vals.astype(np.float32)
+        observation["state"] = state_dict
 
     # --- Language ---
     if embodiment_format == "unitree_g1":
-        # Flat key: "annotation.human.task_description" → tuple of strings
-        observation["annotation.human.task_description"] = (language_cmd,) * batch_size
+        # Nested dict with UNITREE_G1 language key
+        observation["language"] = {
+            "annotation.human.task_description": [[language_cmd]] * batch_size,
+        }
     else:
-        # Nested dict: {"language": {"task": [[cmd], ...]}}
+        # Nested dict with new_embodiment language key
         observation["language"] = {"task": [[language_cmd]] * batch_size}
 
     return observation
