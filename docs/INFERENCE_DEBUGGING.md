@@ -112,3 +112,7 @@ response = {
 3. Add action scaling if needed
 4. Verify camera/observation matching
 5. Check task language prompts
+
+### Related
+
+- [INFERENCE_EXAMPLES.md](INFERENCE_EXAMPLES.md) — Concrete code examples for all embodiment formats, including correct camera key mapping (`ego_view` vs `cam_left_high`) and state vector construction

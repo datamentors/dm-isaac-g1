@@ -227,6 +227,7 @@ docker exec groot-server bash -c "
 
 ## References
 
+- [INFERENCE_EXAMPLES.md](INFERENCE_EXAMPLES.md) — Concrete code examples for all embodiment formats (`ego_view` vs `cam_left_high`, state construction, action handling)
 - [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md) — Train your own model
 - [Isaac-GR00T Repository](https://github.com/NVIDIA/Isaac-GR00T)
 - [GROOT N1.6 Model Card](https://huggingface.co/nvidia/GR00T-N1.6-3B)

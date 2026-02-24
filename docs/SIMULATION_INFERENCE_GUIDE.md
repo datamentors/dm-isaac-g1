@@ -452,6 +452,7 @@ See [TEAM_MODEL_SUMMARY.md](TEAM_MODEL_SUMMARY.md) for the full model catalog (7
 
 ## Related Documentation
 
+- [INFERENCE_EXAMPLES.md](INFERENCE_EXAMPLES.md) — Concrete code examples for all embodiment formats (`ego_view` vs `cam_left_high`, state construction, action handling)
 - [TEAM_MODEL_SUMMARY.md](TEAM_MODEL_SUMMARY.md) — Models, datasets & infrastructure overview
 - [FINETUNING_GUIDE.md](FINETUNING_GUIDE.md) — Train your own model
 - [INFERENCE_GUIDE.md](INFERENCE_GUIDE.md) — Inference server details
