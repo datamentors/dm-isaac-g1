@@ -377,21 +377,20 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     # The real G1 has an Intel RealSense D435 mounted on the torso:
     #   - Position relative to torso_link: xyz="0.0576 0.0175 0.4299"
     #     (5.8cm forward, 1.75cm right, 43cm up from torso origin)
-    #   - Pitch: 0.831 rad ≈ 47.6° downward (looking at table/hands)
+    #   - Pitch: ~60° downward to center the table/towel in the frame
     #
-    # Camera orientation via euler (in radians):
-    #   The D435 URDF rpy is (0, 0.831, 0) relative to torso_link.
-    #   MuJoCo camera convention: looks along -Z in its local frame.
-    #   We convert the URDF camera orientation to MuJoCo xyaxes:
-    #     - Camera right (X): perpendicular to torso forward-up plane → (0, -1, 0)
-    #       (torso -Y = robot's right side)
-    #     - Camera up (Y): in the pitch plane, rotated θ from vertical
-    #       → (sin(θ), 0, cos(θ)) = (0.740, 0, 0.673)
-    #   This makes the camera look forward and ~47° below horizontal.
+    # MuJoCo camera convention: looks along -Z in its local frame.
+    # xyaxes = (camera_right_x camera_right_y camera_right_z
+    #           camera_up_x camera_up_y camera_up_z)
+    #
+    # For a camera on the torso looking forward-down at pitch θ=60°:
+    #   Camera right (X): (0, -1, 0) — torso -Y = robot's right side
+    #   Camera up (Y): (sin(60°), 0, cos(60°)) = (0.866, 0, 0.500)
+    #   Camera look (-Z): perpendicular, pointing forward and ~60° below horizontal
     ego_camera_xml = (
         '\n            <!-- D435 ego_view camera — matches real G1 head-mounted position -->\n'
         '            <camera name="ego_view" pos="0.0576 0.0175 0.4299"'
-        ' xyaxes="0 -1 0 0.740 0 0.673" fovy="60"/>\n'
+        ' xyaxes="0 -1 0 0.866 0 0.500" fovy="60"/>\n'
     )
 
     # Insert camera inside the torso_link body (after the opening tag or first child)
