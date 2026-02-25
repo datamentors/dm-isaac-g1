@@ -214,10 +214,38 @@ from importlib import import_module
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 from isaaclab.assets import RigidObjectCfg
+import isaaclab.envs.mdp as base_mdp
 import isaaclab.sim as sim_utils
+
+
+def _dummy_obs(env):
+    """Minimal observation: just robot joint positions. Avoids DDS-based obs terms."""
+    return env.scene["robot"].data.joint_pos
+
+
+@configclass
+class _MinimalObsCfg:
+    """Minimal observations config that bypasses DDS-based observation terms.
+
+    The unitree_sim_isaaclab scenes (dex1, dex3, inspire) register observation
+    terms that internally use DDSManager for hardware communication. In pure
+    inference mode we read joint_pos and camera images directly, so we replace
+    the scene's observations with this minimal config to avoid DDS hangs.
+    """
+    @configclass
+    class PolicyCfg(ObsGroup):
+        joint_pos = ObsTerm(func=_dummy_obs)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
+    policy: PolicyCfg = PolicyCfg()
 
 
 def load_env_cfg_class(scene_name: str):
@@ -449,6 +477,20 @@ def main():
     # Apply common configuration overrides
     if hasattr(env_cfg, 'curriculum'):
         env_cfg.curriculum = None
+
+    # Override observations to avoid DDS-based observation terms that hang in
+    # pure inference mode. We read joint_pos + camera directly, no DDS needed.
+    # Also disable rewards/terminations that may use DDS observation functions.
+    env_cfg.observations = _MinimalObsCfg()
+    if hasattr(env_cfg, 'rewards'):
+        env_cfg.rewards = None
+    if hasattr(env_cfg, 'terminations'):
+        env_cfg.terminations = None
+    if hasattr(env_cfg, 'events'):
+        env_cfg.events = None
+    if hasattr(env_cfg, 'event_manager'):
+        env_cfg.event_manager = None
+    print("[INFO] Replaced scene observations with minimal (no-DDS) config", flush=True)
 
     # Action config: use setup.action_joint_patterns if provided, otherwise auto-detect
     if setup.action_joint_patterns:
