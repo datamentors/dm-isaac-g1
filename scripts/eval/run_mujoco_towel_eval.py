@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -575,7 +576,6 @@ def main():
     viewer = None
     if args.show:
         try:
-            import mujoco.viewer
             viewer = mujoco.viewer.launch_passive(model, data)
             print("  Live viewer launched (close window to stop)")
         except Exception as e:
