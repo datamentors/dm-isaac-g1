@@ -72,14 +72,16 @@ from isaaclab.app import AppLauncher
 # See: https://github.com/unitreerobotics/unitree_sim_isaaclab
 AVAILABLE_SCENES = {
     # G1 with Inspire hands (from unitree_sim_isaaclab)
-    # NOTE: Also used for UNITREE_G1 gripper models — same G1 body + d435_link camera;
-    # inspire hand joints are simply ignored when using gripper_unitree setup.
     "pickplace_g1_inspire": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_inspire.pickplace_cylinder_g1_29dof_inspire_env_cfg.PickPlaceG129InspireBaseFixEnvCfg",
     "pickplace_redblock_g1_inspire": "tasks.g1_tasks.pick_place_redblock_g1_29dof_inspire.pickplace_redblock_g1_29dof_inspire_joint_env_cfg.PickPlaceG129InspireHandBaseFixEnvCfg",
     "stack_g1_inspire": "tasks.g1_tasks.stack_rgyblock_g1_29dof_inspire.stack_rgyblock_g1_29dof_inspire_joint_env_cfg.StackRgyBlockG129InspireBaseFixEnvCfg",
     # G1 with DEX3 hands (from unitree_sim_isaaclab)
     "pickplace_g1_dex3": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_dex3.pickplace_cylinder_g1_29dof_dex3_joint_env_cfg.PickPlaceG129DEX3JointEnvCfg",
     "stack_g1_dex3": "tasks.g1_tasks.stack_rgyblock_g1_29dof_dex3.stack_rgyblock_g1_29dof_dex3_joint_env_cfg.StackRgyBlockG129DEX3BaseFixEnvCfg",
+    # G1 with Dex1 gripper hands (from unitree_sim_isaaclab)
+    # Dex1 = simple 2-jaw parallel gripper (4 joints: Joint1_1 + Joint2_1 per hand)
+    "pickplace_g1_dex1": "tasks.g1_tasks.pick_place_cylinder_g1_29dof_dex1.pickplace_cylinder_g1_29dof_dex1_joint_env_cfg.PickPlaceG129DEX1BaseFixEnvCfg",
+    "pickplace_redblock_g1_dex1": "tasks.g1_tasks.pick_place_redblock_g1_29dof_dex1.pickplace_redblock_g1_29dof_dex1_joint_env_cfg.PickPlaceG129DEX1BaseFixEnvCfg",
     # IsaacLab locomotion tasks (simplified robot, no d435_link)
     "locomotion_g1_flat": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg.G1FlatEnvCfg",
     "locomotion_g1_rough": "isaaclab_tasks.manager_based.locomotion.velocity.config.g1.rough_env_cfg.G1RoughEnvCfg",

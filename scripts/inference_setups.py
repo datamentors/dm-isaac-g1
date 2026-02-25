@@ -486,9 +486,10 @@ SETUPS: dict[str, InferenceSetup] = {
     # Model: groot-g1-gripper-hospitality-7ds (UNITREE_G1 embodiment)
     "gripper_unitree": InferenceSetup(
         description=(
-            "G1 Gripper (UNITREE_G1 embodiment) with 1 ego-view camera. "
+            "G1 Gripper (UNITREE_G1 embodiment) with Dex1 gripper hands + 1 ego-view camera. "
             "31 DOF state, 23 DOF mixed action (arms RELATIVE, grippers/waist/nav ABSOLUTE). "
-            "For hospitality models: fold towel, clean table, wipe table, etc."
+            "For hospitality models: fold towel, clean table, wipe table, etc. "
+            "Uses Dex1 scene (pickplace_g1_dex1) which has actual gripper joints."
         ),
         cameras=[
             CameraSpec(
@@ -498,9 +499,7 @@ SETUPS: dict[str, InferenceSetup] = {
                 rot=(0.5, -0.5, 0.5, -0.5),
             ),
         ],
-        # No dedicated gripper scenes in unitree_sim_isaaclab — use inspire scene
-        # (same G1 body + d435_link camera; inspire hand joints are simply ignored)
-        scene="pickplace_g1_inspire",
+        scene="pickplace_g1_dex1",
         language="fold the towel",
         spawn_objects=False,  # Use scene's native objects
         dof_layout={
@@ -534,8 +533,10 @@ SETUPS: dict[str, InferenceSetup] = {
                 "right_shoulder_yaw_joint", "right_elbow_joint",
                 "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
             ],
-            "left_hand": ["left_gripper_joint"],
-            "right_hand": ["right_gripper_joint"],
+            # Dex1 gripper: Joint1_1 = main jaw (maps to model's 1 DOF gripper output)
+            # Joint2_1 is the secondary jaw — we only control Joint1_1 from the model.
+            "left_hand": ["left_hand_Joint1_1"],
+            "right_hand": ["right_hand_Joint1_1"],
         },
         action_joint_patterns=[
             # left arm (7 DOF) — RELATIVE
@@ -546,8 +547,8 @@ SETUPS: dict[str, InferenceSetup] = {
             "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
             "right_shoulder_yaw_joint", "right_elbow_joint",
             "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
-            # grippers (2 DOF) — ABSOLUTE
-            "left_gripper_joint", "right_gripper_joint",
+            # grippers (1 DOF each) — ABSOLUTE
+            "left_hand_Joint1_1", "right_hand_Joint1_1",
             # waist (3 DOF) — ABSOLUTE
             "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
         ],
@@ -557,7 +558,7 @@ SETUPS: dict[str, InferenceSetup] = {
     # -------------------------------------------------------------------------
     "gripper_redblock": InferenceSetup(
         description=(
-            "G1 Gripper (UNITREE_G1) pick-and-place red block scene. "
+            "G1 Gripper (UNITREE_G1) pick-and-place red block scene with Dex1 gripper hands. "
             "Same config as gripper_unitree but with red block scene."
         ),
         cameras=[
@@ -568,7 +569,7 @@ SETUPS: dict[str, InferenceSetup] = {
                 rot=(0.5, -0.5, 0.5, -0.5),
             ),
         ],
-        scene="pickplace_redblock_g1_inspire",
+        scene="pickplace_redblock_g1_dex1",
         language="pick up the red block",
         spawn_objects=False,
         dof_layout={
@@ -602,8 +603,8 @@ SETUPS: dict[str, InferenceSetup] = {
                 "right_shoulder_yaw_joint", "right_elbow_joint",
                 "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
             ],
-            "left_hand": ["left_gripper_joint"],
-            "right_hand": ["right_gripper_joint"],
+            "left_hand": ["left_hand_Joint1_1"],
+            "right_hand": ["right_hand_Joint1_1"],
         },
         action_joint_patterns=[
             "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
@@ -612,7 +613,7 @@ SETUPS: dict[str, InferenceSetup] = {
             "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
             "right_shoulder_yaw_joint", "right_elbow_joint",
             "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
-            "left_gripper_joint", "right_gripper_joint",
+            "left_hand_Joint1_1", "right_hand_Joint1_1",
             "waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint",
         ],
         hand_type="gripper",
