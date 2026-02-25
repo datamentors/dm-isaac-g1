@@ -349,6 +349,10 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     a flexcomp towel, qpos grows to ~800+, making the keyframe invalid.
     We handle this by loading the scene XML, stripping conflicting keyframes
     from the included G1 model, then compiling.
+
+    Also injects the ego_view camera into the torso_link body to match the
+    real G1's Intel RealSense D435 camera position. This is critical for
+    GROOT — it needs a head-mounted ego view, not a fixed world camera.
     """
     import re
 
@@ -368,6 +372,42 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     g1_xml_no_keyframe = re.sub(
         r'<keyframe>.*?</keyframe>', '', g1_xml, flags=re.DOTALL
     )
+
+    # Inject ego_view camera into torso_link body.
+    # The real G1 has an Intel RealSense D435 mounted on the torso:
+    #   - Position relative to torso_link: xyz="0.0576 0.0175 0.4299"
+    #     (5.8cm forward, 1.75cm right, 43cm up from torso origin)
+    #   - Pitch: 0.831 rad ≈ 47.6° downward (looking at table/hands)
+    #
+    # Camera orientation via euler (in radians):
+    #   The D435 URDF rpy is (0, 0.831, 0) relative to torso_link.
+    #   MuJoCo camera convention: looks along -Z in its local frame.
+    #   We convert the URDF camera orientation to MuJoCo xyaxes:
+    #     - Camera right (X): perpendicular to torso forward-up plane → (0, -1, 0)
+    #       (torso -Y = robot's right side)
+    #     - Camera up (Y): in the pitch plane, rotated θ from vertical
+    #       → (sin(θ), 0, cos(θ)) = (0.740, 0, 0.673)
+    #   This makes the camera look forward and ~47° below horizontal.
+    ego_camera_xml = (
+        '\n            <!-- D435 ego_view camera — matches real G1 head-mounted position -->\n'
+        '            <camera name="ego_view" pos="0.0576 0.0175 0.4299"'
+        ' xyaxes="0 -1 0 0.740 0 0.673" fovy="60"/>\n'
+    )
+
+    # Insert camera inside the torso_link body (after the opening tag or first child)
+    # Look for <body name="torso_link"> and insert after the next line
+    torso_pattern = r'(<body\s+name="torso_link"[^>]*>)'
+    match = re.search(torso_pattern, g1_xml_no_keyframe)
+    if match:
+        insert_pos = match.end()
+        g1_xml_no_keyframe = (
+            g1_xml_no_keyframe[:insert_pos]
+            + ego_camera_xml
+            + g1_xml_no_keyframe[insert_pos:]
+        )
+        print("  Injected ego_view camera into torso_link body")
+    else:
+        print("  WARNING: Could not find torso_link body for camera injection")
 
     # Write a temporary combined model
     import tempfile
@@ -493,7 +533,37 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
     # Set initial keyframe if available
     if model.nkey > 0:
         mujoco.mj_resetDataKeyframe(model, data, 0)
+
+    # Orient the robot to face the table (+Y direction).
+    # The Menagerie G1's default forward is +X. We rotate 90° around Z.
+    # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz]
+    pelvis_jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "pelvis")
+    if pelvis_jid >= 0:
+        qpos_addr = model.jnt_qposadr[pelvis_jid]
+        # Position: keep default height, centered at origin
+        # data.qpos[qpos_addr:qpos_addr+3] already set by reset
+        # Orientation: 90° rotation around Z axis
+        # quat = (cos(π/4), 0, 0, sin(π/4)) = (0.7071, 0, 0, 0.7071)
+        data.qpos[qpos_addr + 3] = 0.7071068  # qw
+        data.qpos[qpos_addr + 4] = 0.0        # qx
+        data.qpos[qpos_addr + 5] = 0.0        # qy
+        data.qpos[qpos_addr + 6] = 0.7071068  # qz
+
     mujoco.mj_forward(model, data)
+
+    # Save initial ego_view frame for debugging (what GROOT sees at step 0)
+    debug_img = render_ego_view(model, data, renderer)
+    try:
+        import cv2
+        debug_path = os.path.join(
+            os.environ.get("EVAL_OUTPUT_DIR", "/tmp/mujoco_towel_eval"),
+            "debug_ego_view_step0.png"
+        )
+        os.makedirs(os.path.dirname(debug_path), exist_ok=True)
+        cv2.imwrite(debug_path, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR))
+        print(f"  Debug ego_view saved: {debug_path}")
+    except Exception:
+        pass
 
     step = 0
     action_buffer = None
@@ -608,6 +678,7 @@ def main():
     # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["EVAL_OUTPUT_DIR"] = str(output_dir)
 
     # Load MuJoCo scene
     print(f"Loading scene: {args.scene}")
