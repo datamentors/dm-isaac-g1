@@ -536,17 +536,19 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
     # Orient the robot to face the table (+Y direction).
     # The Menagerie G1's default forward is +X. We rotate 90° around Z.
     # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz]
-    pelvis_jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "pelvis")
-    if pelvis_jid >= 0:
-        qpos_addr = model.jnt_qposadr[pelvis_jid]
-        # Position: keep default height, centered at origin
-        # data.qpos[qpos_addr:qpos_addr+3] already set by reset
-        # Orientation: 90° rotation around Z axis
-        # quat = (cos(π/4), 0, 0, sin(π/4)) = (0.7071, 0, 0, 0.7071)
-        data.qpos[qpos_addr + 3] = 0.7071068  # qw
-        data.qpos[qpos_addr + 4] = 0.0        # qx
-        data.qpos[qpos_addr + 5] = 0.0        # qy
-        data.qpos[qpos_addr + 6] = 0.7071068  # qz
+    # The Menagerie model uses "floating_base_joint" (not "pelvis") for the freejoint.
+    for jname in ["floating_base_joint", "pelvis"]:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+        if jid >= 0 and model.jnt_type[jid] == 0:  # 0 = free joint
+            qpos_addr = model.jnt_qposadr[jid]
+            # Orientation: 90° rotation around Z axis
+            # quat = (cos(π/4), 0, 0, sin(π/4)) = (0.7071, 0, 0, 0.7071)
+            data.qpos[qpos_addr + 3] = 0.7071068  # qw
+            data.qpos[qpos_addr + 4] = 0.0        # qx
+            data.qpos[qpos_addr + 5] = 0.0        # qy
+            data.qpos[qpos_addr + 6] = 0.7071068  # qz
+            print(f"  Rotated robot to face +Y via {jname} (qpos[{qpos_addr}:{qpos_addr+7}])")
+            break
 
     mujoco.mj_forward(model, data)
 
