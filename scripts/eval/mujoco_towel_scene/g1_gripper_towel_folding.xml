@@ -1,0 +1,104 @@
+<mujoco model="g1_gripper_towel_folding">
+  <!--
+    G1 with Dexterous Hands — Towel Folding Scene for GROOT Evaluation
+    ===================================================================
+    Uses the Menagerie G1 with_hands model (43 actuators):
+      29 body joints + 14 hand joints (7 per hand)
+    Hand joints per side: thumb(3) + middle(2) + index(2) = 7
+
+    The GROOT model outputs a single gripper value per hand (state[29], state[30]).
+    The eval script maps this to all 7 finger joints using a coordinated grasp:
+      thumb: opens/closes opposite direction from fingers
+      index + middle: curl proportional to gripper command
+
+    Requires: MuJoCo >= 3.0.0 (for flexcomp deformable bodies)
+  -->
+
+  <!-- Elasticity shell plugin for cloth simulation -->
+  <extension>
+    <plugin plugin="mujoco.elasticity.shell"/>
+  </extension>
+
+  <!-- Load G1 with hands from Menagerie -->
+  <compiler angle="radian" meshdir="/workspace/mujoco_menagerie/unitree_g1/assets"/>
+  <include file="/workspace/mujoco_menagerie/unitree_g1/g1_with_hands.xml"/>
+
+  <option timestep="0.002" integrator="implicitfast" solver="Newton" iterations="4" tolerance="1e-10">
+    <flag warmstart="enable"/>
+  </option>
+
+  <statistic center="0.0 0.5 0.8" extent="1.5"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0.5 0.5 0.5"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-140" elevation="-20"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <!-- Ground -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+              texrepeat="5 5" reflectance="0.2"/>
+
+    <!-- Table -->
+    <texture type="2d" name="table_tex" builtin="flat" rgb1="0.55 0.35 0.2"
+             width="128" height="128"/>
+    <material name="table_mat" texture="table_tex" specular="0.1" shininess="0.1"/>
+
+    <!-- Towel -->
+    <texture type="2d" name="towel_tex" builtin="flat" rgb1="0.85 0.85 0.95"
+             width="128" height="128"/>
+    <material name="towel_mat" texture="towel_tex" specular="0.0" shininess="0.0"
+              rgba="0.85 0.85 0.95 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light pos="0 0.5 3.0" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
+    <light pos="1 0 2.5" dir="-0.3 0.3 -0.8" diffuse="0.4 0.4 0.4"/>
+
+    <!-- Ground plane -->
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"
+          condim="3" friction="1.0 0.5 0.1"/>
+
+    <!-- Table (positioned in front of robot) -->
+    <body name="table" pos="0 0.55 0">
+      <!-- Table top -->
+      <geom name="table_top" type="box" size="0.45 0.35 0.02" pos="0 0 0.74"
+            material="table_mat" mass="20" condim="3" friction="0.8 0.3 0.1"/>
+      <!-- Table legs -->
+      <geom name="leg_fl" type="cylinder" size="0.025" fromto="-0.40 -0.30 0.0 -0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_fr" type="cylinder" size="0.025" fromto=" 0.40 -0.30 0.0  0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_bl" type="cylinder" size="0.025" fromto="-0.40  0.30 0.0 -0.40  0.30 0.72" material="table_mat"/>
+      <geom name="leg_br" type="cylinder" size="0.025" fromto=" 0.40  0.30 0.0  0.40  0.30 0.72" material="table_mat"/>
+    </body>
+
+    <!-- Deformable towel on the table -->
+    <body name="towel_anchor" pos="0 0.55 0.77">
+      <flexcomp name="towel" type="grid" count="16 16 1" spacing="0.02 0.02 0.02"
+                pos="0 0 0" dim="2" mass="0.15" radius="0.005"
+                material="towel_mat">
+        <contact condim="3" selfcollide="auto" friction="0.8 0.3 0.1"
+                 solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        <edge equality="true" damping="0.002"/>
+        <plugin plugin="mujoco.elasticity.shell">
+          <config key="poisson" value="0.3"/>
+          <config key="young" value="5e3"/>
+          <config key="thickness" value="0.002"/>
+        </plugin>
+      </flexcomp>
+    </body>
+
+    <!-- Head-mounted camera (ego_view) -->
+    <camera name="ego_view" pos="0.15 0.55 1.45" xyaxes="1 0 0 0 0.34 0.94"
+            fovy="60" mode="fixed"/>
+
+    <!-- External overview camera -->
+    <camera name="overview" pos="1.5 -0.5 2.0" xyaxes="0 1 0 -0.5 0 0.86"
+            fovy="60" mode="fixed"/>
+  </worldbody>
+</mujoco>

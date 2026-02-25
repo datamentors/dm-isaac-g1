@@ -151,10 +151,8 @@ def build_joint_name_to_state_index(model: mujoco.MjModel) -> dict[str, int]:
         ("right_wrist_roll_joint",     27),   # Menagerie joint[27] → state[27]
         ("right_wrist_pitch_joint",    28),   # Menagerie joint[28] → state[28]
         # Hands (state indices 29-30) — gripper joints
-        # NOTE: MuJoCo Menagerie G1 does NOT have gripper joints.
-        # These will be unmapped and default to 0 in the state vector.
-        # For the "with_hands" model, you'd need to map finger joints
-        # to a single gripper value (e.g., average finger curl).
+        # For the no-hands model: unmapped, defaults to 0.
+        # For the with_hands model: we compute an average finger curl below.
     ]
 
     mapping = {}
@@ -169,6 +167,82 @@ def build_joint_name_to_state_index(model: mujoco.MjModel) -> dict[str, int]:
     return mapping
 
 
+# Finger joint names for with_hands model.
+# Used to compute a single gripper value (average curl) for state[29]/state[30]
+# and to map a single gripper command to all finger joints.
+LEFT_HAND_FINGER_JOINTS = [
+    "left_hand_thumb_0_joint",
+    "left_hand_thumb_1_joint",
+    "left_hand_thumb_2_joint",
+    "left_hand_middle_0_joint",
+    "left_hand_middle_1_joint",
+    "left_hand_index_0_joint",
+    "left_hand_index_1_joint",
+]
+RIGHT_HAND_FINGER_JOINTS = [
+    "right_hand_thumb_0_joint",
+    "right_hand_thumb_1_joint",
+    "right_hand_thumb_2_joint",
+    "right_hand_middle_0_joint",
+    "right_hand_middle_1_joint",
+    "right_hand_index_0_joint",
+    "right_hand_index_1_joint",
+]
+
+
+def _has_hand_joints(model: mujoco.MjModel) -> bool:
+    """Check if model has dexterous hand joints."""
+    try:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "left_hand_thumb_0_joint")
+        return jid >= 0
+    except Exception:
+        return False
+
+
+def _get_finger_curl(model: mujoco.MjModel, data: mujoco.MjData,
+                     finger_joints: list[str]) -> float:
+    """Compute average normalized finger curl (0=open, 1=closed) from finger joints."""
+    curls = []
+    for jname in finger_joints:
+        try:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+            if jid < 0:
+                continue
+            qpos_addr = model.jnt_qposadr[jid]
+            val = data.qpos[qpos_addr]
+            # Normalize to [0, 1] using joint range
+            lo = model.jnt_range[jid, 0]
+            hi = model.jnt_range[jid, 1]
+            if hi > lo:
+                curls.append((val - lo) / (hi - lo))
+        except Exception:
+            pass
+    return float(np.mean(curls)) if curls else 0.0
+
+
+def _apply_gripper_to_fingers(model: mujoco.MjModel, data: mujoco.MjData,
+                              gripper_val: float, finger_joints: list[str]):
+    """Map a single gripper command (0=open, 1=closed) to all finger joint actuators.
+
+    Linearly interpolates gripper_val across each finger joint's range.
+    """
+    for jname in finger_joints:
+        try:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+            if jid < 0:
+                continue
+            lo = model.jnt_range[jid, 0]
+            hi = model.jnt_range[jid, 1]
+            target = lo + gripper_val * (hi - lo)
+            # Find actuator for this joint
+            for act_id in range(model.nu):
+                if model.actuator_trnid[act_id, 0] == jid:
+                    data.ctrl[act_id] = target
+                    break
+        except Exception:
+            pass
+
+
 def get_state_vector(model: mujoco.MjModel, data: mujoco.MjData,
                      joint_mapping: dict) -> np.ndarray:
     """Extract 31-DOF state vector from MuJoCo simulation."""
@@ -177,6 +251,11 @@ def get_state_vector(model: mujoco.MjModel, data: mujoco.MjData,
     for joint_name, (mj_joint_id, state_idx) in joint_mapping.items():
         qpos_addr = model.jnt_qposadr[mj_joint_id]
         state[state_idx] = data.qpos[qpos_addr]
+
+    # For with_hands model: compute gripper state from finger joints
+    if _has_hand_joints(model):
+        state[29] = _get_finger_curl(model, data, LEFT_HAND_FINGER_JOINTS)
+        state[30] = _get_finger_curl(model, data, RIGHT_HAND_FINGER_JOINTS)
 
     return state
 
@@ -234,9 +313,6 @@ def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
     targets["waist_roll_joint"] = waist[1]
     targets["waist_pitch_joint"] = waist[2]
 
-    # Grippers — only applied if joints exist in model (Menagerie G1 has no grippers)
-    # Silently skip if not present
-
     # Apply to MuJoCo actuators (position control)
     for jname, target_val in targets.items():
         if jname in joint_mapping:
@@ -246,6 +322,11 @@ def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
                 if model.actuator_trnid[act_id, 0] == mj_joint_id:
                     data.ctrl[act_id] = target_val
                     break
+
+    # Grippers — map single gripper value to all finger joints (with_hands model)
+    if _has_hand_joints(model):
+        _apply_gripper_to_fingers(model, data, left_hand, LEFT_HAND_FINGER_JOINTS)
+        _apply_gripper_to_fingers(model, data, right_hand, RIGHT_HAND_FINGER_JOINTS)
 
 
 def render_ego_view(model: mujoco.MjModel, data: mujoco.MjData,
@@ -275,8 +356,11 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     with open(scene_path) as f:
         scene_xml = f.read()
 
-    # Read the G1 model XML
-    g1_path = os.path.join(menagerie_dir, "g1.xml")
+    # Detect which G1 model the scene uses (g1.xml or g1_with_hands.xml)
+    g1_filename = "g1.xml"
+    if "g1_with_hands.xml" in scene_xml:
+        g1_filename = "g1_with_hands.xml"
+    g1_path = os.path.join(menagerie_dir, g1_filename)
     with open(g1_path) as f:
         g1_xml = f.read()
 
@@ -288,13 +372,13 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     # Write a temporary combined model
     import tempfile
     # Write modified G1 XML
-    g1_tmp = os.path.join(menagerie_dir, "_g1_no_keyframe.xml")
+    g1_tmp = os.path.join(menagerie_dir, f"_{g1_filename.replace('.xml', '_no_keyframe.xml')}")
     with open(g1_tmp, 'w') as f:
         f.write(g1_xml_no_keyframe)
 
     # Update scene to reference the no-keyframe version
     scene_xml_fixed = scene_xml.replace(
-        f"{menagerie_dir}/g1.xml",
+        f"{menagerie_dir}/{g1_filename}",
         g1_tmp
     )
 
