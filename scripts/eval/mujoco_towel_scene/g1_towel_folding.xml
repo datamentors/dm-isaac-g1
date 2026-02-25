@@ -1,0 +1,134 @@
+<mujoco model="g1_towel_folding">
+  <!--
+    G1 Towel Folding Scene for GROOT Evaluation
+    =============================================
+    Requires: MuJoCo >= 3.0.0 (for flexcomp deformable bodies)
+
+    This scene places the Unitree G1 (from MuJoCo Menagerie) at a table
+    with a deformable towel. The towel uses the flexcomp + elasticity.shell
+    plugin for physically-based cloth simulation.
+
+    Setup:
+      pip install mujoco>=3.2.6
+      git clone https://github.com/google-deepmind/mujoco_menagerie.git /workspace/mujoco_menagerie
+
+    Usage:
+      python run_mujoco_towel_eval.py \
+          - -scene g1_towel_folding.xml \
+          - -model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full
+  -->
+
+  <!-- Elasticity shell plugin for cloth simulation -->
+  <extension>
+    <plugin plugin="mujoco.elasticity.shell"/>
+  </extension>
+
+  <!--
+    Load the G1 model from MuJoCo Menagerie.
+
+    IMPORTANT: This file must be symlinked or copied into the Menagerie G1 dir
+    for mesh resolution to work. The setup_scene.sh script handles this.
+    Alternatively, load programmatically by composing XML strings.
+
+    If running from the Menagerie directory:
+      cd /workspace/mujoco_menagerie/unitree_g1 && mujoco g1_towel_folding.xml
+
+    If running from elsewhere, the Python loader in run_mujoco_towel_eval.py
+    handles this by composing the scene programmatically.
+  -->
+  <compiler angle="radian" meshdir="/workspace/mujoco_menagerie/unitree_g1/assets"/>
+  <include file="/workspace/mujoco_menagerie/unitree_g1/g1.xml"/>
+
+  <option timestep="0.002" integrator="implicitfast" solver="Newton" iterations="4" tolerance="1e-10">
+    <flag warmstart="enable"/>
+  </option>
+
+  <statistic center="0.0 0.5 0.8" extent="1.5"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0.5 0.5 0.5"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-140" elevation="-20"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <!-- Ground -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+              texrepeat="5 5" reflectance="0.2"/>
+
+    <!-- Table -->
+    <texture type="2d" name="table_tex" builtin="flat" rgb1="0.55 0.35 0.2"
+             width="128" height="128"/>
+    <material name="table_mat" texture="table_tex" specular="0.1" shininess="0.1"/>
+
+    <!-- Towel -->
+    <texture type="2d" name="towel_tex" builtin="flat" rgb1="0.85 0.85 0.95"
+             width="128" height="128"/>
+    <material name="towel_mat" texture="towel_tex" specular="0.0" shininess="0.0"
+              rgba="0.85 0.85 0.95 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light pos="0 0.5 3.0" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
+    <light pos="1 0 2.5" dir="-0.3 0.3 -0.8" diffuse="0.4 0.4 0.4"/>
+
+    <!-- Ground plane -->
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"
+          condim="3" friction="1.0 0.5 0.1"/>
+
+    <!-- Table (positioned in front of robot) -->
+    <body name="table" pos="0 0.55 0">
+      <!-- Table top -->
+      <geom name="table_top" type="box" size="0.45 0.35 0.02" pos="0 0 0.74"
+            material="table_mat" mass="20" condim="3" friction="0.8 0.3 0.1"/>
+      <!-- Table legs -->
+      <geom name="leg_fl" type="cylinder" size="0.025" fromto="-0.40 -0.30 0.0 -0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_fr" type="cylinder" size="0.025" fromto=" 0.40 -0.30 0.0  0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_bl" type="cylinder" size="0.025" fromto="-0.40  0.30 0.0 -0.40  0.30 0.72" material="table_mat"/>
+      <geom name="leg_br" type="cylinder" size="0.025" fromto=" 0.40  0.30 0.0  0.40  0.30 0.72" material="table_mat"/>
+    </body>
+
+    <!-- Deformable towel on the table -->
+    <!--
+      flexcomp with type="grid" creates a 2D deformable mesh.
+      count="16 16 1" = 16x16 grid nodes
+      spacing="0.02" = 2cm between nodes → ~30cm x 30cm towel
+      The towel starts flat on the table surface at z=0.77 (just above table top)
+    -->
+    <body name="towel_anchor" pos="0 0.55 0.77">
+      <flexcomp name="towel" type="grid" count="16 16 1" spacing="0.02 0.02 0.02"
+                pos="0 0 0" dim="2" mass="0.15" radius="0.005"
+                material="towel_mat">
+        <contact condim="3" selfcollide="auto" friction="0.8 0.3 0.1"
+                 solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        <edge equality="true" damping="0.002"/>
+        <plugin plugin="mujoco.elasticity.shell">
+          <config key="poisson" value="0.3"/>
+          <config key="young" value="5e3"/>
+          <config key="thickness" value="0.002"/>
+        </plugin>
+      </flexcomp>
+    </body>
+
+    <!-- Head-mounted camera (ego_view) — matches GROOT training setup -->
+    <!-- This approximates the d435_link camera position on G1's head -->
+    <camera name="ego_view" pos="0.15 0.55 1.45" xyaxes="1 0 0 0 0.34 0.94"
+            fovy="60" mode="fixed"/>
+
+    <!-- External overview camera for debugging/visualization -->
+    <camera name="overview" pos="1.5 -0.5 2.0" xyaxes="0 1 0 -0.5 0 0.86"
+            fovy="60" mode="fixed"/>
+  </worldbody>
+
+  <!--
+    NOTE: The Menagerie G1 model includes a "stand" keyframe with 36 qpos values.
+    With the flexcomp towel added, the total qpos is much larger, so we cannot
+    use static keyframes. The robot initial pose is set programmatically in
+    run_mujoco_towel_eval.py via mj_resetData + setting qpos directly.
+  -->
+</mujoco>

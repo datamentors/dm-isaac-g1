@@ -1200,8 +1200,10 @@ def main():
                     debug_frame_count += 1
 
             # Build action vector using predicted trajectory
-            # Based on embodiment config (rep=ABSOLUTE, type=NON_EEF):
-            # Actions are ABSOLUTE joint position targets, not deltas
+            # Action representation depends on embodiment format:
+            #   UNITREE_G1: arms=RELATIVE (deltas from trajectory start), grippers/waist/nav=ABSOLUTE
+            #   new_embodiment: ALL actions are ABSOLUTE joint position targets
+            # Source: Isaac-GR00T/gr00t/configs/data/embodiment_configs.py
             # Initialize with current joint positions in ACTION SPACE order.
             # action[i] controls robot joint action_joint_ids[i], so we read
             # robot.data.joint_pos at those indices.
@@ -1272,7 +1274,9 @@ def main():
                     current_action_vec[:, idxs] = arr
 
             # Apply action groups — driven by DOF layout and embodiment format.
-            # UNITREE_G1: arms are RELATIVE (deltas from trajectory start), everything else ABSOLUTE.
+            # Per Isaac-GR00T embodiment_configs.py UNITREE_G1 action configs:
+            #   left_arm, right_arm: ActionRepresentation.RELATIVE (deltas from trajectory start)
+            #   left_hand, right_hand, waist, base_height_command, navigate_command: ABSOLUTE
             # new_embodiment: ALL actions are ABSOLUTE joint position targets.
             if embodiment_format == "unitree_g1":
                 # UNITREE_G1 mixed action format

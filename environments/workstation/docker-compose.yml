@@ -30,6 +30,9 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
       # W&B
       - WANDB_API_KEY=${WANDB_API_KEY}
+      # MuJoCo headless rendering
+      - MUJOCO_GL=egl
+      - PYOPENGL_PLATFORM=egl
     volumes:
       # Mount the dm-isaac-g1 repo (live code editing)
       - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
@@ -42,6 +45,8 @@ services:
       - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
       # Mount unitree_sim_isaaclab (from /home/datamentors)
       - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
+      # MuJoCo Menagerie (persistent — avoids re-cloning on rebuild)
+      - mujoco_menagerie:/workspace/mujoco_menagerie
       # X11 for GUI
       - /tmp/.X11-unix:/tmp/.X11-unix
       # GPU access
@@ -61,3 +66,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+volumes:
+  mujoco_menagerie:

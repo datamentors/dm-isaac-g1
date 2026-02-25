@@ -156,6 +156,29 @@ RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
 
 
 # ==========================================
+# MuJoCo 3.x (custom scene evaluation)
+# ==========================================
+# Required for:
+#   - Custom G1 scenes with deformable objects (flexcomp towels, sponges)
+#   - GR00T-WholeBodyControl loco-manipulation eval
+#   - Standalone policy validation without Isaac Sim
+#
+# MuJoCo 3.0+ added flexcomp deformable bodies with the elasticity.shell
+# plugin, enabling cloth/towel simulation for tasks like fold_towel.
+#
+# The G1 MJCF model comes from MuJoCo Menagerie (google-deepmind/mujoco_menagerie).
+# It is the standard, well-tested 29-DOF model used across the community.
+RUN pip install mujoco==3.2.6 opencv-python-headless>=4.8.0
+
+# Clone MuJoCo Menagerie (curated MJCF robot models including Unitree G1)
+RUN git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git \
+    /workspace/mujoco_menagerie
+
+# Set EGL rendering for headless MuJoCo (no display required)
+ENV MUJOCO_GL=egl
+ENV PYOPENGL_PLATFORM=egl
+
+# ==========================================
 # CRITICAL: Pin NumPy to < 2.0 for stability
 # ==========================================
 # This ensures compatibility with:
@@ -169,7 +192,7 @@ RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 # ==========================================
 # Set PYTHONPATH for all modules
 # Note: warp is bundled in Isaac Sim's extscache, not installed via pip
-ENV PYTHONPATH="/isaac-sim/extscache/omni.warp.core-1.7.1+lx64:/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
+ENV PYTHONPATH="/isaac-sim/extscache/omni.warp.core-1.7.1+lx64:/workspace/dm-isaac-g1/src:/workspace/dm-isaac-g1/scripts/eval:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
 
 # Expose ports
 # Isaac Sim streaming
