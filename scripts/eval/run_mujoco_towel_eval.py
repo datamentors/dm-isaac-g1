@@ -265,25 +265,25 @@ def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
                   current_state: np.ndarray):
     """Apply 23-DOF action vector to MuJoCo actuators.
 
-    Arms (indices 0-13) are RELATIVE actions (delta from current).
-    Everything else is ABSOLUTE.
+    IMPORTANT: The GROOT server's StateActionProcessor.unapply_action() already
+    converts RELATIVE actions to ABSOLUTE targets internally. The returned arm
+    values are ABSOLUTE joint positions, not deltas. Do NOT add them to current
+    state — that would double-apply the delta.
+
+    All action components are treated as ABSOLUTE targets here.
     """
     if actions.shape[-1] != ACTION_DOF:
         print(f"WARNING: expected {ACTION_DOF} action dims, got {actions.shape[-1]}")
         return
 
-    # Extract action components
-    left_arm_delta = actions[0:7]    # RELATIVE
-    right_arm_delta = actions[7:14]  # RELATIVE
+    # Extract action components — ALL are absolute targets from the server
+    left_arm_target = actions[0:7]   # ABSOLUTE (server already decoded from relative)
+    right_arm_target = actions[7:14] # ABSOLUTE (server already decoded from relative)
     left_hand = actions[14]          # ABSOLUTE
     right_hand = actions[15]         # ABSOLUTE
     waist = actions[16:19]           # ABSOLUTE
-    # base_height = actions[19]      # Not applied in fixed-base MuJoCo
-    # navigate = actions[20:23]      # Not applied in fixed-base MuJoCo
-
-    # Compute target positions for arms (current + delta)
-    left_arm_target = current_state[15:22] + left_arm_delta
-    right_arm_target = current_state[22:29] + right_arm_delta
+    # base_height = actions[19]      # For WBC (not applied without WBC)
+    # navigate = actions[20:23]      # For WBC (not applied without WBC)
 
     # Build target qpos for actuated joints
     # Map joint names to target positions
@@ -372,6 +372,26 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
     g1_xml_no_keyframe = re.sub(
         r'<keyframe>.*?</keyframe>', '', g1_xml, flags=re.DOTALL
     )
+
+    # Lock the robot base: remove the freejoint so the pelvis is fixed to world.
+    # Without the gr00t_wbc whole-body controller, the freejoint robot has no
+    # balance control and falls over. Fixing the base lets us test arm behavior.
+    # Also rotate the pelvis body to face +Y (toward the table).
+    g1_xml_no_keyframe = re.sub(
+        r'<freejoint\s+name="floating_base_joint"\s*/>', '', g1_xml_no_keyframe
+    )
+    # Also handle the variant without self-closing tag
+    g1_xml_no_keyframe = re.sub(
+        r'<freejoint\s+name="floating_base_joint"[^/]*>.*?</freejoint>', '',
+        g1_xml_no_keyframe, flags=re.DOTALL
+    )
+    # Set pelvis orientation to face +Y: quat="0.7071 0 0 0.7071" (90° around Z)
+    g1_xml_no_keyframe = re.sub(
+        r'(<body\s+name="pelvis"\s+pos="[^"]*")',
+        r'\1 quat="0.7071 0 0 0.7071"',
+        g1_xml_no_keyframe
+    )
+    print("  Locked base (removed freejoint) and rotated pelvis to face +Y")
 
     # Inject ego_view camera into torso_link body.
     # The real G1 has an Intel RealSense D435 mounted on the torso:
@@ -533,23 +553,8 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
     if model.nkey > 0:
         mujoco.mj_resetDataKeyframe(model, data, 0)
 
-    # Orient the robot to face the table (+Y direction).
-    # The Menagerie G1's default forward is +X. We rotate 90° around Z.
-    # Freejoint qpos layout: [x, y, z, qw, qx, qy, qz]
-    # The Menagerie model uses "floating_base_joint" (not "pelvis") for the freejoint.
-    for jname in ["floating_base_joint", "pelvis"]:
-        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
-        if jid >= 0 and model.jnt_type[jid] == 0:  # 0 = free joint
-            qpos_addr = model.jnt_qposadr[jid]
-            # Orientation: 90° rotation around Z axis
-            # quat = (cos(π/4), 0, 0, sin(π/4)) = (0.7071, 0, 0, 0.7071)
-            data.qpos[qpos_addr + 3] = 0.7071068  # qw
-            data.qpos[qpos_addr + 4] = 0.0        # qx
-            data.qpos[qpos_addr + 5] = 0.0        # qy
-            data.qpos[qpos_addr + 6] = 0.7071068  # qz
-            print(f"  Rotated robot to face +Y via {jname} (qpos[{qpos_addr}:{qpos_addr+7}])")
-            break
-
+    # Robot orientation is set in the XML (pelvis quat="0.7071 0 0 0.7071" = face +Y).
+    # Base is locked (freejoint removed) — no balance controller needed for tabletop tasks.
     mujoco.mj_forward(model, data)
 
     # Save initial ego_view frame for debugging (what GROOT sees at step 0)
@@ -662,8 +667,8 @@ def main():
                         help="Number of evaluation episodes")
     parser.add_argument("--max-steps", type=int, default=500,
                         help="Max steps per episode")
-    parser.add_argument("--action-horizon", type=int, default=16,
-                        help="Steps per action chunk before re-querying")
+    parser.add_argument("--action-horizon", type=int, default=20,
+                        help="Steps per action chunk before re-querying (NVIDIA uses 20 of 30)")
     parser.add_argument("--output-dir", type=str, default="/tmp/mujoco_towel_eval",
                         help="Output directory for videos and logs")
     parser.add_argument("--render-width", type=int, default=640,
