@@ -40,14 +40,18 @@ Observation Format (flat keys for Gr00tSimPolicyWrapper):
 
 Action Format (flat keys from Gr00tSimPolicyWrapper):
     action = {
-        "action.left_arm":  np.float32 (B,T,7)  -- RELATIVE deltas
-        "action.right_arm": np.float32 (B,T,7)  -- RELATIVE deltas
+        "action.left_arm":  np.float32 (B,T,7)  -- ABSOLUTE (server converts from relative)
+        "action.right_arm": np.float32 (B,T,7)  -- ABSOLUTE (server converts from relative)
         "action.left_hand": np.float32 (B,T,1)  -- ABSOLUTE
         "action.right_hand":np.float32 (B,T,1)  -- ABSOLUTE
         "action.waist":     np.float32 (B,T,3)  -- ABSOLUTE
         "action.base_height_command": np.float32 (B,T,1) -- ABSOLUTE (for WBC)
         "action.navigate_command":    np.float32 (B,T,3) -- ABSOLUTE (for WBC)
     }
+
+    NOTE: The model internally predicts RELATIVE deltas for arms, but the server's
+    StateActionProcessor.unapply_action() converts them to ABSOLUTE positions before
+    returning. All action values received by the client are ABSOLUTE targets.
 
 Requirements:
     pip install mujoco>=3.2.6 pyzmq numpy opencv-python matplotlib
@@ -271,13 +275,17 @@ def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
                   current_state: np.ndarray):
     """Apply per-group action dict to MuJoCo actuators for a single timestep.
 
+    ALL values from the server are ABSOLUTE joint targets. The server's
+    StateActionProcessor.unapply_action() already converts RELATIVE actions
+    to ABSOLUTE internally (adds deltas to the current state it received).
+    Do NOT add them to current state again — that would double-apply the delta.
+
     Args:
         action_step: dict of {group_name: np.array(D,)} for one timestep.
-            - left_arm, right_arm: RELATIVE deltas (add to current state)
-            - left_hand, right_hand, waist: ABSOLUTE targets
-            - base_height_command, navigate_command: for WBC (ignored here)
+            All values are ABSOLUTE joint position targets.
         joint_mapping: from build_joint_name_to_state_index()
-        current_state: (31,) current joint state
+        current_state: (31,) current joint state (unused for action application,
+            kept for API compatibility)
     """
     # Arm joints in training order:
     # [0]=sh_pitch [1]=sh_roll [2]=sh_yaw [3]=elbow [4]=wr_yaw [5]=wr_roll [6]=wr_pitch
@@ -288,19 +296,15 @@ def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
 
     targets = {}
 
-    # Left arm: RELATIVE — add delta to current state
+    # Left arm: ABSOLUTE (server already converted from relative)
     if "left_arm" in action_step:
-        left_arm_delta = action_step["left_arm"]
-        left_arm_current = current_state[15:22]  # state indices for left_arm
-        left_arm_target = left_arm_current + left_arm_delta
+        left_arm_target = action_step["left_arm"]
         for i, suffix in enumerate(arm_joint_names):
             targets[f"left_{suffix}"] = left_arm_target[i]
 
-    # Right arm: RELATIVE — add delta to current state
+    # Right arm: ABSOLUTE (server already converted from relative)
     if "right_arm" in action_step:
-        right_arm_delta = action_step["right_arm"]
-        right_arm_current = current_state[22:29]  # state indices for right_arm
-        right_arm_target = right_arm_current + right_arm_delta
+        right_arm_target = action_step["right_arm"]
         for i, suffix in enumerate(arm_joint_names):
             targets[f"right_{suffix}"] = right_arm_target[i]
 
@@ -630,8 +634,8 @@ def main():
     parser = argparse.ArgumentParser(description="MuJoCo GROOT G1 Towel Eval")
     parser.add_argument("--scene", type=str, required=True,
                         help="Path to MuJoCo scene XML")
-    parser.add_argument("--host", type=str, default="localhost",
-                        help="GROOT server host")
+    parser.add_argument("--host", type=str, default="192.168.1.237",
+                        help="GROOT server host (default: Spark)")
     parser.add_argument("--port", type=int, default=5556,
                         help="GROOT server port (server must use --use-sim-policy-wrapper)")
     parser.add_argument("--model-path", type=str, default=None,

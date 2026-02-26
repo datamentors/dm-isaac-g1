@@ -18,7 +18,7 @@ All three connect to the same **GROOT inference server** via ZeroMQ. The server 
 ┌──────────────────────┐     ZMQ (port 5556)     ┌──────────────────────────────┐
 │   Simulation Client  │◄───────────────────────►│  GROOT Inference Server       │
 │  (MuJoCo / Isaac Sim │                         │  --use-sim-policy-wrapper     │
-│   / Real Robot)      │                         │  (workstation 192.168.1.205)  │
+│   / Real Robot)      │                         │  (Spark 192.168.1.237)        │
 └──────────────────────┘                         └──────────────────────────────┘
         │                                                │
         ▼                                                ▼
@@ -26,8 +26,9 @@ All three connect to the same **GROOT inference server** via ZeroMQ. The server 
    video.ego_view + state.* + language             GR00T Model
         │                                                │
         └──────────► Actions (flat keys) ◄───────────────┘
-                  action.left_arm (T=30, RELATIVE)
+                  action.left_arm (T=30, ABSOLUTE)
                   action.right_arm, .waist, .hands...
+                  (server converts relative→absolute internally)
 ```
 
 ---

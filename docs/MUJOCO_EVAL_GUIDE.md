@@ -19,12 +19,12 @@ Custom MuJoCo scenes for evaluating GROOT G1 policies, starting with towel foldi
 └──────────────────────────┘                   └──────────────────────────────┘
          │                                               │
          ▼                                               ▼
-  Observations (flat keys)                         Actions (flat keys)
-  video.ego_view (224x224 RGB)                     action.left_arm  (T,7) RELATIVE
-  state.left_arm (7), state.right_arm (7)          action.right_arm (T,7) RELATIVE
-  state.waist (3), state.left/right_leg (6)        action.left_hand (T,1) ABSOLUTE
-  state.left/right_hand (1)                        action.right_hand(T,1) ABSOLUTE
-  annotation.human.task_description                action.waist     (T,3) ABSOLUTE
+  Observations (flat keys)                         Actions (flat keys, ALL ABSOLUTE)
+  video.ego_view (224x224 RGB)                     action.left_arm  (T,7)
+  state.left_arm (7), state.right_arm (7)          action.right_arm (T,7)
+  state.waist (3), state.left/right_leg (6)        action.left_hand (T,1)
+  state.left/right_hand (1)                        action.right_hand(T,1)
+  annotation.human.task_description                action.waist     (T,3)
                                                    action.base_height_command (T,1)
                                                    action.navigate_command    (T,3)
 ```
@@ -35,7 +35,7 @@ Both the simulation and the server run inside the `dm-workstation` container on 
 - Server uses `--use-sim-policy-wrapper` which wraps the model with `Gr00tSimPolicyWrapper`. This handles flat key ↔ nested dict conversion and is the official NVIDIA approach for sim eval.
 - Robot base is **locked** (freejoint removed, pelvis fixed at 90° facing table). Without `gr00t_wbc` whole-body controller, the robot has no balance — fixing the base lets us test arm behavior.
 - `ego_view` camera is **injected into torso_link body** at runtime, matching the real G1's Intel RealSense D435 head-mount position.
-- Arm actions are **RELATIVE deltas** — added to current joint state. Hands, waist are ABSOLUTE targets.
+- All action values from the server are **ABSOLUTE joint targets**. The model internally predicts relative deltas for arms, but `StateActionProcessor.unapply_action()` converts them to absolute positions server-side before returning to the client.
 
 ---
 
@@ -338,7 +338,7 @@ python3 gr00t/eval/rollout_policy.py \
 | `get_state_vector()` | Extracts 31-DOF state vector from MuJoCo `data.qpos` |
 | `build_groot_observation()` | Builds flat-key observation dict for `Gr00tSimPolicyWrapper` |
 | `decode_action_dict()` | Decodes flat action keys (`action.left_arm`, etc.) into per-group arrays |
-| `apply_actions()` | Applies per-group action dict to MuJoCo actuators (RELATIVE for arms, ABSOLUTE for rest) |
+| `apply_actions()` | Applies per-group action dict to MuJoCo actuators (all ABSOLUTE targets from server) |
 | `render_ego_view()` | Renders ego_view camera at 224x224 for GROOT input |
 | `run_episode()` | Runs a single evaluation episode with action chunking |
 | `_get_finger_curl()` | Computes average normalized finger curl for gripper state |
