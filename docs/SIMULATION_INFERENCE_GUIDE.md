@@ -12,21 +12,22 @@ There are three ways to evaluate a fine-tuned GR00T model:
 | **Isaac Sim (Isaac Lab)** | Isaac Sim 5.x | Unitree G1 gripper | Full physics sim, RL, domain randomization | Medium (needs env adaptation) |
 | **Real Robot** | — | Unitree G1 EDU 2 | Production deployment | High |
 
-All three connect to the same **GROOT inference server** via ZeroMQ (port 5555).
+All three connect to the same **GROOT inference server** via ZeroMQ. The server must use `--use-sim-policy-wrapper` for simulation eval.
 
 ```
-┌──────────────────────┐     ZMQ (port 5555)     ┌──────────────────────┐
-│   Simulation Client  │◄───────────────────────►│  GROOT Inference     │
-│  (MuJoCo / Isaac Sim │                         │  Server (Spark)      │
-│   / Real Robot)      │                         │  192.168.1.237       │
-└──────────────────────┘                         └──────────────────────┘
+┌──────────────────────┐     ZMQ (port 5556)     ┌──────────────────────────────┐
+│   Simulation Client  │◄───────────────────────►│  GROOT Inference Server       │
+│  (MuJoCo / Isaac Sim │                         │  --use-sim-policy-wrapper     │
+│   / Real Robot)      │                         │  (workstation 192.168.1.205)  │
+└──────────────────────┘                         └──────────────────────────────┘
         │                                                │
         ▼                                                ▼
-   Observations                                    Fine-tuned
-   (ego_view + 31 DOF state)                       GR00T Model
+   Observations (flat keys)                        Fine-tuned
+   video.ego_view + state.* + language             GR00T Model
         │                                                │
-        └──────────► Actions (23 DOF) ◄──────────────────┘
-                  (30-step trajectory)
+        └──────────► Actions (flat keys) ◄───────────────┘
+                  action.left_arm (T=30, RELATIVE)
+                  action.right_arm, .waist, .hands...
 ```
 
 ---
@@ -61,12 +62,12 @@ bash gr00t/eval/sim/GR00T-WholeBodyControl/setup_GR00T_WholeBodyControl.sh
 **Terminal 1 — Start GROOT inference server:**
 
 ```bash
-# On Spark (192.168.1.237) — server is already running
-# Or start locally on workstation:
-uv run python gr00t/eval/run_gr00t_server.py \
-    --model-path /workspace/checkpoints/groot-g1-gripper-hospitality-7ds \
+# Start on workstation:
+cd /workspace/Isaac-GR00T
+python3 -m gr00t.eval.run_gr00t_server \
+    --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
     --embodiment-tag UNITREE_G1 \
-    --port 5555 \
+    --port 5556 \
     --use-sim-policy-wrapper
 ```
 

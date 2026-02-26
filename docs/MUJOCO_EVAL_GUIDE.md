@@ -7,23 +7,35 @@ Custom MuJoCo scenes for evaluating GROOT G1 policies, starting with towel foldi
 ## Architecture
 
 ```
-┌──────────────────────────┐     ZMQ (5555)     ┌──────────────────────┐
-│  MuJoCo Simulation       │◄──────────────────►│  GROOT Inference     │
-│  (run_mujoco_towel_eval) │                    │  Server              │
-│                          │                    │  (local or Spark)    │
-│  G1 (Menagerie 29-DOF)   │                    │                      │
-│  + Table + Towel (flex)  │                    │  groot-g1-gripper-   │
-│  + ego_view camera       │                    │  fold-towel-full     │
-└──────────────────────────┘                    └──────────────────────┘
+┌──────────────────────────┐    ZMQ (5556)     ┌──────────────────────────────┐
+│  MuJoCo Simulation       │◄────────────────►│  GROOT Inference Server       │
+│  (run_mujoco_towel_eval) │                   │  --use-sim-policy-wrapper     │
+│                          │                   │                               │
+│  G1 (Menagerie 43 act.)  │                   │  Gr00tSimPolicyWrapper        │
+│  + Table + Towel (flex)  │                   │  converts flat keys ↔ nested  │
+│  + ego_view camera       │                   │                               │
+│  + Fixed base (no WBC)   │                   │  groot-g1-gripper-            │
+│                          │                   │  fold-towel-full              │
+└──────────────────────────┘                   └──────────────────────────────┘
          │                                               │
          ▼                                               ▼
-  Observations                                     Actions
-  ego_view (224x224 RGB)                           23 DOF
-  state (31 DOF)                                   (30-step chunks)
-  language ("fold the towel")
+  Observations (flat keys)                         Actions (flat keys)
+  video.ego_view (224x224 RGB)                     action.left_arm  (T,7) RELATIVE
+  state.left_arm (7), state.right_arm (7)          action.right_arm (T,7) RELATIVE
+  state.waist (3), state.left/right_leg (6)        action.left_hand (T,1) ABSOLUTE
+  state.left/right_hand (1)                        action.right_hand(T,1) ABSOLUTE
+  annotation.human.task_description                action.waist     (T,3) ABSOLUTE
+                                                   action.base_height_command (T,1)
+                                                   action.navigate_command    (T,3)
 ```
 
-Both the simulation and the server run inside the `dm-workstation` container on the Blackwell workstation (192.168.1.205). The server can also run on the Spark (192.168.1.237).
+Both the simulation and the server run inside the `dm-workstation` container on the Blackwell workstation (192.168.1.205).
+
+**Key design choices:**
+- Server uses `--use-sim-policy-wrapper` which wraps the model with `Gr00tSimPolicyWrapper`. This handles flat key ↔ nested dict conversion and is the official NVIDIA approach for sim eval.
+- Robot base is **locked** (freejoint removed, pelvis fixed at 90° facing table). Without `gr00t_wbc` whole-body controller, the robot has no balance — fixing the base lets us test arm behavior.
+- `ego_view` camera is **injected into torso_link body** at runtime, matching the real G1's Intel RealSense D435 head-mount position.
+- Arm actions are **RELATIVE deltas** — added to current joint state. Hands, waist are ABSOLUTE targets.
 
 ---
 
@@ -34,23 +46,36 @@ Both the simulation and the server run inside the `dm-workstation` container on 
 sshpass -p datamentors ssh datamentors@192.168.1.205
 docker exec -it dm-workstation bash
 
-# --- Terminal 1: Start GROOT server ---
+# --- Terminal 1: Start GROOT server with sim wrapper ---
 cd /workspace/Isaac-GR00T
-python3 gr00t/eval/run_gr00t_server.py \
+python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
     --embodiment-tag UNITREE_G1 \
-    --port 5555 \
+    --port 5556 \
     --use-sim-policy-wrapper
 
 # --- Terminal 2: Run MuJoCo eval ---
-python3 /workspace/dm-isaac-g1/scripts/eval/run_mujoco_towel_eval.py \
-    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_towel_folding.xml \
-    --host 127.0.0.1 --port 5555 \
+cd /workspace/dm-isaac-g1/scripts/eval
+MUJOCO_GL=egl python3 run_mujoco_towel_eval.py \
+    --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
+    --host localhost --port 5556 \
     --n-episodes 5 --max-steps 500 \
+    --action-horizon 20 \
     --language "fold the towel"
 ```
 
 Videos are saved to `/tmp/mujoco_towel_eval/episode_*.mp4`.
+
+**Note:** If `AutoProcessor.from_pretrained` fails with "Unrecognized processing class", copy the processor config to the checkpoint root:
+```bash
+cp /workspace/checkpoints/groot-g1-gripper-fold-towel-full/processor/processor_config.json \
+   /workspace/checkpoints/groot-g1-gripper-fold-towel-full/
+cp /workspace/checkpoints/groot-g1-gripper-fold-towel-full/processor/statistics.json \
+   /workspace/checkpoints/groot-g1-gripper-fold-towel-full/
+cp /workspace/checkpoints/groot-g1-gripper-fold-towel-full/processor/embodiment_id.json \
+   /workspace/checkpoints/groot-g1-gripper-fold-towel-full/
+```
+This is a known issue with `transformers>=4.51` where the custom processor registration changed.
 
 ---
 
@@ -61,15 +86,17 @@ scripts/eval/
 ├── setup_eval_workstation.sh              # One-time setup (WBC, datasets, deps)
 ├── run_mujoco_towel_eval.py               # Closed-loop MuJoCo eval script
 └── mujoco_towel_scene/
-    ├── g1_towel_folding.xml               # Scene: G1 + table + deformable towel
+    ├── g1_towel_folding.xml               # Scene: G1 (no hands) + table + towel
+    ├── g1_gripper_towel_folding.xml       # Scene: G1 (with_hands) + table + towel
     └── setup_scene.sh                     # Clone Menagerie + verify scene
 ```
 
 | File | Purpose |
 |------|---------|
 | `setup_eval_workstation.sh` | Installs MuJoCo 3.2.6, clones Menagerie, downloads datasets, runs sanity checks |
-| `run_mujoco_towel_eval.py` | Main eval loop: loads scene, connects to GROOT, runs episodes, records video |
-| `g1_towel_folding.xml` | MuJoCo MJCF scene with G1 (Menagerie), table, and flexcomp cloth towel |
+| `run_mujoco_towel_eval.py` | Main eval loop: loads scene, connects to GROOT via PolicyClient, runs episodes, records video |
+| `g1_towel_folding.xml` | MuJoCo MJCF scene with G1 29-DOF (no grippers), table, and flexcomp cloth towel |
+| `g1_gripper_towel_folding.xml` | MuJoCo MJCF scene with G1 43-DOF (with Inspire hands), table, and towel |
 | `setup_scene.sh` | Clones MuJoCo Menagerie, creates symlinks, verifies scene loads |
 
 ---
@@ -80,10 +107,10 @@ scripts/eval/
 
 The scene (`g1_towel_folding.xml`) combines:
 
-1. **Unitree G1 robot** from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie/tree/main/unitree_g1) (29 actuated joints, no grippers)
+1. **Unitree G1 robot** from [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie/tree/main/unitree_g1) — either `g1.xml` (29 act) or `g1_with_hands.xml` (43 act, Inspire fingers)
 2. **Table** — box geom at (0, 0.55, 0.74), sized 0.9m x 0.7m
 3. **Deformable towel** — MuJoCo 3.0+ `flexcomp` with `mujoco.elasticity.shell` plugin
-4. **Cameras** — `ego_view` (head-mounted, GROOT input) and `overview` (debug)
+4. **Cameras** — `ego_view` (injected into torso_link at load time, matching D435 head-mount) and `overview` (fixed world camera for debug video)
 
 ### Towel (Cloth) Configuration
 
@@ -111,16 +138,15 @@ The scene (`g1_towel_folding.xml`) combines:
 
 Tune `young` (1e2 to 1e5) to control stiffness. Lower values make the towel drape more realistically.
 
-### Keyframe Workaround
+### Scene Composition at Load Time
 
-The Menagerie G1 includes a `stand` keyframe with 36 qpos values. Adding the towel flexcomp increases total qpos to ~804, which makes the keyframe invalid. The `load_towel_scene()` function in `run_mujoco_towel_eval.py` handles this by:
+The `load_towel_scene()` function performs several XML manipulations before compilation:
 
-1. Reading the G1 XML and stripping the `<keyframe>` section
-2. Writing a temporary modified XML
-3. Loading the combined scene from a temporary file
-4. Cleaning up temp files
-
-The robot initial pose is set programmatically instead.
+1. **Strip keyframes** — The Menagerie G1 `stand` keyframe has 36 qpos, but flexcomp towel increases qpos to ~811. Keyframe is removed to avoid size conflict.
+2. **Lock the base** — Removes `<freejoint name="floating_base_joint"/>` so the pelvis is fixed to world. Without `gr00t_wbc`, the freejoint robot has no balance controller and falls.
+3. **Rotate to face table** — Sets `quat="0.7071 0 0 0.7071"` on the pelvis body (90° around Z, default G1 faces +X, table is at +Y).
+4. **Inject ego_view camera** — Adds a camera into the `torso_link` body matching the real G1's Intel RealSense D435 position: `pos="0.0576 0.0175 0.4299"` with 60° pitch downward.
+5. **Write temp XML** — Compiles from a temporary file in the Menagerie directory (for mesh path resolution), then cleans up.
 
 ---
 
@@ -200,7 +226,11 @@ for name in ['left_wrist_yaw_joint', 'left_wrist_roll_joint', 'left_wrist_pitch_
 
 ### Gripper Note
 
-MuJoCo Menagerie G1 has **no gripper joints** (29 actuators vs 31 state DOF). State indices 29-30 default to 0. The `g1_with_hands.xml` variant has Inspire-style dexterous fingers (7 DOF per hand) which would need to be mapped to a single gripper value if used.
+The `g1_gripper_towel_folding.xml` scene uses `g1_with_hands.xml` (43 actuators: 29 body + 14 finger). The 7-DOF Inspire fingers per hand are mapped to a single gripper value:
+- **State**: `_get_finger_curl()` computes average normalized finger curl (0=open, 1=closed)
+- **Action**: `_apply_gripper_to_fingers()` maps the single gripper command to all 7 finger joints via linear interpolation across each joint's range
+
+The `g1_towel_folding.xml` scene uses `g1.xml` (29 actuators, no grippers). State indices 29-30 default to 0.
 
 ---
 
@@ -234,43 +264,50 @@ Output: MSE/MAE metrics + trajectory comparison plots at `/tmp/open_loop_eval/tr
 
 ### 2. MuJoCo Closed-Loop Eval (Custom Towel Scene)
 
-Full interaction with physics simulation. Requires GROOT server.
+Full interaction with physics simulation. Requires GROOT server with `--use-sim-policy-wrapper`.
 
 ```bash
 # Server (terminal 1):
-python3 gr00t/eval/run_gr00t_server.py \
+cd /workspace/Isaac-GR00T
+python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-    --embodiment-tag UNITREE_G1 --port 5555 --use-sim-policy-wrapper
+    --embodiment-tag UNITREE_G1 --port 5556 --use-sim-policy-wrapper
 
 # Eval (terminal 2):
-python3 /workspace/dm-isaac-g1/scripts/eval/run_mujoco_towel_eval.py \
-    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_towel_folding.xml \
-    --host 127.0.0.1 --port 5555 \
-    --n-episodes 5 --max-steps 500
+cd /workspace/dm-isaac-g1/scripts/eval
+MUJOCO_GL=egl python3 run_mujoco_towel_eval.py \
+    --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
+    --host localhost --port 5556 \
+    --n-episodes 5 --max-steps 500 --action-horizon 20
 ```
 
 ### 3. MuJoCo WBC Eval (NVIDIA PnP Apple to Plate)
 
-Uses the official GR00T-WholeBodyControl loco-manipulation environment. Requires WBC venv setup.
+Uses the official GR00T-WholeBodyControl loco-manipulation environment with full balance control. Requires WBC venv setup (separate from main env due to conflicting deps).
 
 ```bash
-# Setup (one-time):
-bash /workspace/Isaac-GR00T/gr00t/eval/sim/GR00T-WholeBodyControl/setup_GR00T_WholeBodyControl.sh
+# Setup (one-time) — creates a separate uv venv with robosuite + gr00t_wbc:
+cd /workspace/Isaac-GR00T
+git submodule update --init external_dependencies/GR00T-WholeBodyControl
+bash gr00t/eval/sim/GR00T-WholeBodyControl/setup_GR00T_WholeBodyControl.sh
 
-# Activate WBC venv:
-source /workspace/Isaac-GR00T/gr00t/eval/sim/GR00T-WholeBodyControl/GR00T-WholeBodyControl_uv/.venv/bin/activate
-
-# Server:
-python3 gr00t/eval/run_gr00t_server.py \
+# Terminal 1: Server (uses main env, NOT WBC venv):
+cd /workspace/Isaac-GR00T
+python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-    --embodiment-tag UNITREE_G1 --port 5555 --use-sim-policy-wrapper
+    --embodiment-tag UNITREE_G1 --port 5556 --use-sim-policy-wrapper
 
-# Rollout:
+# Terminal 2: Rollout (uses WBC venv):
+source gr00t/eval/sim/GR00T-WholeBodyControl/GR00T-WholeBodyControl_uv/.venv/bin/activate
+
 python3 gr00t/eval/rollout_policy.py \
     --n_episodes 10 --max_episode_steps 1440 \
     --env_name gr00tlocomanip_g1_sim/LMPnPAppleToPlateDC_G1_gear_wbc \
-    --n_action_steps 20 --n_envs 5
+    --policy_client_host localhost --policy_client_port 5556 \
+    --n_action_steps 20 --n_envs 1
 ```
+
+**Note:** The WBC pipeline provides proper balance via `WholeBodyControlWrapper`. The `base_height_command` and `navigate_command` actions are consumed by WBC, while our fixed-base MuJoCo eval ignores them.
 
 ---
 
@@ -281,13 +318,12 @@ python3 gr00t/eval/rollout_policy.py \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--scene` | (required) | Path to MuJoCo scene XML |
-| `--host` | `127.0.0.1` | GROOT server host |
-| `--port` | `5555` | GROOT server port |
-| `--model-path` | `None` | Local model checkpoint (bypasses server) |
+| `--host` | `localhost` | GROOT server host |
+| `--port` | `5556` | GROOT server port (must use `--use-sim-policy-wrapper`) |
 | `--language` | `"fold the towel"` | Task language instruction |
 | `--n-episodes` | `5` | Number of evaluation episodes |
 | `--max-steps` | `500` | Max steps per episode |
-| `--action-horizon` | `16` | Steps per action chunk before re-querying |
+| `--action-horizon` | `20` | Steps to execute per 30-step action chunk (NVIDIA uses 20) |
 | `--output-dir` | `/tmp/mujoco_towel_eval` | Output directory for videos |
 | `--render-width` | `640` | Render width for output video |
 | `--render-height` | `480` | Render height for output video |
@@ -297,13 +333,16 @@ python3 gr00t/eval/rollout_policy.py \
 
 | Function | Purpose |
 |----------|---------|
-| `load_towel_scene()` | Loads scene XML, strips Menagerie keyframe, compiles model |
+| `load_towel_scene()` | Loads scene XML, strips keyframe, locks base, rotates pelvis, injects ego_view camera |
 | `build_joint_name_to_state_index()` | Maps MuJoCo joint names to UNITREE_G1 state indices with wrist remapping |
 | `get_state_vector()` | Extracts 31-DOF state vector from MuJoCo `data.qpos` |
-| `apply_actions()` | Applies 23-DOF action vector to MuJoCo actuators (handles RELATIVE arms) |
+| `build_groot_observation()` | Builds flat-key observation dict for `Gr00tSimPolicyWrapper` |
+| `decode_action_dict()` | Decodes flat action keys (`action.left_arm`, etc.) into per-group arrays |
+| `apply_actions()` | Applies per-group action dict to MuJoCo actuators (RELATIVE for arms, ABSOLUTE for rest) |
 | `render_ego_view()` | Renders ego_view camera at 224x224 for GROOT input |
-| `build_groot_observation()` | Builds observation dict in GROOT format (video + state + language) |
 | `run_episode()` | Runs a single evaluation episode with action chunking |
+| `_get_finger_curl()` | Computes average normalized finger curl for gripper state |
+| `_apply_gripper_to_fingers()` | Maps single gripper command to all Inspire finger joints |
 
 ---
 

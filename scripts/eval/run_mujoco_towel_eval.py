@@ -9,38 +9,44 @@ Connects to the GROOT inference server (ZMQ) to get actions from the trained mod
 This script:
   1. Loads a MuJoCo scene with G1 + table + towel
   2. At each step, captures ego_view camera image + joint state
-  3. Sends observation to GROOT server (or loads model locally)
+  3. Sends observation to GROOT server via PolicyClient
   4. Applies returned actions to the robot
   5. Records video and logs metrics
 
 Usage:
-    # Start GROOT server on Spark (192.168.1.237):
+    # Start GROOT server with --use-sim-policy-wrapper:
     python gr00t/eval/run_gr00t_server.py \
         --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-        --embodiment-tag UNITREE_G1 --port 5555
+        --embodiment-tag UNITREE_G1 --use-sim-policy-wrapper --port 5556
 
     # Then run this eval from workstation container:
     python run_mujoco_towel_eval.py \
         --scene mujoco_towel_scene/g1_towel_folding.xml \
-        --host 192.168.1.237 --port 5555 \
+        --host localhost --port 5556 \
         --n-episodes 5 --max-steps 500
 
-    # Or with local model (no server needed):
-    python run_mujoco_towel_eval.py \
-        --scene mujoco_towel_scene/g1_towel_folding.xml \
-        --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-        --n-episodes 5
-
-Observation Format:
-    Uses the GROOT Policy API nested dict format (same as real robot deployment).
-    No --use-sim-policy-wrapper needed on the server.
-
+Observation Format (flat keys for Gr00tSimPolicyWrapper):
     obs = {
-        "video":    {"ego_view": np.uint8 (B,T,H,W,3)},
-        "state":    {"left_leg": (B,T,6), "right_leg": (B,T,6), "waist": (B,T,3),
-                     "left_arm": (B,T,7), "right_arm": (B,T,7),
-                     "left_hand": (B,T,1), "right_hand": (B,T,1)},
-        "language": {"annotation.human.task_description": [[str]]}
+        "video.ego_view":  np.uint8 (B,T,H,W,3),
+        "state.left_leg":  np.float32 (B,T,6),
+        "state.right_leg": np.float32 (B,T,6),
+        "state.waist":     np.float32 (B,T,3),
+        "state.left_arm":  np.float32 (B,T,7),
+        "state.right_arm": np.float32 (B,T,7),
+        "state.left_hand": np.float32 (B,T,1),
+        "state.right_hand":np.float32 (B,T,1),
+        "annotation.human.task_description": tuple[str] (B,)
+    }
+
+Action Format (flat keys from Gr00tSimPolicyWrapper):
+    action = {
+        "action.left_arm":  np.float32 (B,T,7)  -- RELATIVE deltas
+        "action.right_arm": np.float32 (B,T,7)  -- RELATIVE deltas
+        "action.left_hand": np.float32 (B,T,1)  -- ABSOLUTE
+        "action.right_hand":np.float32 (B,T,1)  -- ABSOLUTE
+        "action.waist":     np.float32 (B,T,3)  -- ABSOLUTE
+        "action.base_height_command": np.float32 (B,T,1) -- ABSOLUTE (for WBC)
+        "action.navigate_command":    np.float32 (B,T,3) -- ABSOLUTE (for WBC)
     }
 
 Requirements:
@@ -261,72 +267,67 @@ def get_state_vector(model: mujoco.MjModel, data: mujoco.MjData,
 
 
 def apply_actions(model: mujoco.MjModel, data: mujoco.MjData,
-                  actions: np.ndarray, joint_mapping: dict,
+                  action_step: dict, joint_mapping: dict,
                   current_state: np.ndarray):
-    """Apply 23-DOF action vector to MuJoCo actuators.
+    """Apply per-group action dict to MuJoCo actuators for a single timestep.
 
-    IMPORTANT: The GROOT server's StateActionProcessor.unapply_action() already
-    converts RELATIVE actions to ABSOLUTE targets internally. The returned arm
-    values are ABSOLUTE joint positions, not deltas. Do NOT add them to current
-    state — that would double-apply the delta.
-
-    All action components are treated as ABSOLUTE targets here.
+    Args:
+        action_step: dict of {group_name: np.array(D,)} for one timestep.
+            - left_arm, right_arm: RELATIVE deltas (add to current state)
+            - left_hand, right_hand, waist: ABSOLUTE targets
+            - base_height_command, navigate_command: for WBC (ignored here)
+        joint_mapping: from build_joint_name_to_state_index()
+        current_state: (31,) current joint state
     """
-    if actions.shape[-1] != ACTION_DOF:
-        print(f"WARNING: expected {ACTION_DOF} action dims, got {actions.shape[-1]}")
-        return
+    # Arm joints in training order:
+    # [0]=sh_pitch [1]=sh_roll [2]=sh_yaw [3]=elbow [4]=wr_yaw [5]=wr_roll [6]=wr_pitch
+    arm_joint_names = [
+        "shoulder_pitch_joint", "shoulder_roll_joint", "shoulder_yaw_joint",
+        "elbow_joint", "wrist_yaw_joint", "wrist_roll_joint", "wrist_pitch_joint",
+    ]
 
-    # Extract action components — ALL are absolute targets from the server
-    left_arm_target = actions[0:7]   # ABSOLUTE (server already decoded from relative)
-    right_arm_target = actions[7:14] # ABSOLUTE (server already decoded from relative)
-    left_hand = actions[14]          # ABSOLUTE
-    right_hand = actions[15]         # ABSOLUTE
-    waist = actions[16:19]           # ABSOLUTE
-    # base_height = actions[19]      # For WBC (not applied without WBC)
-    # navigate = actions[20:23]      # For WBC (not applied without WBC)
-
-    # Build target qpos for actuated joints
-    # Map joint names to target positions
     targets = {}
 
-    # Left arm joints — action indices [0-6] are in TRAINING order:
-    # [0]=sh_pitch [1]=sh_roll [2]=sh_yaw [3]=elbow [4]=wr_yaw [5]=wr_roll [6]=wr_pitch
-    targets["left_shoulder_pitch_joint"] = left_arm_target[0]
-    targets["left_shoulder_roll_joint"] = left_arm_target[1]
-    targets["left_shoulder_yaw_joint"] = left_arm_target[2]
-    targets["left_elbow_joint"] = left_arm_target[3]
-    targets["left_wrist_yaw_joint"] = left_arm_target[4]
-    targets["left_wrist_roll_joint"] = left_arm_target[5]
-    targets["left_wrist_pitch_joint"] = left_arm_target[6]
+    # Left arm: RELATIVE — add delta to current state
+    if "left_arm" in action_step:
+        left_arm_delta = action_step["left_arm"]
+        left_arm_current = current_state[15:22]  # state indices for left_arm
+        left_arm_target = left_arm_current + left_arm_delta
+        for i, suffix in enumerate(arm_joint_names):
+            targets[f"left_{suffix}"] = left_arm_target[i]
 
-    # Right arm joints — same ordering
-    targets["right_shoulder_pitch_joint"] = right_arm_target[0]
-    targets["right_shoulder_roll_joint"] = right_arm_target[1]
-    targets["right_shoulder_yaw_joint"] = right_arm_target[2]
-    targets["right_elbow_joint"] = right_arm_target[3]
-    targets["right_wrist_yaw_joint"] = right_arm_target[4]
-    targets["right_wrist_roll_joint"] = right_arm_target[5]
-    targets["right_wrist_pitch_joint"] = right_arm_target[6]
+    # Right arm: RELATIVE — add delta to current state
+    if "right_arm" in action_step:
+        right_arm_delta = action_step["right_arm"]
+        right_arm_current = current_state[22:29]  # state indices for right_arm
+        right_arm_target = right_arm_current + right_arm_delta
+        for i, suffix in enumerate(arm_joint_names):
+            targets[f"right_{suffix}"] = right_arm_target[i]
 
-    # Waist
-    targets["waist_yaw_joint"] = waist[0]
-    targets["waist_roll_joint"] = waist[1]
-    targets["waist_pitch_joint"] = waist[2]
+    # Waist: ABSOLUTE
+    if "waist" in action_step:
+        waist = action_step["waist"]
+        targets["waist_yaw_joint"] = waist[0]
+        targets["waist_roll_joint"] = waist[1]
+        targets["waist_pitch_joint"] = waist[2]
 
     # Apply to MuJoCo actuators (position control)
     for jname, target_val in targets.items():
         if jname in joint_mapping:
             mj_joint_id, _ = joint_mapping[jname]
-            # Find actuator for this joint
             for act_id in range(model.nu):
                 if model.actuator_trnid[act_id, 0] == mj_joint_id:
-                    data.ctrl[act_id] = target_val
+                    data.ctrl[act_id] = float(target_val)
                     break
 
-    # Grippers — map single gripper value to all finger joints (with_hands model)
+    # Grippers: ABSOLUTE — map single value to all finger joints
     if _has_hand_joints(model):
-        _apply_gripper_to_fingers(model, data, left_hand, LEFT_HAND_FINGER_JOINTS)
-        _apply_gripper_to_fingers(model, data, right_hand, RIGHT_HAND_FINGER_JOINTS)
+        if "left_hand" in action_step:
+            _apply_gripper_to_fingers(model, data, float(action_step["left_hand"][0]),
+                                      LEFT_HAND_FINGER_JOINTS)
+        if "right_hand" in action_step:
+            _apply_gripper_to_fingers(model, data, float(action_step["right_hand"][0]),
+                                      RIGHT_HAND_FINGER_JOINTS)
 
 
 def render_ego_view(model: mujoco.MjModel, data: mujoco.MjData,
@@ -460,84 +461,62 @@ def load_towel_scene(scene_path: str, menagerie_dir: str = "/workspace/mujoco_me
 
 def build_groot_observation(image: np.ndarray, state: np.ndarray,
                             language: str) -> dict:
-    """Build observation dict in GROOT Policy API nested format.
+    """Build observation dict in flat key format for Gr00tSimPolicyWrapper.
 
-    Uses the same format as real robot deployment (SO100, etc.) — no
-    --use-sim-policy-wrapper needed on the server.
+    The server must be started with --use-sim-policy-wrapper, which expects
+    flat keys like 'video.ego_view', 'state.left_arm', etc.
+    The wrapper converts these to the nested format internally.
 
-    GROOT expects per-group state arrays:
-      video:    {"ego_view": (B,T,H,W,3) uint8}
-      state:    {"left_leg": (B,T,6), "right_leg": (B,T,6), "waist": (B,T,3),
-                 "left_arm": (B,T,7), "right_arm": (B,T,7),
-                 "left_hand": (B,T,1), "right_hand": (B,T,1)}
-      language: {"annotation.human.task_description": [["fold the towel"]]}
+    Args:
+        image: (H, W, 3) uint8 RGB image from ego_view camera
+        state: (31,) float32 state vector
+        language: task description string
     """
     B, T = 1, 1
 
-    # Video: (B, T, H, W, 3)
-    image_bt = image[np.newaxis, np.newaxis, ...].astype(np.uint8)
-
-    # State: split 31-DOF vector into per-group arrays (B, T, D)
     def _bt(arr):
         return arr.astype(np.float32).reshape(B, T, -1)
 
-    state_dict = {
-        "left_leg":   _bt(state[0:6]),
-        "right_leg":  _bt(state[6:12]),
-        "waist":      _bt(state[12:15]),
-        "left_arm":   _bt(state[15:22]),
-        "right_arm":  _bt(state[22:29]),
-        "left_hand":  _bt(state[29:30]),
-        "right_hand": _bt(state[30:31]),
+    obs = {
+        # Video: (B, T, H, W, 3) uint8
+        "video.ego_view": image[np.newaxis, np.newaxis, ...].astype(np.uint8),
+        # State: flat keys with (B, T, D) float32
+        "state.left_leg":   _bt(state[0:6]),
+        "state.right_leg":  _bt(state[6:12]),
+        "state.waist":      _bt(state[12:15]),
+        "state.left_arm":   _bt(state[15:22]),
+        "state.right_arm":  _bt(state[22:29]),
+        "state.left_hand":  _bt(state[29:30]),
+        "state.right_hand": _bt(state[30:31]),
+        # Language: tuple of strings (B,)
+        "annotation.human.task_description": (language,),
     }
-
-    # Language: (B, T) = [[str]]
-    language_dict = {
-        "annotation.human.task_description": [[language]],
-    }
-
-    return {
-        "video": {"ego_view": image_bt},
-        "state": state_dict,
-        "language": language_dict,
-    }
+    return obs
 
 
-def decode_action_dict(action_dict: dict) -> np.ndarray:
-    """Decode GROOT per-group action dict into a flat 23-DOF action array.
+def decode_action_dict(action_dict: dict) -> dict:
+    """Decode flat action dict from Gr00tSimPolicyWrapper into per-group arrays.
 
-    Server returns actions as:
-        {"left_arm": (B,T,7), "right_arm": (B,T,7), "left_hand": (B,T,1),
-         "right_hand": (B,T,1), "waist": (B,T,3),
-         "base_height_command": (B,T,1), "navigate_command": (B,T,3)}
+    Server with --use-sim-policy-wrapper returns:
+        {"action.left_arm": (B,T,7), "action.right_arm": (B,T,7),
+         "action.left_hand": (B,T,1), "action.right_hand": (B,T,1),
+         "action.waist": (B,T,3), "action.base_height_command": (B,T,1),
+         "action.navigate_command": (B,T,3)}
 
-    We concatenate into: (T, 23) matching ACTION_GROUPS order.
+    Returns dict of per-group arrays with batch dim removed: {name: (T, D)}
     """
-    # Order must match ACTION_GROUPS
-    group_order = [
-        ("left_arm", 7),
-        ("right_arm", 7),
-        ("left_hand", 1),
-        ("right_hand", 1),
-        ("waist", 3),
-        ("base_height_command", 1),
-        ("navigate_command", 3),
-    ]
-
-    chunks = []
-    horizon = None
-    for name, expected_dim in group_order:
-        arr = np.array(action_dict[name])  # (B, T, D)
-        # Remove batch dim
+    result = {}
+    for key, arr in action_dict.items():
+        # Strip "action." prefix
+        name = key.replace("action.", "") if key.startswith("action.") else key
+        arr = np.array(arr)
+        # Remove batch dim: (B, T, D) -> (T, D)
         if arr.ndim == 3:
-            arr = arr[0]  # (T, D)
+            arr = arr[0]
         elif arr.ndim == 1:
-            arr = arr.reshape(1, -1)  # (1, D)
-        if horizon is None:
-            horizon = arr.shape[0]
-        chunks.append(arr)
-
-    return np.concatenate(chunks, axis=-1)  # (T, 23)
+            arr = arr.reshape(1, -1)
+        result[name] = arr
+    return result
 
 
 def run_episode(model, data, renderer, policy_client, joint_mapping,
@@ -572,15 +551,16 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
         pass
 
     step = 0
-    action_buffer = None
+    action_groups = None  # dict of {name: (T, D)} per-group action arrays
     action_idx = 0
+    action_horizon_len = 0
 
     while step < max_steps:
         current_state = get_state_vector(model, data, joint_mapping)
         states.append(current_state.copy())
 
         # Query policy when action buffer is exhausted
-        if action_buffer is None or action_idx >= action_buffer.shape[0]:
+        if action_groups is None or action_idx >= action_horizon_len:
             # Render ego view
             image = render_ego_view(model, data, renderer)
             obs = build_groot_observation(image, current_state, language)
@@ -588,30 +568,25 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
             # Get actions from GROOT
             action_dict, info = policy_client.get_action(obs)
 
-            # Decode per-group action dict into flat (T, 23) array
-            if isinstance(action_dict, dict) and "left_arm" in action_dict:
-                # Nested format (base server, no sim wrapper)
-                action_buffer = decode_action_dict(action_dict)
-            elif isinstance(action_dict, dict) and "action" in action_dict:
-                # Flat format (sim wrapper active)
-                action_buffer = np.array(action_dict["action"])
-                if action_buffer.ndim == 3:
-                    action_buffer = action_buffer[0]
-            else:
-                action_buffer = np.array(action_dict)
-                if action_buffer.ndim == 3:
-                    action_buffer = action_buffer[0]
-
+            # Decode flat action keys into per-group arrays
+            action_groups = decode_action_dict(action_dict)
             action_idx = 0
 
-            if step == 0:
-                print(f"  Action buffer shape: {action_buffer.shape} "
-                      f"(horizon={action_buffer.shape[0]}, dim={action_buffer.shape[-1]})")
+            # Determine horizon from first group
+            first_key = next(iter(action_groups))
+            action_horizon_len = min(action_horizon, action_groups[first_key].shape[0])
 
-        # Apply current action from buffer
-        action = action_buffer[min(action_idx, len(action_buffer) - 1)]
-        apply_actions(model, data, action, joint_mapping, current_state)
-        actions_log.append(action.copy())
+            if step == 0:
+                print(f"  Action groups: {list(action_groups.keys())}")
+                for k, v in action_groups.items():
+                    print(f"    {k}: shape={v.shape}, range=[{v.min():.4f}, {v.max():.4f}]")
+                print(f"  Using {action_horizon_len} of {action_groups[first_key].shape[0]} steps")
+
+        # Build single-step action dict for this timestep
+        t = min(action_idx, action_horizon_len - 1)
+        action_step = {name: arr[t] for name, arr in action_groups.items()}
+        apply_actions(model, data, action_step, joint_mapping, current_state)
+        actions_log.append(action_step)
 
         # Step simulation
         mujoco.mj_step(model, data)
@@ -632,7 +607,7 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
     return {
         "frames": frames,
         "states": np.array(states),
-        "actions": np.array(actions_log),
+        "actions": actions_log,
         "steps": step,
     }
 
@@ -655,12 +630,12 @@ def main():
     parser = argparse.ArgumentParser(description="MuJoCo GROOT G1 Towel Eval")
     parser.add_argument("--scene", type=str, required=True,
                         help="Path to MuJoCo scene XML")
-    parser.add_argument("--host", type=str, default="192.168.1.237",
-                        help="GROOT server host (default: Spark)")
-    parser.add_argument("--port", type=int, default=5555,
-                        help="GROOT server port")
+    parser.add_argument("--host", type=str, default="localhost",
+                        help="GROOT server host")
+    parser.add_argument("--port", type=int, default=5556,
+                        help="GROOT server port (server must use --use-sim-policy-wrapper)")
     parser.add_argument("--model-path", type=str, default=None,
-                        help="Local model path (bypasses server)")
+                        help="Local model path (bypasses server, not recommended)")
     parser.add_argument("--language", type=str, default="fold the towel",
                         help="Task language instruction")
     parser.add_argument("--n-episodes", type=int, default=5,
@@ -712,26 +687,14 @@ def main():
     # Create renderer
     renderer = mujoco.Renderer(model, height=args.render_height, width=args.render_width)
 
-    # Connect to GROOT policy
-    if args.model_path:
-        print(f"Loading local model: {args.model_path}")
-        from gr00t.policy.gr00t_policy import Gr00tPolicy
-        policy_client = Gr00tPolicy.from_pretrained(
-            args.model_path,
-            embodiment_tag="UNITREE_G1",
-        )
+    # Connect to GROOT policy server (must be started with --use-sim-policy-wrapper)
+    print(f"Connecting to GROOT server: {args.host}:{args.port}")
+    from gr00t.policy.server_client import PolicyClient
+    policy_client = PolicyClient(host=args.host, port=args.port)
+    if policy_client.ping():
+        print("  Server is alive!")
     else:
-        print(f"Connecting to GROOT server: {args.host}:{args.port}")
-        from gr00t.policy.server_client import PolicyClient
-        policy_client = PolicyClient(
-            host=args.host,
-            port=args.port,
-            strict=False,
-        )
-        if policy_client.ping():
-            print("  Server is alive!")
-        else:
-            print("  WARNING: Server did not respond to ping")
+        print("  WARNING: Server did not respond to ping")
 
     # Launch live viewer if requested
     viewer = None
