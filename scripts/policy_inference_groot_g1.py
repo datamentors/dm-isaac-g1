@@ -1280,7 +1280,7 @@ def main():
             # new_embodiment: ALL actions are ABSOLUTE joint position targets.
             if embodiment_format == "unitree_g1":
                 # UNITREE_G1 mixed action format
-                _RELATIVE_GROUPS = {"left_arm", "right_arm"}
+                _RELATIVE_GROUPS = set()  # Server converts relative->absolute via use_relative_action=True
                 for part_name in action_dof_ranges:
                     _apply_group(part_name, relative=(part_name in _RELATIVE_GROUPS))
             else:

@@ -715,11 +715,10 @@ def decode_groot_actions(action_dict):
 
 
 def apply_groot_upper_body(model, data, action_step, joint_mapping,
-                           hand_config: HandConfig):
+                           hand_config: HandConfig,
+                           arm_kp: float = 100.0,
+                           arm_kd: float = 2.0):
     """Apply GROOT upper body actions (arms + hands) to MuJoCo actuators."""
-    arm_kp = 100.0
-    arm_kd = 2.0
-
     for side in ["left", "right"]:
         key = f"{side}_arm"
         if key not in action_step:
@@ -813,7 +812,9 @@ def save_video(frames, path, fps=25):
 
 def run_episode(model, data, renderer, policy_client, joint_mapping,
                 wbc_ctrl, hand_config, language, max_steps, action_horizon,
-                groot_query_interval=4, render_video=True):
+                groot_query_interval=4, render_video=True,
+                arm_kp=100.0, arm_kd=2.0,
+                use_groot_waist_cmd=True, waist_action_order="ypr"):
     """Run one evaluation episode with WBC + GROOT."""
     frames = []
     states = []
@@ -945,12 +946,23 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
                 wbc_ctrl.loco_cmd = current_groot_step["navigate_command"].astype(np.float32)
             if "base_height_command" in current_groot_step:
                 wbc_ctrl.height_cmd = float(current_groot_step["base_height_command"][0])
+            if use_groot_waist_cmd and "waist" in current_groot_step:
+                waist = current_groot_step["waist"]
+                if waist_action_order == "ypr":
+                    yaw, pitch, roll = float(waist[0]), float(waist[1]), float(waist[2])
+                elif waist_action_order == "yrp":
+                    yaw, roll, pitch = float(waist[0]), float(waist[1]), float(waist[2])
+                else:
+                    raise ValueError(f"Unsupported waist_action_order: {waist_action_order}")
+                # WBC expects rpy_cmd in roll, pitch, yaw order.
+                wbc_ctrl.rpy_cmd = np.array([roll, pitch, yaw], dtype=np.float32)
 
         for _ in range(control_decimation):
             apply_wbc_torques(model, data, wbc_target_q, joint_mapping, wbc_ctrl)
             if current_groot_step:
                 apply_groot_upper_body(model, data, current_groot_step,
-                                       joint_mapping, hand_config)
+                                       joint_mapping, hand_config,
+                                       arm_kp=arm_kp, arm_kd=arm_kd)
             mujoco.mj_step(model, data)
             sim_step += 1
 
@@ -994,6 +1006,15 @@ def main():
                         help="GROOT action horizon (steps per query)")
     parser.add_argument("--groot-query-interval", type=int, default=4,
                         help="Query GROOT every N WBC steps (4=12.5Hz)")
+    parser.add_argument("--arm-kp", type=float, default=160.0,
+                        help="Arm PD proportional gain for GROOT upper-body control")
+    parser.add_argument("--arm-kd", type=float, default=4.0,
+                        help="Arm PD derivative gain for GROOT upper-body control")
+    parser.add_argument("--disable-groot-waist-cmd", action="store_true",
+                        help="Ignore action.waist from GROOT when setting WBC rpy_cmd")
+    parser.add_argument("--waist-action-order", type=str, default="ypr",
+                        choices=["ypr", "yrp"],
+                        help="Interpret action.waist as ypr=yaw,pitch,roll (recommended) or yrp")
     parser.add_argument("--output-dir", type=str,
                         default="/tmp/mujoco_towel_eval_wbc",
                         help="Output directory")
@@ -1062,6 +1083,10 @@ def main():
             action_horizon=args.action_horizon,
             groot_query_interval=args.groot_query_interval,
             render_video=not args.no_video,
+            arm_kp=args.arm_kp,
+            arm_kd=args.arm_kd,
+            use_groot_waist_cmd=not args.disable_groot_waist_cmd,
+            waist_action_order=args.waist_action_order,
         )
 
         elapsed = time.time() - t0
