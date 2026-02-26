@@ -36,6 +36,7 @@ Usage:
 import argparse
 import os
 import re
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -48,50 +49,31 @@ import numpy as np
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
+# Add project root to path so we can import dm_isaac_g1.core
+_project_root = Path(__file__).resolve().parents[2]
+if str(_project_root / "src") not in sys.path:
+    sys.path.insert(0, str(_project_root / "src"))
+
+from dm_isaac_g1.core.robot_configs import (  # noqa: E402
+    # Hand types and registry
+    DEX1, DEX3, INSPIRE, HAND_TYPES as HAND_TYPE_REGISTRY,
+    # Body definitions
+    G1_BODY_JOINT_NAMES, G1_BODY_DOF,
+    # GROOT layout
+    GROOT_STATE_LAYOUT, GROOT_STATE_DOF, GROOT_TO_WBC_ARM_REMAP,
+    WBC_JOINT_NAMES, WBC_NUM_ACTIONS, WBC_ARM_START, WBC_ARM_COUNT,
+    # Value conversion
+    dex1_physical_to_training, dex1_training_to_physical,
+)
+
 
 # =============================================================================
-# Constants: UNITREE_G1 joint layout
+# Constants: UNITREE_G1 joint layout (from centralized robot_configs)
 # =============================================================================
 
-# State vector layout (31 DOF — as seen by GROOT)
-STATE_GROUPS = {
-    "left_leg":   (0,  6),
-    "right_leg":  (6,  12),
-    "waist":      (12, 15),
-    "left_arm":   (15, 22),
-    "right_arm":  (22, 29),
-    "left_hand":  (29, 30),
-    "right_hand": (30, 31),
-}
-STATE_DOF = 31
-
-# WBC joint ordering: first 15 actuated joints in the WBC XML
-WBC_NUM_ACTIONS = 15
-WBC_ARM_START = 15
-WBC_ARM_COUNT = 14  # 7 per arm
-
-# Joint names in the WBC G1 model (actuator order)
-WBC_JOINT_NAMES = [
-    # Left leg (0-5)
-    "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
-    "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
-    # Right leg (6-11)
-    "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
-    "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
-    # Waist (12-14)
-    "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
-    # Left arm (15-21)
-    "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
-    "left_shoulder_yaw_joint", "left_elbow_joint",
-    "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
-    # Right arm (22-28)
-    "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
-    "right_shoulder_yaw_joint", "right_elbow_joint",
-    "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
-]
-
-# GROOT arm action order (training order — yaw,roll,pitch for wrists):
-GROOT_TO_WBC_ARM = [0, 1, 2, 3, 6, 4, 5]
+STATE_GROUPS = GROOT_STATE_LAYOUT
+STATE_DOF = GROOT_STATE_DOF
+GROOT_TO_WBC_ARM = GROOT_TO_WBC_ARM_REMAP
 
 # Training-data mean joint state (from checkpoint dataset_statistics.json).
 TRAINING_MEAN_STATE = {
@@ -162,7 +144,7 @@ class HandConfig:
 class Dex1HandConfig(HandConfig):
     """Dex1 prismatic parallel-jaw gripper.
 
-    Specs (from unitree_ros URDF):
+    Specs from dm_isaac_g1.core.robot_configs.DEX1:
       - 2 prismatic joints per hand (Joint1_1 primary, Joint2_1 mirrored)
       - Range: [-0.02, 0.0245] meters per finger
       - Attach to wrist_yaw_link at offset [0.0415, 0, 0]
@@ -171,12 +153,9 @@ class Dex1HandConfig(HandConfig):
 
     def __init__(self):
         super().__init__(
-            name="dex1",
+            name=DEX1.name,
             g1_filename="g1.xml",
-            joint_names={
-                "left":  ["left_hand_Joint1_1", "left_hand_Joint2_1"],
-                "right": ["right_hand_Joint1_1", "right_hand_Joint2_1"],
-            },
+            joint_names=DEX1.joint_names,
         )
 
     def inject_into_xml(self, g1_xml: str) -> str:
@@ -218,20 +197,10 @@ class Dex1HandConfig(HandConfig):
     <position name="right_hand_Joint2_1" joint="right_hand_Joint2_1" kp="800" kv="3.0"/>"""
 
     def physical_to_training(self, value: float) -> float:
-        input_min, input_max = 0.024, -0.02
-        output_min, output_max = 0.0, 5.4
-        try:
-            value = round(float(value), 3)
-        except Exception:
-            pass
-        value = max(input_max, min(input_min, value))
-        return round(output_min + (output_max - output_min) * (input_min - value) / (input_min - input_max), 3)
+        return dex1_physical_to_training(value)
 
     def training_to_physical(self, value: float) -> float:
-        input_min, input_max = 0.0, 5.4
-        output_min, output_max = 0.024, -0.02
-        value = max(input_min, min(input_max, float(value)))
-        return output_min + (output_max - output_min) * (value - input_min) / (input_max - input_min)
+        return dex1_training_to_physical(value)
 
     def get_hand_state(self, model, data, side: str) -> float:
         jname = self.joint_names[side][0]  # Joint1_1 (primary)
@@ -280,26 +249,17 @@ class InspireHandConfig(HandConfig):
 
     Uses g1_with_hands.xml. Maps between GROOT's 1-DOF hand value and 7 finger joints
     by linearly interpolating each finger joint across its range.
+
+    Note: Menagerie g1_with_hands.xml uses Dex3 naming (7 joints/hand), not
+    the full Inspire 12-DOF naming. The joint names here match Menagerie's model.
     """
 
     def __init__(self):
+        # Menagerie g1_with_hands uses Dex3-style 7-joint naming
         super().__init__(
             name="inspire",
             g1_filename="g1_with_hands.xml",
-            joint_names={
-                "left": [
-                    "left_hand_thumb_0_joint", "left_hand_thumb_1_joint",
-                    "left_hand_thumb_2_joint",
-                    "left_hand_middle_0_joint", "left_hand_middle_1_joint",
-                    "left_hand_index_0_joint", "left_hand_index_1_joint",
-                ],
-                "right": [
-                    "right_hand_thumb_0_joint", "right_hand_thumb_1_joint",
-                    "right_hand_thumb_2_joint",
-                    "right_hand_middle_0_joint", "right_hand_middle_1_joint",
-                    "right_hand_index_0_joint", "right_hand_index_1_joint",
-                ],
-            },
+            joint_names=DEX3.joint_names,
         )
 
     def get_actuator_xml(self) -> str:
@@ -384,9 +344,10 @@ class NoHandConfig(HandConfig):
         )
 
 
-# Registry
+# Registry of MuJoCo hand configs (keys match robot_configs.HAND_TYPES)
 HAND_TYPES: Dict[str, HandConfig] = {
     "dex1": Dex1HandConfig(),
+    "gripper": Dex1HandConfig(),  # alias — same as dex1
     "inspire": InspireHandConfig(),
     "none": NoHandConfig(),
 }

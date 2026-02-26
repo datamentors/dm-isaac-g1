@@ -67,18 +67,22 @@ Note:
 
 # This config is NOT registered — UNITREE_G1 is already pre-registered in
 # Isaac-GR00T. This file documents the expected layout for reference.
+#
+# Centralized robot definitions: dm_isaac_g1.core.robot_configs
+# Hand type: DEX1 (Dex1 prismatic grippers, aka "gripper")
+# Value conversion: dex1_physical_to_training / dex1_training_to_physical
 
-# State layout (31 DOF)
+from dm_isaac_g1.core.robot_configs import (
+    GROOT_STATE_LAYOUT, GROOT_STATE_DOF, GROOT_ACTION_DOF,
+    DEX1, G1_BODY_JOINT_NAMES,
+)
+
+# State layout (31 DOF) — from centralized config
 STATE_LAYOUT = {
-    "left_leg":   {"start": 0,  "end": 6,  "dof": 6},
-    "right_leg":  {"start": 6,  "end": 12, "dof": 6},
-    "waist":      {"start": 12, "end": 15, "dof": 3},
-    "left_arm":   {"start": 15, "end": 22, "dof": 7},
-    "right_arm":  {"start": 22, "end": 29, "dof": 7},
-    "left_hand":  {"start": 29, "end": 30, "dof": 1},
-    "right_hand": {"start": 30, "end": 31, "dof": 1},
+    k: {"start": v[0], "end": v[1], "dof": v[1] - v[0]}
+    for k, v in GROOT_STATE_LAYOUT.items()
 }
-TOTAL_STATE_DOF = 31
+TOTAL_STATE_DOF = GROOT_STATE_DOF
 
 # Action layout (23 DOF)
 ACTION_LAYOUT = {
@@ -90,7 +94,7 @@ ACTION_LAYOUT = {
     "base_height_command": {"start": 19, "end": 20, "dof": 1,  "rep": "ABSOLUTE"},
     "navigate_command":    {"start": 20, "end": 23, "dof": 3,  "rep": "ABSOLUTE"},
 }
-TOTAL_ACTION_DOF = 23
+TOTAL_ACTION_DOF = GROOT_ACTION_DOF
 
 # Training hyperparameters (validated on Blackwell RTX PRO 6000, 98 GB VRAM)
 RECOMMENDED_HYPERPARAMS = {

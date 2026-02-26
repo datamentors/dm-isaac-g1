@@ -100,8 +100,14 @@ register_modality_config(
 
 # =============================================================================
 # Reference: DOF breakdown (for documentation only, not used by loader)
+# Centralized Dex3 joint definitions: dm_isaac_g1.core.robot_configs.DEX3
 # =============================================================================
 
+from dm_isaac_g1.core.robot_configs import DEX3, G1_BODY_JOINT_NAMES
+
+# Flat index: joint name from raw dataset info.json
+# Note: Dataset uses "k" prefix naming, robot_configs uses Isaac Lab naming.
+# The mapping is: kLeftShoulderPitch -> left_shoulder_pitch_joint, etc.
 G1_DEX3_DOF_LAYOUT = {
     # Flat index: joint name from raw dataset info.json
     0:  "kLeftShoulderPitch",
@@ -132,4 +138,12 @@ G1_DEX3_DOF_LAYOUT = {
     25: "kRightHandIndex1",
     26: "kRightHandMiddle0",
     27: "kRightHandMiddle1",
+}
+
+# Isaac Lab joint names (from centralized config)
+G1_DEX3_JOINT_NAMES = {
+    "left_arm": G1_BODY_JOINT_NAMES["left_arm"],
+    "right_arm": G1_BODY_JOINT_NAMES["right_arm"],
+    "left_dex3_hand": DEX3.joint_names["left"],
+    "right_dex3_hand": DEX3.joint_names["right"],
 }

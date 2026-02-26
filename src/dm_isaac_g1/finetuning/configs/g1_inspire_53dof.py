@@ -36,93 +36,26 @@ from gr00t.data.types import (
 from gr00t.data.embodiment_tags import EmbodimentTag
 
 # =============================================================================
-# Joint Configuration
+# Joint Configuration — from centralized robot_configs
 # =============================================================================
 
-# Complete joint names for documentation and validation
+from dm_isaac_g1.core.robot_configs import (
+    G1_BODY_JOINT_NAMES, G1_BODY_INDEX_RANGES,
+    INSPIRE, G1_INSPIRE,
+)
+
+# Complete joint names (body + Inspire hands)
 G1_INSPIRE_JOINT_NAMES = {
-    # Legs (12 DOF)
-    "left_leg": [
-        "left_hip_yaw_joint",
-        "left_hip_roll_joint",
-        "left_hip_pitch_joint",
-        "left_knee_joint",
-        "left_ankle_pitch_joint",
-        "left_ankle_roll_joint",
-    ],
-    "right_leg": [
-        "right_hip_yaw_joint",
-        "right_hip_roll_joint",
-        "right_hip_pitch_joint",
-        "right_knee_joint",
-        "right_ankle_pitch_joint",
-        "right_ankle_roll_joint",
-    ],
-    # Waist (3 DOF)
-    "waist": [
-        "waist_yaw_joint",
-        "waist_roll_joint",
-        "waist_pitch_joint",
-    ],
-    # Arms (14 DOF)
-    "left_arm": [
-        "left_shoulder_pitch_joint",
-        "left_shoulder_roll_joint",
-        "left_shoulder_yaw_joint",
-        "left_elbow_joint",
-        "left_wrist_roll_joint",
-        "left_wrist_pitch_joint",
-        "left_wrist_yaw_joint",
-    ],
-    "right_arm": [
-        "right_shoulder_pitch_joint",
-        "right_shoulder_roll_joint",
-        "right_shoulder_yaw_joint",
-        "right_elbow_joint",
-        "right_wrist_roll_joint",
-        "right_wrist_pitch_joint",
-        "right_wrist_yaw_joint",
-    ],
-    # Inspire Hands (24 DOF)
-    "left_inspire_hand": [
-        "L_index_proximal_joint",
-        "L_index_intermediate_joint",
-        "L_middle_proximal_joint",
-        "L_middle_intermediate_joint",
-        "L_pinky_proximal_joint",
-        "L_pinky_intermediate_joint",
-        "L_ring_proximal_joint",
-        "L_ring_intermediate_joint",
-        "L_thumb_proximal_yaw_joint",
-        "L_thumb_proximal_pitch_joint",
-        "L_thumb_intermediate_joint",
-        "L_thumb_distal_joint",
-    ],
-    "right_inspire_hand": [
-        "R_index_proximal_joint",
-        "R_index_intermediate_joint",
-        "R_middle_proximal_joint",
-        "R_middle_intermediate_joint",
-        "R_pinky_proximal_joint",
-        "R_pinky_intermediate_joint",
-        "R_ring_proximal_joint",
-        "R_ring_intermediate_joint",
-        "R_thumb_proximal_yaw_joint",
-        "R_thumb_proximal_pitch_joint",
-        "R_thumb_intermediate_joint",
-        "R_thumb_distal_joint",
-    ],
+    **G1_BODY_JOINT_NAMES,
+    "left_inspire_hand": INSPIRE.joint_names["left"],
+    "right_inspire_hand": INSPIRE.joint_names["right"],
 }
 
 # Index ranges in the 53 DOF state vector
 JOINT_INDEX_RANGES = {
-    "left_leg": (0, 6),           # indices 0-5
-    "right_leg": (6, 12),         # indices 6-11
-    "waist": (12, 15),            # indices 12-14
-    "left_arm": (15, 22),         # indices 15-21
-    "right_arm": (22, 29),        # indices 22-28
-    "left_inspire_hand": (29, 41),  # indices 29-40
-    "right_inspire_hand": (41, 53), # indices 41-52
+    **G1_BODY_INDEX_RANGES,
+    "left_inspire_hand": (29, 41),
+    "right_inspire_hand": (41, 53),
 }
 
 # =============================================================================

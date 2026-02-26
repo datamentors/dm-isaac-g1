@@ -1,110 +1,108 @@
-"""Robot definitions for G1 + Inspire Hands.
+"""Robot definitions for Unitree G1.
 
-Defines the joint configuration for the Unitree G1 EDU 2 robot
-with Inspire Robotics Dexterous Hands (53 DOF total).
+Provides the G1Robot class (generic, works with any hand type) and
+backward-compatible G1InspireRobot alias.
+
+All joint names, hand types, and actuator specs are defined in robot_configs.py.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from dm_isaac_g1.core.robot_configs import (
+    G1_BODY_JOINT_NAMES,
+    G1_BODY_DOF,
+    G1_BODY_INDEX_RANGES,
+    DEX1,
+    DEX3,
+    INSPIRE,
+    HAND_TYPES,
+    HandType,
+    G1RobotConfig,
+)
 
 
-# Complete joint names for G1 + Inspire (53 DOF)
+# Legacy constants (kept for backward compatibility with finetuning configs)
 G1_INSPIRE_JOINT_NAMES: Dict[str, List[str]] = {
-    # Legs (12 DOF)
-    "left_leg": [
-        "left_hip_yaw_joint",
-        "left_hip_roll_joint",
-        "left_hip_pitch_joint",
-        "left_knee_joint",
-        "left_ankle_pitch_joint",
-        "left_ankle_roll_joint",
-    ],
-    "right_leg": [
-        "right_hip_yaw_joint",
-        "right_hip_roll_joint",
-        "right_hip_pitch_joint",
-        "right_knee_joint",
-        "right_ankle_pitch_joint",
-        "right_ankle_roll_joint",
-    ],
-    # Waist (3 DOF)
-    "waist": [
-        "waist_yaw_joint",
-        "waist_roll_joint",
-        "waist_pitch_joint",
-    ],
-    # Arms (14 DOF)
-    "left_arm": [
-        "left_shoulder_pitch_joint",
-        "left_shoulder_roll_joint",
-        "left_shoulder_yaw_joint",
-        "left_elbow_joint",
-        "left_wrist_roll_joint",
-        "left_wrist_pitch_joint",
-        "left_wrist_yaw_joint",
-    ],
-    "right_arm": [
-        "right_shoulder_pitch_joint",
-        "right_shoulder_roll_joint",
-        "right_shoulder_yaw_joint",
-        "right_elbow_joint",
-        "right_wrist_roll_joint",
-        "right_wrist_pitch_joint",
-        "right_wrist_yaw_joint",
-    ],
-    # Inspire Hands (24 DOF)
-    "left_inspire_hand": [
-        "L_index_proximal_joint",
-        "L_index_intermediate_joint",
-        "L_middle_proximal_joint",
-        "L_middle_intermediate_joint",
-        "L_pinky_proximal_joint",
-        "L_pinky_intermediate_joint",
-        "L_ring_proximal_joint",
-        "L_ring_intermediate_joint",
-        "L_thumb_proximal_yaw_joint",
-        "L_thumb_proximal_pitch_joint",
-        "L_thumb_intermediate_joint",
-        "L_thumb_distal_joint",
-    ],
-    "right_inspire_hand": [
-        "R_index_proximal_joint",
-        "R_index_intermediate_joint",
-        "R_middle_proximal_joint",
-        "R_middle_intermediate_joint",
-        "R_pinky_proximal_joint",
-        "R_pinky_intermediate_joint",
-        "R_ring_proximal_joint",
-        "R_ring_intermediate_joint",
-        "R_thumb_proximal_yaw_joint",
-        "R_thumb_proximal_pitch_joint",
-        "R_thumb_intermediate_joint",
-        "R_thumb_distal_joint",
-    ],
+    **G1_BODY_JOINT_NAMES,
+    "left_inspire_hand": INSPIRE.joint_names["left"],
+    "right_inspire_hand": INSPIRE.joint_names["right"],
 }
 
-# Index ranges in the 53 DOF state vector
 JOINT_INDEX_RANGES: Dict[str, Tuple[int, int]] = {
-    "left_leg": (0, 6),  # indices 0-5
-    "right_leg": (6, 12),  # indices 6-11
-    "waist": (12, 15),  # indices 12-14
-    "left_arm": (15, 22),  # indices 15-21
-    "right_arm": (22, 29),  # indices 22-28
-    "left_inspire_hand": (29, 41),  # indices 29-40
-    "right_inspire_hand": (41, 53),  # indices 41-52
+    **G1_BODY_INDEX_RANGES,
+    "left_inspire_hand": (29, 41),
+    "right_inspire_hand": (41, 53),
 }
 
 
 @dataclass
-class G1InspireRobot:
-    """G1 EDU 2 robot with Inspire Robotics Dexterous Hands.
+class G1Robot:
+    """Unitree G1 robot with configurable hand type.
 
     Attributes:
-        body_dof: Degrees of freedom for body (legs + waist + arms).
-        hand_dof_per_hand: Degrees of freedom per Inspire hand.
-        total_dof: Total degrees of freedom.
-        joint_names: Dictionary mapping body parts to joint names.
-        joint_indices: Dictionary mapping body parts to index ranges.
+        hand_type: The hand type (DEX1, DEX3, INSPIRE, or None).
+        body_dof: Body DOF (always 29).
+    """
+
+    hand_type: Optional[HandType] = None
+    body_dof: int = G1_BODY_DOF
+
+    @property
+    def hand_dof_per_hand(self) -> int:
+        return self.hand_type.dof_per_hand if self.hand_type else 0
+
+    @property
+    def total_dof(self) -> int:
+        return self.body_dof + (self.hand_type.total_dof if self.hand_type else 0)
+
+    @property
+    def joint_names(self) -> Dict[str, List[str]]:
+        names = dict(G1_BODY_JOINT_NAMES)
+        if self.hand_type:
+            names["left_hand"] = self.hand_type.joint_names["left"]
+            names["right_hand"] = self.hand_type.joint_names["right"]
+        return names
+
+    @property
+    def joint_indices(self) -> Dict[str, Tuple[int, int]]:
+        indices = dict(G1_BODY_INDEX_RANGES)
+        if self.hand_type:
+            n = self.hand_type.dof_per_hand
+            offset = self.body_dof
+            indices["left_hand"] = (offset, offset + n)
+            indices["right_hand"] = (offset + n, offset + 2 * n)
+        return indices
+
+    def get_joint_indices(self, body_part: str) -> Tuple[int, int]:
+        """Get the index range for a body part."""
+        return self.joint_indices[body_part]
+
+    def get_joint_names(self, body_part: str) -> List[str]:
+        """Get joint names for a body part."""
+        return self.joint_names[body_part]
+
+    def validate_state_vector(self, state: List[float]) -> bool:
+        """Validate that a state vector has correct dimensions."""
+        return len(state) == self.total_dof
+
+    @property
+    def all_joint_names(self) -> List[str]:
+        """Get all joint names in order."""
+        names: List[str] = []
+        for part in ["left_leg", "right_leg", "waist", "left_arm", "right_arm"]:
+            names.extend(G1_BODY_JOINT_NAMES[part])
+        if self.hand_type:
+            names.extend(self.hand_type.joint_names["left"])
+            names.extend(self.hand_type.joint_names["right"])
+        return names
+
+
+@dataclass
+class G1InspireRobot:
+    """G1 EDU 2 robot with Inspire Robotics Dexterous Hands (53 DOF).
+
+    Backward-compatible wrapper around G1Robot(hand_type=INSPIRE).
     """
 
     body_dof: int = 29
@@ -119,39 +117,15 @@ class G1InspireRobot:
     )
 
     def get_joint_indices(self, body_part: str) -> Tuple[int, int]:
-        """Get the index range for a body part.
-
-        Args:
-            body_part: Name of body part (e.g., "left_arm", "right_inspire_hand").
-
-        Returns:
-            Tuple of (start_index, end_index).
-
-        Raises:
-            KeyError: If body part not found.
-        """
+        """Get the index range for a body part."""
         return self.joint_indices[body_part]
 
     def get_joint_names(self, body_part: str) -> List[str]:
-        """Get joint names for a body part.
-
-        Args:
-            body_part: Name of body part.
-
-        Returns:
-            List of joint names.
-        """
+        """Get joint names for a body part."""
         return self.joint_names[body_part]
 
     def validate_state_vector(self, state: List[float]) -> bool:
-        """Validate that a state vector has correct dimensions.
-
-        Args:
-            state: State vector to validate.
-
-        Returns:
-            True if valid, False otherwise.
-        """
+        """Validate that a state vector has correct dimensions."""
         return len(state) == self.total_dof
 
     @property
@@ -159,13 +133,9 @@ class G1InspireRobot:
         """Get all joint names in order."""
         names = []
         for part in [
-            "left_leg",
-            "right_leg",
-            "waist",
-            "left_arm",
-            "right_arm",
-            "left_inspire_hand",
-            "right_inspire_hand",
+            "left_leg", "right_leg", "waist",
+            "left_arm", "right_arm",
+            "left_inspire_hand", "right_inspire_hand",
         ]:
             names.extend(self.joint_names[part])
         return names
