@@ -16,6 +16,12 @@ Architecture:
   WBC controls 15 joints: 6 left leg + 6 right leg + 3 waist
   GROOT controls 14 arm joints + grippers, and provides navigate/height commands
 
+Key fixes (v2):
+  - Uses g1_with_hands.xml (dexterous hands) with 1-DOF gripper mapping
+  - Sets initial joint pose from training data mean state (not zeros)
+  - Computes gripper state from finger curl (not hardcoded 0.0)
+  - Applies gripper actions to finger joints
+
 Requirements:
     pip install mujoco>=3.2.6 pyzmq numpy opencv-python onnxruntime pyyaml
 
@@ -28,7 +34,7 @@ Usage:
 
     # Then run this eval from workstation container:
     python run_mujoco_towel_eval_wbc.py \
-        --scene mujoco_towel_scene/g1_towel_folding.xml \
+        --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
         --wbc-dir /workspace/Isaac-GR00T/external_dependencies/GR00T-WholeBodyControl/gr00t_wbc/sim2mujoco/resources/robots/g1 \
         --host 192.168.1.237 --port 5555 \
         --max-steps 1500
@@ -101,6 +107,38 @@ WBC_JOINT_NAMES = [
 #   shoulder_pitch, shoulder_roll, shoulder_yaw, elbow, wrist_roll, wrist_pitch, wrist_yaw
 # Remap: GROOT[4]=yaw→WBC[6], GROOT[5]=roll→WBC[4], GROOT[6]=pitch→WBC[5]
 GROOT_TO_WBC_ARM = [0, 1, 2, 3, 6, 4, 5]  # GROOT index → WBC position within 7-DOF arm
+
+# Training-data mean joint state (from checkpoint dataset_statistics.json).
+# Used to initialize the robot to a pose close to the training distribution
+# instead of MuJoCo's default zeros.
+TRAINING_MEAN_STATE = {
+    # left_leg: [hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll]
+    "left_leg":  np.array([-0.43, 0.03, 0.005, 0.64, -0.17, 0.0003], dtype=np.float32),
+    # right_leg
+    "right_leg": np.array([-0.44, -0.05, 0.02, 0.63, -0.18, 0.008], dtype=np.float32),
+    # waist: [yaw, roll, pitch]
+    "waist":     np.array([0.005, -0.04, 0.24], dtype=np.float32),
+    # left_arm: [sh_pitch, sh_roll, sh_yaw, elbow, wr_yaw, wr_roll, wr_pitch] (GROOT order)
+    "left_arm":  np.array([-0.75, 0.61, 0.08, 0.42, -0.35, 0.40, -0.94], dtype=np.float32),
+    # right_arm
+    "right_arm": np.array([-0.90, -0.54, -0.11, 0.68, 0.30, 0.15, 0.93], dtype=np.float32),
+    # hands: raw joint value from training data (not 0-1 normalized)
+    "left_hand":  2.9,
+    "right_hand": 2.25,
+}
+
+# Dexterous hand (Inspire) finger joint names from g1_with_hands.xml.
+# These are mapped to/from a single gripper value for GROOT's 1-DOF hand state.
+LEFT_HAND_FINGER_JOINTS = [
+    "left_hand_thumb_0_joint", "left_hand_thumb_1_joint", "left_hand_thumb_2_joint",
+    "left_hand_middle_0_joint", "left_hand_middle_1_joint",
+    "left_hand_index_0_joint", "left_hand_index_1_joint",
+]
+RIGHT_HAND_FINGER_JOINTS = [
+    "right_hand_thumb_0_joint", "right_hand_thumb_1_joint", "right_hand_thumb_2_joint",
+    "right_hand_middle_0_joint", "right_hand_middle_1_joint",
+    "right_hand_index_0_joint", "right_hand_index_1_joint",
+]
 
 
 # =============================================================================
@@ -303,7 +341,28 @@ def load_towel_scene_wbc(scene_path: str,
     #
     # We convert by replacing the <actuator> section entirely with torque-mode motors.
     # This matches the WBC G1 model (g1_gear_wbc.xml) actuator configuration.
-    actuator_replacement = """<actuator>
+    # Build actuator replacement — 29 body joints always present.
+    # If using g1_with_hands.xml, also add 14 finger joint actuators.
+    hand_actuators = ""
+    if g1_filename == "g1_with_hands.xml":
+        hand_actuators = """
+    <!-- Inspire hand actuators (position control for finger joints) -->
+    <position name="left_hand_thumb_0" joint="left_hand_thumb_0_joint" kp="10"/>
+    <position name="left_hand_thumb_1" joint="left_hand_thumb_1_joint" kp="10"/>
+    <position name="left_hand_thumb_2" joint="left_hand_thumb_2_joint" kp="10"/>
+    <position name="left_hand_middle_0" joint="left_hand_middle_0_joint" kp="10"/>
+    <position name="left_hand_middle_1" joint="left_hand_middle_1_joint" kp="10"/>
+    <position name="left_hand_index_0" joint="left_hand_index_0_joint" kp="10"/>
+    <position name="left_hand_index_1" joint="left_hand_index_1_joint" kp="10"/>
+    <position name="right_hand_thumb_0" joint="right_hand_thumb_0_joint" kp="10"/>
+    <position name="right_hand_thumb_1" joint="right_hand_thumb_1_joint" kp="10"/>
+    <position name="right_hand_thumb_2" joint="right_hand_thumb_2_joint" kp="10"/>
+    <position name="right_hand_middle_0" joint="right_hand_middle_0_joint" kp="10"/>
+    <position name="right_hand_middle_1" joint="right_hand_middle_1_joint" kp="10"/>
+    <position name="right_hand_index_0" joint="right_hand_index_0_joint" kp="10"/>
+    <position name="right_hand_index_1" joint="right_hand_index_1_joint" kp="10"/>"""
+
+    actuator_replacement = f"""<actuator>
     <!-- Direct torque actuators for WBC (converted from Menagerie position-servo) -->
     <motor name="left_hip_pitch" joint="left_hip_pitch_joint" gear="1"/>
     <motor name="left_hip_roll" joint="left_hip_roll_joint" gear="1"/>
@@ -333,7 +392,7 @@ def load_towel_scene_wbc(scene_path: str,
     <motor name="right_elbow" joint="right_elbow_joint" gear="1"/>
     <motor name="right_wrist_roll" joint="right_wrist_roll_joint" gear="1"/>
     <motor name="right_wrist_pitch" joint="right_wrist_pitch_joint" gear="1"/>
-    <motor name="right_wrist_yaw" joint="right_wrist_yaw_joint" gear="1"/>
+    <motor name="right_wrist_yaw" joint="right_wrist_yaw_joint" gear="1"/>{hand_actuators}
   </actuator>"""
     g1_xml_mod = re.sub(
         r'<actuator>.*?</actuator>', actuator_replacement,
@@ -484,6 +543,69 @@ def get_base_state(model, data):
     return quat.astype(np.float32), ang_vel.astype(np.float32)
 
 
+def _has_hand_joints(model):
+    """Check if model has dexterous hand joints (Inspire hands)."""
+    try:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "left_hand_thumb_0_joint")
+        return jid >= 0
+    except Exception:
+        return False
+
+
+def _get_finger_curl(model, data, finger_joints):
+    """Compute average normalized finger curl from finger joints.
+
+    Returns a value in the raw joint-value space that matches what the
+    training data recorded (not 0-1 normalized). The training data recorded
+    the raw Dex1 Joint1_1 value (range ~[0, 4.74]).
+
+    For Inspire hands, we approximate this by averaging finger joint positions
+    in radians, scaled to match the Dex1 range.
+    """
+    vals = []
+    for jname in finger_joints:
+        try:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+            if jid < 0:
+                continue
+            qpos_addr = model.jnt_qposadr[jid]
+            vals.append(data.qpos[qpos_addr])
+        except Exception:
+            pass
+    if not vals:
+        return 0.0
+    # Return raw average position (Inspire joints are in radians ~[0, 1.57])
+    # Scale to approximate Dex1 range [0, ~4.74]: multiply by ~3
+    return float(np.mean(vals)) * 3.0
+
+
+def _apply_gripper_to_fingers(model, data, gripper_val, finger_joints):
+    """Map a single gripper command to all finger joint actuators.
+
+    gripper_val is in Dex1 range (~[0, 4.74]). Convert back to Inspire range.
+    Linearly interpolates across each finger joint's range.
+    """
+    # Convert from Dex1-like range to normalized [0, 1]
+    # Dex1 range approximately [0, 4.74], closed ≈ 4.74, open ≈ 0
+    norm_val = np.clip(gripper_val / 4.74, 0.0, 1.0)
+
+    for jname in finger_joints:
+        try:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+            if jid < 0:
+                continue
+            lo = model.jnt_range[jid, 0]
+            hi = model.jnt_range[jid, 1]
+            target = lo + norm_val * (hi - lo)
+            # Find actuator for this joint
+            for act_id in range(model.nu):
+                if model.actuator_trnid[act_id, 0] == jid:
+                    data.ctrl[act_id] = target
+                    break
+        except Exception:
+            pass
+
+
 def get_groot_state_vector(model, data, joint_mapping):
     """Extract 31-DOF GROOT state vector from simulation.
 
@@ -525,9 +647,13 @@ def get_groot_state_vector(model, data, joint_mapping):
     state[27] = q[26]  # wrist_roll (WBC[26]) → GROOT state[27]
     state[28] = q[27]  # wrist_pitch (WBC[27]) → GROOT state[28]
 
-    # Hands: 0 (gripper model has no finger joints in WBC XML)
-    state[29] = 0.0
-    state[30] = 0.0
+    # Hands: compute from finger joints if available, else 0
+    if _has_hand_joints(model):
+        state[29] = _get_finger_curl(model, data, LEFT_HAND_FINGER_JOINTS)
+        state[30] = _get_finger_curl(model, data, RIGHT_HAND_FINGER_JOINTS)
+    else:
+        state[29] = 0.0
+        state[30] = 0.0
 
     return state
 
@@ -573,11 +699,12 @@ def decode_groot_actions(action_dict):
     return result
 
 
-def apply_groot_arms_to_actuators(model, data, action_step, joint_mapping):
-    """Apply GROOT arm actions to MuJoCo actuators.
+def apply_groot_upper_body(model, data, action_step, joint_mapping):
+    """Apply GROOT upper body actions (arms + grippers) to MuJoCo actuators.
 
     GROOT arm actions are ABSOLUTE targets in training order (yaw, roll, pitch for wrists).
     We remap to WBC/Menagerie actuator order (roll, pitch, yaw).
+    Gripper actions are mapped from 1-DOF Dex1 value to all Inspire finger joints.
     """
     arm_kp = 100.0  # PD gain for arm position control
     arm_kd = 2.0
@@ -614,6 +741,15 @@ def apply_groot_arms_to_actuators(model, data, action_step, joint_mapping):
             dq_curr = data.qvel[m["qvel_addr"]]
             tau = arm_kp * (target - q_curr) + arm_kd * (0.0 - dq_curr)
             data.ctrl[m["act_id"]] = tau
+
+    # Apply gripper actions to finger joints (if model has hands)
+    if _has_hand_joints(model):
+        if "left_hand" in action_step:
+            _apply_gripper_to_fingers(model, data, float(action_step["left_hand"][0]),
+                                      LEFT_HAND_FINGER_JOINTS)
+        if "right_hand" in action_step:
+            _apply_gripper_to_fingers(model, data, float(action_step["right_hand"][0]),
+                                      RIGHT_HAND_FINGER_JOINTS)
 
 
 def apply_wbc_torques(model, data, target_q, joint_mapping, wbc_ctrl):
@@ -692,14 +828,80 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
 
     mujoco.mj_resetData(model, data)
 
-    # Set initial standing pose for lower body (WBC defaults)
-    q_body, _ = get_body_joint_state(model, data, joint_mapping)
-    for i, jname in enumerate(WBC_JOINT_NAMES[:15]):
+    # Set initial pose from training data mean state.
+    # This ensures the robot starts in a posture close to the training
+    # distribution instead of MuJoCo's default zeros (which are far outside
+    # the training range and cause state normalization to clip at ±1).
+    print("  Setting initial pose from training data mean state...")
+
+    # Legs: use training mean (overrides WBC defaults)
+    leg_names = [
+        "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+        "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+    ]
+    for i, jname in enumerate(leg_names):
         if jname in joint_mapping:
-            m = joint_mapping[jname]
-            data.qpos[m["qpos_addr"]] = wbc_ctrl.default_angles[i]
+            data.qpos[joint_mapping[jname]["qpos_addr"]] = float(TRAINING_MEAN_STATE["left_leg"][i])
+    leg_names_r = [
+        "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+        "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+    ]
+    for i, jname in enumerate(leg_names_r):
+        if jname in joint_mapping:
+            data.qpos[joint_mapping[jname]["qpos_addr"]] = float(TRAINING_MEAN_STATE["right_leg"][i])
+
+    # Waist
+    waist_names = ["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"]
+    for i, jname in enumerate(waist_names):
+        if jname in joint_mapping:
+            data.qpos[joint_mapping[jname]["qpos_addr"]] = float(TRAINING_MEAN_STATE["waist"][i])
+
+    # Arms: GROOT training order (yaw, roll, pitch for wrists) →
+    # Menagerie order (roll, pitch, yaw for wrists)
+    for side in ["left", "right"]:
+        arm_mean = TRAINING_MEAN_STATE[f"{side}_arm"]
+        # GROOT order: sh_p, sh_r, sh_y, elbow, wr_yaw, wr_roll, wr_pitch
+        arm_names_menagerie = [
+            f"{side}_shoulder_pitch_joint",  # GROOT[0]
+            f"{side}_shoulder_roll_joint",   # GROOT[1]
+            f"{side}_shoulder_yaw_joint",    # GROOT[2]
+            f"{side}_elbow_joint",           # GROOT[3]
+            f"{side}_wrist_roll_joint",      # GROOT[5]
+            f"{side}_wrist_pitch_joint",     # GROOT[6]
+            f"{side}_wrist_yaw_joint",       # GROOT[4]
+        ]
+        groot_to_menagerie = [0, 1, 2, 3, 5, 6, 4]
+        for i, jname in enumerate(arm_names_menagerie):
+            if jname in joint_mapping:
+                data.qpos[joint_mapping[jname]["qpos_addr"]] = float(arm_mean[groot_to_menagerie[i]])
+
+    # Fingers: set to training mean gripper value
+    if _has_hand_joints(model):
+        # Convert Dex1-like value to Inspire finger range
+        for finger_joints, hand_key in [
+            (LEFT_HAND_FINGER_JOINTS, "left_hand"),
+            (RIGHT_HAND_FINGER_JOINTS, "right_hand"),
+        ]:
+            hand_val = TRAINING_MEAN_STATE[hand_key]
+            norm_val = np.clip(hand_val / 4.74, 0.0, 1.0)
+            for jname in finger_joints:
+                try:
+                    jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+                    if jid < 0:
+                        continue
+                    lo = model.jnt_range[jid, 0]
+                    hi = model.jnt_range[jid, 1]
+                    data.qpos[model.jnt_qposadr[jid]] = lo + norm_val * (hi - lo)
+                except Exception:
+                    pass
 
     mujoco.mj_forward(model, data)
+
+    # Log the initial state for verification
+    init_state = get_groot_state_vector(model, data, joint_mapping)
+    print(f"  Initial state (31 DOF):")
+    for group, (start, end) in STATE_GROUPS.items():
+        print(f"    {group:12s}: {init_state[start:end]}")
 
     # Save debug ego view
     try:
@@ -792,9 +994,9 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
             # WBC lower body torques
             apply_wbc_torques(model, data, wbc_target_q, joint_mapping, wbc_ctrl)
 
-            # GROOT upper body (arms)
+            # GROOT upper body (arms + grippers)
             if current_groot_step:
-                apply_groot_arms_to_actuators(model, data, current_groot_step, joint_mapping)
+                apply_groot_upper_body(model, data, current_groot_step, joint_mapping)
 
             # Step simulation
             mujoco.mj_step(model, data)

@@ -1,15 +1,17 @@
 <mujoco model="g1_gripper_towel_folding">
   <!--
-    G1 with Dexterous Hands — Towel Folding Scene for GROOT Evaluation
-    ===================================================================
+    G1 with Hands — Towel Folding Scene for GROOT Gripper Evaluation
+    =================================================================
     Uses the Menagerie G1 with_hands model (43 actuators):
-      29 body joints + 14 hand joints (7 per hand)
+      29 body joints + 14 hand joints (7 per hand, Inspire dexterous)
     Hand joints per side: thumb(3) + middle(2) + index(2) = 7
 
-    The GROOT model outputs a single gripper value per hand (state[29], state[30]).
-    The eval script maps this to all 7 finger joints using a coordinated grasp:
-      thumb: opens/closes opposite direction from fingers
-      index + middle: curl proportional to gripper command
+    The GROOT model was trained with 1-DOF Dex1 grippers (left_hand_Joint1_1,
+    right_hand_Joint1_1). Since no Dex1 MJCF exists in Menagerie, we use the
+    Inspire hands and map between 7-DOF fingers ↔ 1-DOF gripper value in the
+    eval script:
+      - State: average normalized finger curl → single gripper value
+      - Action: single gripper value → all finger joints via interpolation
 
     Requires: MuJoCo >= 3.0.0 (for flexcomp deformable bodies)
   -->
