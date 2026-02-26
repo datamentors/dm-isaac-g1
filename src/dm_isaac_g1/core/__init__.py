@@ -13,7 +13,6 @@ from dm_isaac_g1.core.robot_configs import (
     DEX1,
     DEX3,
     INSPIRE,
-    GRIPPER,
     HAND_TYPES,
     # Body definitions
     G1_BODY_JOINT_NAMES,
@@ -24,7 +23,6 @@ from dm_isaac_g1.core.robot_configs import (
     G1_DEX1,
     G1_DEX3,
     G1_INSPIRE,
-    G1_GRIPPER,
     G1_NO_HANDS,
     # Actuator specs
     ActuatorSpec,
@@ -55,7 +53,6 @@ __all__ = [
     "DEX1",
     "DEX3",
     "INSPIRE",
-    "GRIPPER",
     "HAND_TYPES",
     # Body definitions
     "G1_BODY_JOINT_NAMES",
@@ -66,7 +63,6 @@ __all__ = [
     "G1_DEX1",
     "G1_DEX3",
     "G1_INSPIRE",
-    "G1_GRIPPER",
     "G1_NO_HANDS",
     # Actuator specs
     "ActuatorSpec",

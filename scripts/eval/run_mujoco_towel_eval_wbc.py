@@ -347,7 +347,6 @@ class NoHandConfig(HandConfig):
 # Registry of MuJoCo hand configs (keys match robot_configs.HAND_TYPES)
 HAND_TYPES: Dict[str, HandConfig] = {
     "dex1": Dex1HandConfig(),
-    "gripper": Dex1HandConfig(),  # alias — same as dex1
     "inspire": InspireHandConfig(),
     "none": NoHandConfig(),
 }

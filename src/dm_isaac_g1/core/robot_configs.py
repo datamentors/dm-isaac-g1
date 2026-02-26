@@ -209,17 +209,9 @@ INSPIRE = HandType(
     velocity_limit=50.0,
 )
 
-# --- "Gripper" is an alias for Dex1 ---
-# The pre-registered UNITREE_G1 embodiment in GROOT uses the Dex1 prismatic
-# gripper. Training datasets (G1_Fold_Towel, etc.) all use this hand type.
-# GROOT sees 1 DOF/hand (single value in [0, 5.4]) even though Dex1 has
-# 2 physical joints/hand (Joint1_1 and Joint2_1 mirror each other).
-GRIPPER = DEX1
-
 # --- Hand type registry ---
 HAND_TYPES: Dict[str, Optional[HandType]] = {
     "dex1": DEX1,
-    "gripper": DEX1,  # alias — same hardware
     "dex3": DEX3,
     "inspire": INSPIRE,
     "none": None,
@@ -544,7 +536,6 @@ class G1RobotConfig:
 # Pre-built configurations matching unitree_sim_isaaclab/robots/unitree.py
 G1_DEX1 = G1RobotConfig(hand_type=DEX1, actuator_variant="base_fix")
 G1_DEX1_WHOLEBODY = G1RobotConfig(hand_type=DEX1, actuator_variant="wholebody")
-G1_GRIPPER = G1_DEX1  # alias — UNITREE_G1 pre-registered embodiment uses Dex1
 G1_DEX3 = G1RobotConfig(hand_type=DEX3, actuator_variant="base_fix")
 G1_DEX3_WHOLEBODY = G1RobotConfig(hand_type=DEX3, actuator_variant="wholebody")
 G1_INSPIRE = G1RobotConfig(hand_type=INSPIRE, actuator_variant="base_fix")
