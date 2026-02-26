@@ -115,9 +115,32 @@ The following were verified as correctly handled:
 
 ---
 
+## Fix Applied: Dex1 Prismatic Grippers (v3)
+
+### 4. Exact Dex1 Gripper Model (CRITICAL FIX)
+
+Previous versions used Menagerie's Inspire dexterous hands (7 revolute joints per hand) as an approximation for the Dex1 gripper. This was incorrect — the model was trained with the exact Dex1 prismatic gripper (2 slide joints per hand).
+
+**What changed:**
+- Built `g1_dex1_towel_folding.xml` scene that uses base `g1.xml` (no hands)
+- Dex1 gripper bodies are **injected programmatically** by the eval script into `left_wrist_yaw_link` and `right_wrist_yaw_link`
+- Each gripper has 2 prismatic (slide) joints: `Joint1_1` (primary) and `Joint2_1` (mirrored)
+- Physical range: `[-0.02, 0.0245]` meters per finger
+- Gripper actuators: position-controlled with `kp=800`, `kv=3.0` (matching Isaac Sim config)
+
+**Gripper value conversion** (from `unitree_sim_isaaclab/tools/data_convert.py`):
+- Training data records gripper state in a "control value" space `[0, 5.4]`
+- Physical Dex1 joint space: `[-0.02, 0.024]` meters
+- `-0.02` (fully open) ↔ `5.4`, `0.024` (fully closed) ↔ `0.0`
+- `convert_to_gripper_range()`: physical → training (for state observation)
+- `convert_to_joint_range()`: training → physical (for action application)
+- Training mean: left_hand=2.9 → physical=0.0004m, right_hand=2.25 → physical=0.0057m
+
+---
+
 ## Next Steps
 
-1. **Run eval with fixes applied** — use `g1_gripper_towel_folding.xml` scene with training-mean initial pose and gripper state. This addresses both root causes identified above.
+1. **Run eval with Dex1 fixes** — use `g1_dex1_towel_folding.xml` scene with exact Dex1 prismatic grippers, training-mean initial pose, and correct gripper value conversion
 2. **Test with both models** — run with `fold-towel-full` and `hospitality-7ds` to verify improvement
 3. **Test with NVIDIA's base model** — run `GR00T-N1.6-3B` to see if the base model produces meaningful actions with the corrected setup
 4. **Fine-tune scene geometry if needed** — if actions improve but don't reach the table, adjust robot-to-table distance/height to better match training environment
@@ -135,15 +158,18 @@ The following were verified as correctly handled:
 | `2404f50` | docs: add environment setup guide for MuJoCo eval with WBC |
 | `7dbf309` | docs: add team update for MuJoCo eval pipeline progress |
 | `9bd8490` | docs: add gripper inference changes doc and loco client example script |
+| `d003f17` | fix: add training-mean init pose and Inspire hand gripper mapping |
 
 ---
 
 ## Key Files
 
 - `scripts/eval/run_mujoco_towel_eval.py` — Fixed-base towel eval (no WBC)
-- `scripts/eval/run_mujoco_towel_eval_wbc.py` — WBC-enabled towel eval (with gripper + training pose)
+- `scripts/eval/run_mujoco_towel_eval_wbc.py` — WBC-enabled towel eval (Dex1 grippers + training pose)
+- `scripts/eval/mujoco_towel_scene/g1_dex1_towel_folding.xml` — MuJoCo towel scene (Dex1 prismatic grippers, primary)
 - `scripts/eval/mujoco_towel_scene/g1_towel_folding.xml` — MuJoCo towel scene (base g1, no hands)
-- `scripts/eval/mujoco_towel_scene/g1_gripper_towel_folding.xml` — MuJoCo towel scene (with hands for gripper)
+- `scripts/eval/mujoco_towel_scene/g1_gripper_towel_folding.xml` — MuJoCo towel scene (Inspire hands, deprecated)
+- `scripts/eval/mujoco_towel_scene/dex1_assets/` — Downloaded Dex1 URDF and mesh files (reference)
 - `docs/ENVIRONMENT_SETUP.md` — Full environment/dependency documentation
 - `docs/MUJOCO_EVAL_GUIDE.md` — Eval pipeline architecture guide
 - `docs/SIMULATION_INFERENCE_GUIDE.md` — Inference setup guide

@@ -3,8 +3,8 @@
 MuJoCo Closed-Loop Evaluation for GROOT G1 Towel Folding — with WBC
 ====================================================================
 
-Like run_mujoco_towel_eval.py, but integrates the NVIDIA GR00T
-Whole-Body-Control (WBC) ONNX policies for lower body balance/locomotion.
+Integrates the NVIDIA GR00T Whole-Body-Control (WBC) ONNX policies for
+lower body balance, with GROOT controlling the upper body (arms + Dex1 grippers).
 
 Architecture:
   GROOT server (Spark) → upper body targets (arms, hands, waist, navigate, height)
@@ -14,16 +14,20 @@ Architecture:
   GROOT is queried every N WBC steps (controlled by --groot-query-interval).
 
   WBC controls 15 joints: 6 left leg + 6 right leg + 3 waist
-  GROOT controls 14 arm joints + grippers, and provides navigate/height commands
+  GROOT controls 14 arm joints + 2 Dex1 grippers, plus navigate/height commands
 
-Key fixes (v2):
-  - Uses g1_with_hands.xml (dexterous hands) with 1-DOF gripper mapping
+Key design decisions (v3 — Dex1 gripper):
+  - Uses Menagerie g1.xml (29 DOF body) with Dex1 prismatic grippers injected
+    programmatically (matching the Isaac Sim training setup exactly)
+  - Dex1 has 2 prismatic joints per hand (Joint1_1 and Joint2_1), range [-0.02, 0.0245] m
+  - GROOT controls 1 DOF per hand; Joint2_1 is mechanically coupled (mirrored)
+  - Gripper value conversion: physical [-0.02, 0.024] ↔ training [5.4, 0.0]
+    (convert_to_gripper_range / convert_to_joint_range from unitree_sim_isaaclab)
   - Sets initial joint pose from training data mean state (not zeros)
-  - Computes gripper state from finger curl (not hardcoded 0.0)
-  - Applies gripper actions to finger joints
+  - All actuators converted to direct-torque for WBC compatibility
 
 Requirements:
-    pip install mujoco>=3.2.6 pyzmq numpy opencv-python onnxruntime pyyaml
+    pip install mujoco>=3.0.0 pyzmq numpy opencv-python onnxruntime pyyaml
 
 Usage:
     # Start GROOT server on Spark with --use-sim-policy-wrapper:
@@ -34,7 +38,7 @@ Usage:
 
     # Then run this eval from workstation container:
     python run_mujoco_towel_eval_wbc.py \
-        --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
+        --scene mujoco_towel_scene/g1_dex1_towel_folding.xml \
         --wbc-dir /workspace/Isaac-GR00T/external_dependencies/GR00T-WholeBodyControl/gr00t_wbc/sim2mujoco/resources/robots/g1 \
         --host 192.168.1.237 --port 5555 \
         --max-steps 1500
@@ -122,23 +126,64 @@ TRAINING_MEAN_STATE = {
     "left_arm":  np.array([-0.75, 0.61, 0.08, 0.42, -0.35, 0.40, -0.94], dtype=np.float32),
     # right_arm
     "right_arm": np.array([-0.90, -0.54, -0.11, 0.68, 0.30, 0.15, 0.93], dtype=np.float32),
-    # hands: raw joint value from training data (not 0-1 normalized)
+    # hands: raw value from training data in converted gripper-range space [0, 5.4]
+    # (NOT the physical prismatic joint position [-0.02, 0.024])
     "left_hand":  2.9,
     "right_hand": 2.25,
 }
 
-# Dexterous hand (Inspire) finger joint names from g1_with_hands.xml.
-# These are mapped to/from a single gripper value for GROOT's 1-DOF hand state.
-LEFT_HAND_FINGER_JOINTS = [
-    "left_hand_thumb_0_joint", "left_hand_thumb_1_joint", "left_hand_thumb_2_joint",
-    "left_hand_middle_0_joint", "left_hand_middle_1_joint",
-    "left_hand_index_0_joint", "left_hand_index_1_joint",
-]
-RIGHT_HAND_FINGER_JOINTS = [
-    "right_hand_thumb_0_joint", "right_hand_thumb_1_joint", "right_hand_thumb_2_joint",
-    "right_hand_middle_0_joint", "right_hand_middle_1_joint",
-    "right_hand_index_0_joint", "right_hand_index_1_joint",
-]
+# Dex1 gripper joint names (Isaac Sim naming convention, matching training data).
+# Each hand has 2 prismatic joints that slide in opposite Y directions.
+# GROOT controls Joint1_1 only; Joint2_1 is mechanically coupled (mirrored).
+DEX1_JOINT_NAMES = {
+    "left":  ["left_hand_Joint1_1", "left_hand_Joint2_1"],
+    "right": ["right_hand_Joint1_1", "right_hand_Joint2_1"],
+}
+
+# Dex1 physical joint range (prismatic, meters)
+DEX1_JOINT_RANGE = (-0.02, 0.0245)
+
+
+# =============================================================================
+# Gripper value conversion (from unitree_sim_isaaclab/tools/data_convert.py)
+# =============================================================================
+# The training data records gripper state in a "control value" space [0, 5.4],
+# NOT in the physical prismatic joint space [-0.02, 0.024].
+# convert_to_gripper_range: physical → training   (for state observation)
+# convert_to_joint_range:   training → physical   (for action application)
+
+def convert_to_gripper_range(value):
+    """Convert physical Dex1 joint position to training gripper-range value.
+
+    Physical: [-0.02, 0.024] meters
+    Training: [5.4, 0.0] (inverted: -0.02=open→5.4, 0.024=closed→0.0)
+    """
+    input_min = 0.024   # fully closed (physical)
+    input_max = -0.02   # fully open (physical)
+    output_min = 0.0    # fully closed (training)
+    output_max = 5.4    # fully open (training)
+    try:
+        value = round(float(value), 3)
+    except Exception:
+        pass
+    value = max(input_max, min(input_min, value))
+    converted = output_min + (output_max - output_min) * (input_min - value) / (input_min - input_max)
+    return round(converted, 3)
+
+
+def convert_to_joint_range(value):
+    """Convert training gripper-range value to physical Dex1 joint position.
+
+    Training: [0.0, 5.4] (0.0=closed, 5.4=open)
+    Physical: [0.024, -0.02] meters (0.024=closed, -0.02=open)
+    """
+    input_min = 0.0     # fully closed (training)
+    input_max = 5.4     # fully open (training)
+    output_min = 0.024  # fully closed (physical)
+    output_max = -0.02  # fully open (physical)
+    value = max(input_min, min(input_max, float(value)))
+    converted = output_min + (output_max - output_min) * (value - input_min) / (input_max - input_min)
+    return converted
 
 
 # =============================================================================
@@ -312,22 +357,71 @@ class WBCController:
 # Scene loading — modified for WBC (keeps freejoint, no base lock)
 # =============================================================================
 
+def _inject_dex1_grippers(g1_xml: str) -> str:
+    """Inject Dex1 prismatic gripper bodies into g1.xml wrist links.
+
+    Adds child bodies with prismatic slide joints to left_wrist_yaw_link
+    and right_wrist_yaw_link, matching the Isaac Sim USD training setup.
+
+    Uses regex-based injection to preserve the original XML formatting
+    (ElementTree would reorder attributes and break subsequent regex ops).
+
+    Dex1 specs (from unitree_ros URDF):
+      - Type: prismatic (parallel-jaw sliding)
+      - Range: [-0.02, 0.0245] meters per finger
+      - Attach: fixed to wrist_yaw_link at offset [0.0415, 0, 0]
+      - Fingers slide along Y-axis in opposite directions
+    """
+    for side in ["left", "right"]:
+        wrist_body_name = f"{side}_wrist_yaw_link"
+        # Match the opening tag of the wrist body
+        pattern = rf'(<body\s+name="{wrist_body_name}"[^>]*>)'
+        match = re.search(pattern, g1_xml)
+        if match is None:
+            print(f"  WARNING: Could not find {wrist_body_name} body to inject Dex1 gripper")
+            continue
+
+        dex1_xml = f"""
+        <!-- Dex1 prismatic gripper ({side}) -->
+        <body name="{side}_dex1_base" pos="0.0415 0 0">
+          <body name="{side}_hand_finger1">
+            <joint name="{side}_hand_Joint1_1" type="slide" axis="0 -1 0"
+                   range="-0.02 0.0245" damping="0.1"/>
+            <geom type="box" size="0.01 0.005 0.02" pos="0 -0.015 0"
+                  mass="0.05" rgba="0.3 0.3 0.3 1" condim="3" friction="1.0 0.5 0.1"/>
+          </body>
+          <body name="{side}_hand_finger2">
+            <joint name="{side}_hand_Joint2_1" type="slide" axis="0 1 0"
+                   range="-0.02 0.0245" damping="0.1"/>
+            <geom type="box" size="0.01 0.005 0.02" pos="0 0.015 0"
+                  mass="0.05" rgba="0.3 0.3 0.3 1" condim="3" friction="1.0 0.5 0.1"/>
+          </body>
+        </body>
+"""
+        insert_pos = match.end()
+        g1_xml = g1_xml[:insert_pos] + dex1_xml + g1_xml[insert_pos:]
+        print(f"  Injected Dex1 gripper into {wrist_body_name}")
+
+    return g1_xml
+
+
 def load_towel_scene_wbc(scene_path: str,
                          menagerie_dir: str = "/workspace/mujoco_menagerie/unitree_g1",
                          wbc_timestep: float = 0.005) -> mujoco.MjModel:
-    """Load G1 + towel scene configured for WBC (freejoint enabled).
+    """Load G1 + Dex1 grippers + towel scene configured for WBC.
 
-    Unlike the non-WBC version, this KEEPS the freejoint for pelvis so the
-    WBC balance controller can stabilize the robot. The timestep is set to
-    match WBC's simulation_dt (0.005s = 200 Hz).
+    This function:
+    1. Loads Menagerie's g1.xml (29 DOF body, no hands)
+    2. Injects Dex1 prismatic gripper bodies into the wrist links
+    3. Converts all actuators from position-servo to direct-torque for WBC
+    4. Adds Dex1 gripper actuators (position-controlled)
+    5. Keeps the freejoint for WBC balance
     """
     with open(scene_path) as f:
         scene_xml = f.read()
 
-    # Detect G1 model variant
+    # Always use base g1.xml (no hands) — we inject Dex1 grippers ourselves
     g1_filename = "g1.xml"
-    if "g1_with_hands.xml" in scene_xml:
-        g1_filename = "g1_with_hands.xml"
     g1_path = os.path.join(menagerie_dir, g1_filename)
     with open(g1_path) as f:
         g1_xml = f.read()
@@ -335,34 +429,15 @@ def load_towel_scene_wbc(scene_path: str,
     # Strip keyframe (qpos size mismatch with flexcomp towel)
     g1_xml_mod = re.sub(r'<keyframe>.*?</keyframe>', '', g1_xml, flags=re.DOTALL)
 
+    # Inject Dex1 gripper bodies into wrist links
+    g1_xml_mod = _inject_dex1_grippers(g1_xml_mod)
+
     # CRITICAL: Convert Menagerie position-servo actuators to direct-torque actuators.
     # Menagerie uses: <general gainprm="500 0 0" biasprm="0 -500 -43" biastype="affine" ...>
     # WBC expects:    <motor gear="1" ...>  (direct torque, gain=1, no bias)
-    #
-    # We convert by replacing the <actuator> section entirely with torque-mode motors.
-    # This matches the WBC G1 model (g1_gear_wbc.xml) actuator configuration.
-    # Build actuator replacement — 29 body joints always present.
-    # If using g1_with_hands.xml, also add 14 finger joint actuators.
-    hand_actuators = ""
-    if g1_filename == "g1_with_hands.xml":
-        hand_actuators = """
-    <!-- Inspire hand actuators (position control for finger joints) -->
-    <position name="left_hand_thumb_0" joint="left_hand_thumb_0_joint" kp="10"/>
-    <position name="left_hand_thumb_1" joint="left_hand_thumb_1_joint" kp="10"/>
-    <position name="left_hand_thumb_2" joint="left_hand_thumb_2_joint" kp="10"/>
-    <position name="left_hand_middle_0" joint="left_hand_middle_0_joint" kp="10"/>
-    <position name="left_hand_middle_1" joint="left_hand_middle_1_joint" kp="10"/>
-    <position name="left_hand_index_0" joint="left_hand_index_0_joint" kp="10"/>
-    <position name="left_hand_index_1" joint="left_hand_index_1_joint" kp="10"/>
-    <position name="right_hand_thumb_0" joint="right_hand_thumb_0_joint" kp="10"/>
-    <position name="right_hand_thumb_1" joint="right_hand_thumb_1_joint" kp="10"/>
-    <position name="right_hand_thumb_2" joint="right_hand_thumb_2_joint" kp="10"/>
-    <position name="right_hand_middle_0" joint="right_hand_middle_0_joint" kp="10"/>
-    <position name="right_hand_middle_1" joint="right_hand_middle_1_joint" kp="10"/>
-    <position name="right_hand_index_0" joint="right_hand_index_0_joint" kp="10"/>
-    <position name="right_hand_index_1" joint="right_hand_index_1_joint" kp="10"/>"""
-
-    actuator_replacement = f"""<actuator>
+    # Also add Dex1 gripper actuators (position-controlled, matching Isaac Sim config:
+    # stiffness=800, damping=3.0, friction=200.0 — but simplified for MuJoCo).
+    actuator_replacement = """<actuator>
     <!-- Direct torque actuators for WBC (converted from Menagerie position-servo) -->
     <motor name="left_hip_pitch" joint="left_hip_pitch_joint" gear="1"/>
     <motor name="left_hip_roll" joint="left_hip_roll_joint" gear="1"/>
@@ -392,13 +467,18 @@ def load_towel_scene_wbc(scene_path: str,
     <motor name="right_elbow" joint="right_elbow_joint" gear="1"/>
     <motor name="right_wrist_roll" joint="right_wrist_roll_joint" gear="1"/>
     <motor name="right_wrist_pitch" joint="right_wrist_pitch_joint" gear="1"/>
-    <motor name="right_wrist_yaw" joint="right_wrist_yaw_joint" gear="1"/>{hand_actuators}
+    <motor name="right_wrist_yaw" joint="right_wrist_yaw_joint" gear="1"/>
+    <!-- Dex1 gripper actuators (position-controlled prismatic joints) -->
+    <position name="left_hand_Joint1_1" joint="left_hand_Joint1_1" kp="800" kv="3.0"/>
+    <position name="left_hand_Joint2_1" joint="left_hand_Joint2_1" kp="800" kv="3.0"/>
+    <position name="right_hand_Joint1_1" joint="right_hand_Joint1_1" kp="800" kv="3.0"/>
+    <position name="right_hand_Joint2_1" joint="right_hand_Joint2_1" kp="800" kv="3.0"/>
   </actuator>"""
     g1_xml_mod = re.sub(
         r'<actuator>.*?</actuator>', actuator_replacement,
         g1_xml_mod, flags=re.DOTALL
     )
-    print("  Converted actuators from position-servo to direct-torque mode for WBC")
+    print("  Converted actuators to direct-torque (WBC) + position (Dex1 grippers)")
 
     # Keep the freejoint! WBC will handle balance.
     # Set initial pelvis height to match WBC default (0.793m)
@@ -443,17 +523,17 @@ def load_towel_scene_wbc(scene_path: str,
         )
 
     # Write modified G1 XML
-    g1_tmp = os.path.join(menagerie_dir, f"_{g1_filename.replace('.xml', '_wbc.xml')}")
+    g1_tmp = os.path.join(menagerie_dir, f"_g1_dex1_wbc.xml")
     with open(g1_tmp, 'w') as f:
         f.write(g1_xml_mod)
 
-    # Update scene reference
+    # Update scene reference — the scene XML includes g1.xml from menagerie
     scene_xml_mod = scene_xml_mod.replace(
         f"{menagerie_dir}/{g1_filename}", g1_tmp
     )
 
     # Write scene
-    scene_tmp = os.path.join(menagerie_dir, "_g1_towel_wbc_scene.xml")
+    scene_tmp = os.path.join(menagerie_dir, "_g1_dex1_towel_wbc_scene.xml")
     with open(scene_tmp, 'w') as f:
         f.write(scene_xml_mod)
 
@@ -462,6 +542,18 @@ def load_towel_scene_wbc(scene_path: str,
         print(f"  Scene loaded: {model.nq} qpos, {model.nv} dof, "
               f"{model.nu} actuators, {model.nflex} flex bodies")
         print(f"  Timestep: {model.opt.timestep}s ({1/model.opt.timestep:.0f} Hz)")
+
+        # Verify Dex1 joints exist
+        for side in ["left", "right"]:
+            for jname in DEX1_JOINT_NAMES[side]:
+                jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+                if jid >= 0:
+                    addr = model.jnt_qposadr[jid]
+                    lo, hi = model.jnt_range[jid]
+                    print(f"    {jname}: jid={jid}, qpos_addr={addr}, range=[{lo:.4f}, {hi:.4f}]")
+                else:
+                    print(f"    WARNING: {jname} NOT FOUND in model!")
+
         return model
     finally:
         for tmp in [g1_tmp, scene_tmp]:
@@ -543,64 +635,50 @@ def get_base_state(model, data):
     return quat.astype(np.float32), ang_vel.astype(np.float32)
 
 
-def _has_hand_joints(model):
-    """Check if model has dexterous hand joints (Inspire hands)."""
+def _has_dex1_joints(model):
+    """Check if model has Dex1 prismatic gripper joints."""
     try:
-        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "left_hand_thumb_0_joint")
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "left_hand_Joint1_1")
         return jid >= 0
     except Exception:
         return False
 
 
-def _get_finger_curl(model, data, finger_joints):
-    """Compute average normalized finger curl from finger joints.
+def _get_dex1_gripper_state(model, data, side):
+    """Read Dex1 Joint1_1 physical position and convert to training-range value.
 
-    Returns a value in the raw joint-value space that matches what the
-    training data recorded (not 0-1 normalized). The training data recorded
-    the raw Dex1 Joint1_1 value (range ~[0, 4.74]).
-
-    For Inspire hands, we approximate this by averaging finger joint positions
-    in radians, scaled to match the Dex1 range.
+    Returns a value in the training gripper-range space [0, 5.4] that matches
+    what the training data recorded.
     """
-    vals = []
-    for jname in finger_joints:
-        try:
-            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
-            if jid < 0:
-                continue
-            qpos_addr = model.jnt_qposadr[jid]
-            vals.append(data.qpos[qpos_addr])
-        except Exception:
-            pass
-    if not vals:
+    jname = DEX1_JOINT_NAMES[side][0]  # Joint1_1 (primary finger)
+    try:
+        jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+        if jid < 0:
+            return 0.0
+        physical_pos = float(data.qpos[model.jnt_qposadr[jid]])
+        return convert_to_gripper_range(physical_pos)
+    except Exception:
         return 0.0
-    # Return raw average position (Inspire joints are in radians ~[0, 1.57])
-    # Scale to approximate Dex1 range [0, ~4.74]: multiply by ~3
-    return float(np.mean(vals)) * 3.0
 
 
-def _apply_gripper_to_fingers(model, data, gripper_val, finger_joints):
-    """Map a single gripper command to all finger joint actuators.
+def _apply_dex1_gripper_action(model, data, gripper_val, side):
+    """Apply a GROOT gripper action to the Dex1 prismatic joints.
 
-    gripper_val is in Dex1 range (~[0, 4.74]). Convert back to Inspire range.
-    Linearly interpolates across each finger joint's range.
+    gripper_val is in training range [0, 5.4].
+    Converts to physical joint position and sets both Joint1_1 and Joint2_1
+    (Joint2_1 is mirrored/coupled to Joint1_1).
     """
-    # Convert from Dex1-like range to normalized [0, 1]
-    # Dex1 range approximately [0, 4.74], closed ≈ 4.74, open ≈ 0
-    norm_val = np.clip(gripper_val / 4.74, 0.0, 1.0)
+    physical_pos = convert_to_joint_range(gripper_val)
 
-    for jname in finger_joints:
+    for jname in DEX1_JOINT_NAMES[side]:
         try:
             jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
             if jid < 0:
                 continue
-            lo = model.jnt_range[jid, 0]
-            hi = model.jnt_range[jid, 1]
-            target = lo + norm_val * (hi - lo)
-            # Find actuator for this joint
+            # Find position actuator for this joint
             for act_id in range(model.nu):
                 if model.actuator_trnid[act_id, 0] == jid:
-                    data.ctrl[act_id] = target
+                    data.ctrl[act_id] = physical_pos
                     break
         except Exception:
             pass
@@ -647,13 +725,14 @@ def get_groot_state_vector(model, data, joint_mapping):
     state[27] = q[26]  # wrist_roll (WBC[26]) → GROOT state[27]
     state[28] = q[27]  # wrist_pitch (WBC[27]) → GROOT state[28]
 
-    # Hands: compute from finger joints if available, else 0
-    if _has_hand_joints(model):
-        state[29] = _get_finger_curl(model, data, LEFT_HAND_FINGER_JOINTS)
-        state[30] = _get_finger_curl(model, data, RIGHT_HAND_FINGER_JOINTS)
+    # Hands: read Dex1 Joint1_1 physical position → convert to training range
+    if _has_dex1_joints(model):
+        state[29] = _get_dex1_gripper_state(model, data, "left")
+        state[30] = _get_dex1_gripper_state(model, data, "right")
     else:
-        state[29] = 0.0
-        state[30] = 0.0
+        # Fallback: use training mean (should not happen with Dex1 scene)
+        state[29] = TRAINING_MEAN_STATE["left_hand"]
+        state[30] = TRAINING_MEAN_STATE["right_hand"]
 
     return state
 
@@ -704,7 +783,7 @@ def apply_groot_upper_body(model, data, action_step, joint_mapping):
 
     GROOT arm actions are ABSOLUTE targets in training order (yaw, roll, pitch for wrists).
     We remap to WBC/Menagerie actuator order (roll, pitch, yaw).
-    Gripper actions are mapped from 1-DOF Dex1 value to all Inspire finger joints.
+    Gripper actions are converted from training range [0, 5.4] to physical Dex1 positions.
     """
     arm_kp = 100.0  # PD gain for arm position control
     arm_kd = 2.0
@@ -742,14 +821,12 @@ def apply_groot_upper_body(model, data, action_step, joint_mapping):
             tau = arm_kp * (target - q_curr) + arm_kd * (0.0 - dq_curr)
             data.ctrl[m["act_id"]] = tau
 
-    # Apply gripper actions to finger joints (if model has hands)
-    if _has_hand_joints(model):
+    # Apply gripper actions to Dex1 prismatic joints
+    if _has_dex1_joints(model):
         if "left_hand" in action_step:
-            _apply_gripper_to_fingers(model, data, float(action_step["left_hand"][0]),
-                                      LEFT_HAND_FINGER_JOINTS)
+            _apply_dex1_gripper_action(model, data, float(action_step["left_hand"][0]), "left")
         if "right_hand" in action_step:
-            _apply_gripper_to_fingers(model, data, float(action_step["right_hand"][0]),
-                                      RIGHT_HAND_FINGER_JOINTS)
+            _apply_dex1_gripper_action(model, data, float(action_step["right_hand"][0]), "right")
 
 
 def apply_wbc_torques(model, data, target_q, joint_mapping, wbc_ctrl):
@@ -875,25 +952,20 @@ def run_episode(model, data, renderer, policy_client, joint_mapping,
             if jname in joint_mapping:
                 data.qpos[joint_mapping[jname]["qpos_addr"]] = float(arm_mean[groot_to_menagerie[i]])
 
-    # Fingers: set to training mean gripper value
-    if _has_hand_joints(model):
-        # Convert Dex1-like value to Inspire finger range
-        for finger_joints, hand_key in [
-            (LEFT_HAND_FINGER_JOINTS, "left_hand"),
-            (RIGHT_HAND_FINGER_JOINTS, "right_hand"),
-        ]:
-            hand_val = TRAINING_MEAN_STATE[hand_key]
-            norm_val = np.clip(hand_val / 4.74, 0.0, 1.0)
-            for jname in finger_joints:
+    # Dex1 grippers: set to training mean gripper value (converted to physical position)
+    if _has_dex1_joints(model):
+        for side, hand_key in [("left", "left_hand"), ("right", "right_hand")]:
+            hand_val = TRAINING_MEAN_STATE[hand_key]  # training range [0, 5.4]
+            physical_pos = convert_to_joint_range(hand_val)  # → physical [-0.02, 0.024]
+            for jname in DEX1_JOINT_NAMES[side]:
                 try:
                     jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, jname)
                     if jid < 0:
                         continue
-                    lo = model.jnt_range[jid, 0]
-                    hi = model.jnt_range[jid, 1]
-                    data.qpos[model.jnt_qposadr[jid]] = lo + norm_val * (hi - lo)
+                    data.qpos[model.jnt_qposadr[jid]] = physical_pos
                 except Exception:
                     pass
+            print(f"    {side} hand: training={hand_val:.2f} → physical={physical_pos:.4f} m")
 
     mujoco.mj_forward(model, data)
 

@@ -138,10 +138,10 @@ ln -sf /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_towel_folding.x
 
 ```bash
 # Inside dm-workstation container on workstation
-# IMPORTANT: Use g1_gripper_towel_folding.xml (has hand joints for gripper state)
-#            NOT g1_towel_folding.xml (has no hands — sends 0.0 for gripper state)
+# IMPORTANT: Use g1_dex1_towel_folding.xml — exact Dex1 prismatic grippers
+#            (grippers are injected programmatically from g1.xml base model)
 python /workspace/dm-isaac-g1/scripts/eval/run_mujoco_towel_eval_wbc.py \
-    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_gripper_towel_folding.xml \
+    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_dex1_towel_folding.xml \
     --wbc-dir /workspace/Isaac-GR00T/external_dependencies/GR00T-WholeBodyControl/gr00t_wbc/sim2mujoco/resources/robots/g1 \
     --host 192.168.1.237 --port 5555 \
     --max-steps 1500 \
@@ -151,9 +151,9 @@ python /workspace/dm-isaac-g1/scripts/eval/run_mujoco_towel_eval_wbc.py \
 ### Towel Folding without WBC (fixed base)
 
 ```bash
-# Use gripper scene for correct hand state
+# Use Dex1 gripper scene for correct hand state
 python /workspace/dm-isaac-g1/scripts/eval/run_mujoco_towel_eval.py \
-    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_gripper_towel_folding.xml \
+    --scene /workspace/dm-isaac-g1/scripts/eval/mujoco_towel_scene/g1_dex1_towel_folding.xml \
     --host 192.168.1.237 --port 5555 \
     --max-steps 1500 \
     --output-dir /tmp/mujoco_towel_eval

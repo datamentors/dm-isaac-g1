@@ -1,0 +1,142 @@
+<mujoco model="g1_dex1_towel_folding">
+  <!--
+    G1 with Dex1 Gripper — Towel Folding Scene for GROOT Evaluation
+    ================================================================
+    Uses the Menagerie G1 base model (29 body DOF) + Dex1 prismatic grippers
+    (2 prismatic joints per hand, 4 total gripper DOF).
+
+    Joint naming follows the Isaac Sim USD convention used in training:
+      left_hand_Joint1_1, left_hand_Joint2_1  (left gripper)
+      right_hand_Joint1_1, right_hand_Joint2_1  (right gripper)
+
+    Dex1 gripper specs (from unitree_ros URDF):
+      - Type: prismatic (sliding parallel-jaw)
+      - Range: [-0.02, 0.0245] meters per finger
+      - Effort: 20 N per finger
+      - Attach: fixed to wrist_yaw_link at offset [0.0415, 0, 0]
+      - Fingers slide along Y-axis in opposite directions
+
+    The GROOT model controls 1 DOF per hand (Joint1_1 only).
+    Joint2_1 is mechanically coupled (mirrored) in the eval script.
+
+    Requires: MuJoCo >= 3.0.0 (for flexcomp deformable bodies)
+  -->
+
+  <!-- Elasticity shell plugin for cloth simulation -->
+  <extension>
+    <plugin plugin="mujoco.elasticity.shell"/>
+  </extension>
+
+  <!-- Load G1 base model from Menagerie (no hands) -->
+  <compiler angle="radian" meshdir="/workspace/mujoco_menagerie/unitree_g1/assets"/>
+  <include file="/workspace/mujoco_menagerie/unitree_g1/g1.xml"/>
+
+  <option timestep="0.002" integrator="implicitfast" solver="Newton" iterations="4" tolerance="1e-10">
+    <flag warmstart="enable"/>
+  </option>
+
+  <statistic center="0.0 0.5 0.8" extent="1.5"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0.5 0.5 0.5"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-140" elevation="-20"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <!-- Ground -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+              texrepeat="5 5" reflectance="0.2"/>
+
+    <!-- Table -->
+    <texture type="2d" name="table_tex" builtin="flat" rgb1="0.55 0.35 0.2"
+             width="128" height="128"/>
+    <material name="table_mat" texture="table_tex" specular="0.1" shininess="0.1"/>
+
+    <!-- Towel -->
+    <texture type="2d" name="towel_tex" builtin="flat" rgb1="0.85 0.85 0.95"
+             width="128" height="128"/>
+    <material name="towel_mat" texture="towel_tex" specular="0.0" shininess="0.0"
+              rgba="0.85 0.85 0.95 1"/>
+
+    <!-- Dex1 gripper material -->
+    <material name="dex1_mat" rgba="0.3 0.3 0.3 1" specular="0.3" shininess="0.5"/>
+  </asset>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light pos="0 0.5 3.0" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
+    <light pos="1 0 2.5" dir="-0.3 0.3 -0.8" diffuse="0.4 0.4 0.4"/>
+
+    <!-- Ground plane -->
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"
+          condim="3" friction="1.0 0.5 0.1"/>
+
+    <!-- Table (positioned in front of robot) -->
+    <body name="table" pos="0 0.55 0">
+      <!-- Table top -->
+      <geom name="table_top" type="box" size="0.45 0.35 0.02" pos="0 0 0.74"
+            material="table_mat" mass="20" condim="3" friction="0.8 0.3 0.1"/>
+      <!-- Table legs -->
+      <geom name="leg_fl" type="cylinder" size="0.025" fromto="-0.40 -0.30 0.0 -0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_fr" type="cylinder" size="0.025" fromto=" 0.40 -0.30 0.0  0.40 -0.30 0.72" material="table_mat"/>
+      <geom name="leg_bl" type="cylinder" size="0.025" fromto="-0.40  0.30 0.0 -0.40  0.30 0.72" material="table_mat"/>
+      <geom name="leg_br" type="cylinder" size="0.025" fromto=" 0.40  0.30 0.0  0.40  0.30 0.72" material="table_mat"/>
+    </body>
+
+    <!-- Deformable towel on the table -->
+    <body name="towel_anchor" pos="0 0.55 0.77">
+      <flexcomp name="towel" type="grid" count="16 16 1" spacing="0.02 0.02 0.02"
+                pos="0 0 0" dim="2" mass="0.15" radius="0.005"
+                material="towel_mat">
+        <contact condim="3" selfcollide="auto" friction="0.8 0.3 0.1"
+                 solref="0.01 1" solimp="0.95 0.99 0.001"/>
+        <edge equality="true" damping="0.002"/>
+        <plugin plugin="mujoco.elasticity.shell">
+          <config key="poisson" value="0.3"/>
+          <config key="young" value="5e3"/>
+          <config key="thickness" value="0.002"/>
+        </plugin>
+      </flexcomp>
+    </body>
+
+    <!-- ego_view camera is injected into the robot's torso_link body at load time
+         (matching the real G1's Intel RealSense D435 position). See load_towel_scene(). -->
+
+    <!-- External overview camera -->
+    <camera name="overview" pos="1.5 -0.5 2.0" xyaxes="0 1 0 -0.5 0 0.86"
+            fovy="60" mode="fixed"/>
+  </worldbody>
+
+  <!--
+    Dex1 gripper bodies are injected programmatically by the eval script into
+    left_wrist_yaw_link and right_wrist_yaw_link bodies, since MuJoCo <include>
+    cannot inject into existing bodies from the included g1.xml.
+
+    The eval script's load_towel_scene_wbc() function:
+    1. Parses g1.xml
+    2. Finds left_wrist_yaw_link and right_wrist_yaw_link bodies
+    3. Injects Dex1 gripper child bodies with prismatic joints
+    4. Adds corresponding actuators
+
+    Dex1 gripper body template (injected per side):
+      <body name="left_dex1_base" pos="0.0415 0 0">
+        <body name="left_hand_finger1">
+          <joint name="left_hand_Joint1_1" type="slide" axis="0 -1 0"
+                 range="-0.02 0.0245" damping="0.1"/>
+          <geom type="box" size="0.01 0.005 0.02" pos="0 -0.015 0"
+                material="dex1_mat" mass="0.05"/>
+        </body>
+        <body name="left_hand_finger2">
+          <joint name="left_hand_Joint2_1" type="slide" axis="0 1 0"
+                 range="-0.02 0.0245" damping="0.1"/>
+          <geom type="box" size="0.01 0.005 0.02" pos="0 0.015 0"
+                material="dex1_mat" mass="0.05"/>
+        </body>
+      </body>
+  -->
+</mujoco>
