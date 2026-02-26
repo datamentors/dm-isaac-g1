@@ -159,6 +159,13 @@ class Dex1HandConfig(HandConfig):
         )
 
     def inject_into_xml(self, g1_xml: str) -> str:
+        # Remove Menagerie rubber hand visual meshes (they look like Inspire hands)
+        for side in ["left", "right"]:
+            g1_xml = re.sub(
+                rf'<geom[^>]*mesh="{side}_rubber_hand"[^/]*/>', '', g1_xml
+            )
+        print("  Removed rubber hand visual meshes (replaced by Dex1 grippers)")
+
         for side in ["left", "right"]:
             wrist_body_name = f"{side}_wrist_yaw_link"
             pattern = rf'(<body\s+name="{wrist_body_name}"[^>]*>)'
@@ -173,14 +180,14 @@ class Dex1HandConfig(HandConfig):
           <body name="{side}_hand_finger1">
             <joint name="{side}_hand_Joint1_1" type="slide" axis="0 -1 0"
                    range="-0.02 0.0245" damping="0.1"/>
-            <geom type="box" size="0.01 0.005 0.02" pos="0 -0.015 0"
-                  mass="0.05" rgba="0.3 0.3 0.3 1" condim="3" friction="1.0 0.5 0.1"/>
+            <geom type="box" size="0.015 0.005 0.04" pos="0 -0.015 0"
+                  mass="0.05" rgba="0.2 0.2 0.2 1" condim="3" friction="1.0 0.5 0.1"/>
           </body>
           <body name="{side}_hand_finger2">
             <joint name="{side}_hand_Joint2_1" type="slide" axis="0 1 0"
                    range="-0.02 0.0245" damping="0.1"/>
-            <geom type="box" size="0.01 0.005 0.02" pos="0 0.015 0"
-                  mass="0.05" rgba="0.3 0.3 0.3 1" condim="3" friction="1.0 0.5 0.1"/>
+            <geom type="box" size="0.015 0.005 0.04" pos="0 0.015 0"
+                  mass="0.05" rgba="0.2 0.2 0.2 1" condim="3" friction="1.0 0.5 0.1"/>
           </body>
         </body>
 """
