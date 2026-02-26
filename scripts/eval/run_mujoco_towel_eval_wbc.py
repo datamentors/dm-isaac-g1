@@ -297,6 +297,50 @@ def load_towel_scene_wbc(scene_path: str,
     # Strip keyframe (qpos size mismatch with flexcomp towel)
     g1_xml_mod = re.sub(r'<keyframe>.*?</keyframe>', '', g1_xml, flags=re.DOTALL)
 
+    # CRITICAL: Convert Menagerie position-servo actuators to direct-torque actuators.
+    # Menagerie uses: <general gainprm="500 0 0" biasprm="0 -500 -43" biastype="affine" ...>
+    # WBC expects:    <motor gear="1" ...>  (direct torque, gain=1, no bias)
+    #
+    # We convert by replacing the <actuator> section entirely with torque-mode motors.
+    # This matches the WBC G1 model (g1_gear_wbc.xml) actuator configuration.
+    actuator_replacement = """<actuator>
+    <!-- Direct torque actuators for WBC (converted from Menagerie position-servo) -->
+    <motor name="left_hip_pitch" joint="left_hip_pitch_joint" gear="1"/>
+    <motor name="left_hip_roll" joint="left_hip_roll_joint" gear="1"/>
+    <motor name="left_hip_yaw" joint="left_hip_yaw_joint" gear="1"/>
+    <motor name="left_knee" joint="left_knee_joint" gear="1"/>
+    <motor name="left_ankle_pitch" joint="left_ankle_pitch_joint" gear="1"/>
+    <motor name="left_ankle_roll" joint="left_ankle_roll_joint" gear="1"/>
+    <motor name="right_hip_pitch" joint="right_hip_pitch_joint" gear="1"/>
+    <motor name="right_hip_roll" joint="right_hip_roll_joint" gear="1"/>
+    <motor name="right_hip_yaw" joint="right_hip_yaw_joint" gear="1"/>
+    <motor name="right_knee" joint="right_knee_joint" gear="1"/>
+    <motor name="right_ankle_pitch" joint="right_ankle_pitch_joint" gear="1"/>
+    <motor name="right_ankle_roll" joint="right_ankle_roll_joint" gear="1"/>
+    <motor name="waist_yaw" joint="waist_yaw_joint" gear="1"/>
+    <motor name="waist_roll" joint="waist_roll_joint" gear="1"/>
+    <motor name="waist_pitch" joint="waist_pitch_joint" gear="1"/>
+    <motor name="left_shoulder_pitch" joint="left_shoulder_pitch_joint" gear="1"/>
+    <motor name="left_shoulder_roll" joint="left_shoulder_roll_joint" gear="1"/>
+    <motor name="left_shoulder_yaw" joint="left_shoulder_yaw_joint" gear="1"/>
+    <motor name="left_elbow" joint="left_elbow_joint" gear="1"/>
+    <motor name="left_wrist_roll" joint="left_wrist_roll_joint" gear="1"/>
+    <motor name="left_wrist_pitch" joint="left_wrist_pitch_joint" gear="1"/>
+    <motor name="left_wrist_yaw" joint="left_wrist_yaw_joint" gear="1"/>
+    <motor name="right_shoulder_pitch" joint="right_shoulder_pitch_joint" gear="1"/>
+    <motor name="right_shoulder_roll" joint="right_shoulder_roll_joint" gear="1"/>
+    <motor name="right_shoulder_yaw" joint="right_shoulder_yaw_joint" gear="1"/>
+    <motor name="right_elbow" joint="right_elbow_joint" gear="1"/>
+    <motor name="right_wrist_roll" joint="right_wrist_roll_joint" gear="1"/>
+    <motor name="right_wrist_pitch" joint="right_wrist_pitch_joint" gear="1"/>
+    <motor name="right_wrist_yaw" joint="right_wrist_yaw_joint" gear="1"/>
+  </actuator>"""
+    g1_xml_mod = re.sub(
+        r'<actuator>.*?</actuator>', actuator_replacement,
+        g1_xml_mod, flags=re.DOTALL
+    )
+    print("  Converted actuators from position-servo to direct-torque mode for WBC")
+
     # Keep the freejoint! WBC will handle balance.
     # Set initial pelvis height to match WBC default (0.793m)
     # and rotate to face +Y (toward the table)
