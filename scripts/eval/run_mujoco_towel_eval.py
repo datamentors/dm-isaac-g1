@@ -17,12 +17,12 @@ Usage:
     # Start GROOT server with --use-sim-policy-wrapper:
     python gr00t/eval/run_gr00t_server.py \
         --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-        --embodiment-tag UNITREE_G1 --use-sim-policy-wrapper --port 5556
+        --embodiment-tag UNITREE_G1 --use-sim-policy-wrapper --port 5555
 
     # Then run this eval from workstation container:
     python run_mujoco_towel_eval.py \
         --scene mujoco_towel_scene/g1_towel_folding.xml \
-        --host localhost --port 5556 \
+        --host 192.168.1.237 --port 5555 \
         --n-episodes 5 --max-steps 500
 
 Observation Format (flat keys for Gr00tSimPolicyWrapper):
@@ -636,7 +636,7 @@ def main():
                         help="Path to MuJoCo scene XML")
     parser.add_argument("--host", type=str, default="192.168.1.237",
                         help="GROOT server host (default: Spark)")
-    parser.add_argument("--port", type=int, default=5556,
+    parser.add_argument("--port", type=int, default=5555,
                         help="GROOT server port (server must use --use-sim-policy-wrapper)")
     parser.add_argument("--model-path", type=str, default=None,
                         help="Local model path (bypasses server, not recommended)")

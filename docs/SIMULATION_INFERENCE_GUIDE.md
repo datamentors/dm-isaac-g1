@@ -15,7 +15,7 @@ There are three ways to evaluate a fine-tuned GR00T model:
 All three connect to the same **GROOT inference server** via ZeroMQ. The server must use `--use-sim-policy-wrapper` for simulation eval.
 
 ```
-┌──────────────────────┐     ZMQ (port 5556)     ┌──────────────────────────────┐
+┌──────────────────────┐     ZMQ (port 5555)     ┌──────────────────────────────┐
 │   Simulation Client  │◄───────────────────────►│  GROOT Inference Server       │
 │  (MuJoCo / Isaac Sim │                         │  --use-sim-policy-wrapper     │
 │   / Real Robot)      │                         │  (Spark 192.168.1.237)        │
@@ -68,7 +68,7 @@ cd /workspace/Isaac-GR00T
 python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
     --embodiment-tag UNITREE_G1 \
-    --port 5556 \
+    --port 5555 \
     --use-sim-policy-wrapper
 ```
 

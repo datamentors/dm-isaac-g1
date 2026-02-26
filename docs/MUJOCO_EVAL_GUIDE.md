@@ -7,7 +7,7 @@ Custom MuJoCo scenes for evaluating GROOT G1 policies, starting with towel foldi
 ## Architecture
 
 ```
-┌──────────────────────────┐    ZMQ (5556)     ┌──────────────────────────────┐
+┌──────────────────────────┐    ZMQ (5555)     ┌──────────────────────────────┐
 │  MuJoCo Simulation       │◄────────────────►│  GROOT Inference Server       │
 │  (run_mujoco_towel_eval) │                   │  --use-sim-policy-wrapper     │
 │                          │                   │                               │
@@ -51,14 +51,14 @@ cd /workspace/Isaac-GR00T
 python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
     --embodiment-tag UNITREE_G1 \
-    --port 5556 \
+    --port 5555 \
     --use-sim-policy-wrapper
 
 # --- Terminal 2: Run MuJoCo eval ---
 cd /workspace/dm-isaac-g1/scripts/eval
 MUJOCO_GL=egl python3 run_mujoco_towel_eval.py \
     --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
-    --host localhost --port 5556 \
+    --host 192.168.1.237 --port 5555 \
     --n-episodes 5 --max-steps 500 \
     --action-horizon 20 \
     --language "fold the towel"
@@ -271,13 +271,13 @@ Full interaction with physics simulation. Requires GROOT server with `--use-sim-
 cd /workspace/Isaac-GR00T
 python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-    --embodiment-tag UNITREE_G1 --port 5556 --use-sim-policy-wrapper
+    --embodiment-tag UNITREE_G1 --port 5555 --use-sim-policy-wrapper
 
 # Eval (terminal 2):
 cd /workspace/dm-isaac-g1/scripts/eval
 MUJOCO_GL=egl python3 run_mujoco_towel_eval.py \
     --scene mujoco_towel_scene/g1_gripper_towel_folding.xml \
-    --host localhost --port 5556 \
+    --host 192.168.1.237 --port 5555 \
     --n-episodes 5 --max-steps 500 --action-horizon 20
 ```
 
@@ -295,7 +295,7 @@ bash gr00t/eval/sim/GR00T-WholeBodyControl/setup_GR00T_WholeBodyControl.sh
 cd /workspace/Isaac-GR00T
 python3 -m gr00t.eval.run_gr00t_server \
     --model-path /workspace/checkpoints/groot-g1-gripper-fold-towel-full \
-    --embodiment-tag UNITREE_G1 --port 5556 --use-sim-policy-wrapper
+    --embodiment-tag UNITREE_G1 --port 5555 --use-sim-policy-wrapper
 
 # Terminal 2: Rollout (uses WBC venv):
 source gr00t/eval/sim/GR00T-WholeBodyControl/GR00T-WholeBodyControl_uv/.venv/bin/activate
@@ -303,7 +303,7 @@ source gr00t/eval/sim/GR00T-WholeBodyControl/GR00T-WholeBodyControl_uv/.venv/bin
 python3 gr00t/eval/rollout_policy.py \
     --n_episodes 10 --max_episode_steps 1440 \
     --env_name gr00tlocomanip_g1_sim/LMPnPAppleToPlateDC_G1_gear_wbc \
-    --policy_client_host localhost --policy_client_port 5556 \
+    --policy_client_host localhost --policy_client_port 5555 \
     --n_action_steps 20 --n_envs 1
 ```
 
@@ -319,7 +319,7 @@ python3 gr00t/eval/rollout_policy.py \
 |------|---------|-------------|
 | `--scene` | (required) | Path to MuJoCo scene XML |
 | `--host` | `localhost` | GROOT server host |
-| `--port` | `5556` | GROOT server port (must use `--use-sim-policy-wrapper`) |
+| `--port` | `5555` | GROOT server port (must use `--use-sim-policy-wrapper`) |
 | `--language` | `"fold the towel"` | Task language instruction |
 | `--n-episodes` | `5` | Number of evaluation episodes |
 | `--max-steps` | `500` | Max steps per episode |
