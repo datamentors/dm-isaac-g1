@@ -188,6 +188,16 @@ ENV PYOPENGL_PLATFORM=egl
 RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
 
 # ==========================================
+# GROOT Fine-tuning Dependencies
+# ==========================================
+# torchcodec: Video decoding backend for GROOT data loading
+# wandb: Experiment tracking for fine-tuning runs
+# FFmpeg: Required by torchcodec for video decoding
+RUN apt-get update -qq && apt-get install -y -qq ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv pip install --system torchcodec wandb
+
+# ==========================================
 # Environment Configuration
 # ==========================================
 # Set PYTHONPATH for all modules

@@ -89,6 +89,7 @@ def main():
     config.data.shard_size = 1024
     config.data.episode_sampling_rate = 0.1
     config.data.num_shards_per_epoch = 100000
+    config.data.video_backend = "torchcodec"
 
     # Inject early stopping callback via monkey-patch
     OrigTrainer = exp_module.Gr00tTrainer
