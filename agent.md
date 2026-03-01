@@ -386,6 +386,19 @@ torchrun --nproc_per_node=1 --master_port=29500 \
 - `global_batch_size 64` (not 8 — more VRAM available with 1 camera)
 - `dataloader_num_workers 4` (safe with 1 camera vs 4)
 
+### Training Monitoring (MANDATORY)
+
+**Always enable `--use_wandb` on every fine-tuning run.** This is a non-negotiable default — it provides live loss curves, gradient norms, and LR schedule in a web dashboard. Without it, we are blind to training progress.
+
+```bash
+# ALWAYS include this flag in training commands:
+--use_wandb
+```
+
+If wandb is unavailable or the user explicitly opts out, ensure stdout is captured to a log file with `2>&1 | tee /workspace/logs/<run_name>.log` as a fallback.
+
+**NVIDIA reference training volume**: For UNITREE_G1 PnP tasks, NVIDIA uses `global_batch_size=1024` × `max_steps=10000` = **10.24M total samples**. On our single-GPU setup, match this with `--global_batch_size 128 --gradient_accumulation_steps 8`. Never use `global_batch_size 8` — it results in 256× undertraining.
+
 ### 2. Monitor Training
 
 ```bash
