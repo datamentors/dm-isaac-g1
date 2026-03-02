@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>INFERENCE_ARCHITECTURE_COMPARISON.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid@10.3.1/dist/mermaid.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="inference-architecture-comparison-direct-control-vs-wbc-pipeline">Inference Architecture Comparison: Direct Control vs WBC Pipeline</h1>
+<p>Comparison of how our G1 robot runs inference in two different architectures:</p>
+<ol>
+<li><strong>Direct Control</strong> — our original approach (dm-isaac-g1)</li>
+<li><strong>WBC Pipeline</strong> — NVIDIA's GR00T Whole-Body Control (GR00T-WholeBodyControl)</li>
+</ol>
+<p>Both use the same GROOT model server for policy inference, but differ fundamentally in how observations reach the model and how model outputs become robot joint commands.</p>
+<hr>
+<h2 id="1-direct-control-architecture-original">1. Direct Control Architecture (Original)</h2>
+<p>Simple 2-process setup: one simulation, one GROOT model server.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph SIM["Simulation Process (Isaac Sim / MuJoCo)"]
+        direction TB
+        S1["1. Read joint positions (31 DOF)"]
+        S2["2. Render ego camera (480x640)"]
+        S3["3. Build observation dict"]
+        S4["4. client.get_action(obs)"]
+        S5["5. Extract action[t] from buffer"]
+        S6["6. Apply to joints directly"]
+        S7["7. env.step(action)"]
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
+        S7 -.->|"loop"| S1
+    end
+
+    subgraph GROOT["GROOT Server (Spark:5555)"]
+        MODEL["GROOT Policy Model"]
+    end
+
+    S3 -- "obs via ZMQ REQ" --> MODEL
+    MODEL -- "actions via ZMQ REP" --> S4
+
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style MODEL fill:#c96830,stroke:#a04f18,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S2 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S3 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S4 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S5 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S6 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S7 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+</div></code></pre>
+<h3 id="observation-format">Observation Format</h3>
+<p>The simulation reads joint positions directly and packages them into the GROOT observation format:</p>
+<pre class="hljs"><code><div>observation = {
+    &quot;video&quot;: {
+        &quot;ego_view&quot;: (1, 1, 480, 640, 3) uint8
+    },
+    &quot;state&quot;: {
+        &quot;left_leg&quot;:   (1, 1, 6)  float32    ─┐
+        &quot;right_leg&quot;:  (1, 1, 6)  float32     │ 31 DOF total
+        &quot;waist&quot;:      (1, 1, 3)  float32     │ (read from sim joint positions)
+        &quot;left_arm&quot;:   (1, 1, 7)  float32     │
+        &quot;right_arm&quot;:  (1, 1, 7)  float32     │
+        &quot;left_hand&quot;:  (1, 1, 1)  float32     │ gripper (normalized 0-1)
+        &quot;right_hand&quot;: (1, 1, 1)  float32    ─┘
+    },
+    &quot;annotation&quot;: {
+        &quot;human.task_description&quot;: [[&quot;fold the towel&quot;]]
+    }
+}
+</div></code></pre>
+<h3 id="action-format">Action Format</h3>
+<p>GROOT returns a 30-step action trajectory. The eval script executes some number of steps before re-querying:</p>
+<pre class="hljs"><code><div>action_dict = {
+    &quot;action.waist&quot;:      (1, 30, 3)   ABSOLUTE
+    &quot;action.left_arm&quot;:   (1, 30, 7)   RELATIVE (delta from trajectory start)
+    &quot;action.right_arm&quot;:  (1, 30, 7)   RELATIVE (delta from trajectory start)
+    &quot;action.left_hand&quot;:  (1, 30, 1)   ABSOLUTE
+    &quot;action.right_hand&quot;: (1, 30, 1)   ABSOLUTE
+    &quot;action.base_height_command&quot;: (1, 30, 1)  ABSOLUTE (ignored in fixed-base)
+    &quot;action.navigate_command&quot;:    (1, 30, 3)  ABSOLUTE (ignored in fixed-base)
+}
+</div></code></pre>
+<p><strong>Key: arms use relative deltas</strong> — <code>target = start_pos + delta * action_scale</code>.</p>
+<h3 id="action-application">Action Application</h3>
+<pre class="hljs"><code><div><span class="hljs-keyword">for</span> t <span class="hljs-keyword">in</span> range(num_action_steps):
+    <span class="hljs-comment"># Extract action at timestep t</span>
+    <span class="hljs-keyword">for</span> group <span class="hljs-keyword">in</span> [<span class="hljs-string">"waist"</span>, <span class="hljs-string">"left_arm"</span>, <span class="hljs-string">"right_arm"</span>, <span class="hljs-string">"left_hand"</span>, <span class="hljs-string">"right_hand"</span>]:
+        <span class="hljs-keyword">if</span> group <span class="hljs-keyword">in</span> (<span class="hljs-string">"left_arm"</span>, <span class="hljs-string">"right_arm"</span>):
+            target = trajectory_start_pos + action[t] * action_scale  <span class="hljs-comment"># relative</span>
+        <span class="hljs-keyword">else</span>:
+            target = action[t]  <span class="hljs-comment"># absolute</span>
+
+    <span class="hljs-comment"># Apply directly to joint targets via PD controller</span>
+    <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> range(control_decimation):
+        env.step(target_joint_positions)
+</div></code></pre>
+<h3 id="key-characteristics">Key Characteristics</h3>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Processes</td>
+<td>2 (sim + GROOT server)</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td>ZMQ REQ/REP only</td>
+</tr>
+<tr>
+<td>Robot base</td>
+<td><strong>Fixed</strong> (no walking)</td>
+</tr>
+<tr>
+<td>Balance controller</td>
+<td><strong>None</strong></td>
+</tr>
+<tr>
+<td>Lower body</td>
+<td>Observed only, NOT controlled</td>
+</tr>
+<tr>
+<td>Hand type</td>
+<td>1 DOF gripper (Dex1)</td>
+</tr>
+<tr>
+<td>State dims</td>
+<td>31 DOF (legs observed, not controlled)</td>
+</tr>
+<tr>
+<td>Action dims</td>
+<td>23 DOF (waist + arms + hands + nav + height)</td>
+</tr>
+<tr>
+<td>Action horizon</td>
+<td>30 steps, execute K before re-query</td>
+</tr>
+<tr>
+<td>Camera</td>
+<td>1 ego-view</td>
+</tr>
+<tr>
+<td>Frequency</td>
+<td>Sim-rate / control_decimation</td>
+</tr>
+<tr>
+<td>Action type</td>
+<td>Mixed (relative arms, absolute rest)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="limitations">Limitations</h3>
+<ol>
+<li><strong>Fixed base only</strong> — robot cannot walk, must be placed at the task</li>
+<li><strong>No balance</strong> — legs are passive; if base isn't fixed, robot falls over</li>
+<li><strong>No locomotion</strong> — <code>navigate_command</code> and <code>base_height_command</code> are in the action output but have no effect without a controller to execute them</li>
+<li><strong>Tight coupling</strong> — observation building and action application are embedded in the eval script, making it hard to swap sim backends</li>
+</ol>
+<hr>
+<h2 id="2-wbc-pipeline-architecture-nvidia-gr00t-wholebodycontrol">2. WBC Pipeline Architecture (NVIDIA GR00T-WholeBodyControl)</h2>
+<p>3-process architecture with decoupled control. The key innovation: <strong>the GROOT model only controls the upper body, while a separate RL-trained policy controls the legs for balance and locomotion</strong>.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph GROOT["GROOT Server (Spark:5555)"]
+        GMODEL["GROOT Policy Model"]
+    end
+
+    subgraph BRIDGE["Bridge (External Integration)"]
+        B1["Subscribe env_state_act"]
+        B2["Read camera stream"]
+        B3["Call GROOT server"]
+        B4["Map output to upper body goal"]
+        B5["Publish upper_body_pose + navigate_cmd"]
+    end
+
+    subgraph WBC["WBC Control Loop (50 Hz)"]
+        W1["Read robot state from DDS"]
+        subgraph POLICY["G1DecoupledWholeBodyPolicy"]
+            INTERP["InterpolationPolicy\n(upper body: arms+waist+hands)"]
+            RLPOL["G1GearWbcPolicy\n(lower body: legs via ONNX RL)"]
+        end
+        W2["Send joint commands via DDS"]
+        W3["Publish env_state_act for bridge"]
+    end
+
+    subgraph SIM["Simulation (MuJoCo / RoboCasa)"]
+        P1["Physics step"]
+        P2["Publish sensor data via DDS"]
+        P3["Read joint commands via DDS"]
+    end
+
+    B3 -- "obs via ZMQ REQ" --> GMODEL
+    GMODEL -- "actions via ZMQ REP" --> B3
+
+    B5 -- "ROS2 topics\n(msgpack)" --> W1
+    W3 -- "ROS2 topics\n(msgpack)" --> B1
+
+    W2 -- "DDS topics\n(Unitree SDK2)" --> P3
+    P2 -- "DDS topics\n(Unitree SDK2)" --> W1
+
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style GMODEL fill:#c96830,stroke:#a04f18,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B2 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B3 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B4 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B5 fill:#9384f2,stroke:#7060d4,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style POLICY fill:#27ae60,stroke:#1a7a42,color:#fff
+    style INTERP fill:#3dd87f,stroke:#2bb365,color:#fff
+    style RLPOL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W2 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W3 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style P1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style P2 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style P3 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+</div></code></pre>
+<h3 id="how-the-3-processes-communicate">How the 3 Processes Communicate</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    GROOT["GROOT Server\n(Spark)"]
+    BRIDGE["Bridge\n(gets obs, sends goal)"]
+    WBC["WBC Control Loop\n(50 Hz motor control)"]
+    SIM["Simulation\n(physics + sensors)"]
+
+    GROOT <-- "ZMQ\nREQ/REP" --> BRIDGE
+    BRIDGE -- "ROS2\ntopics" --> WBC
+    WBC -- "ROS2\ntopics" --> BRIDGE
+    WBC <-- "DDS\ntopics" --> SIM
+
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+</div></code></pre>
+<p>The bridge <strong>never talks to the sim directly</strong>. It only reads published state from the WBC loop and publishes goal commands back.</p>
+<h3 id="observation-flow-sim-%E2%86%92-wbc-%E2%86%92-bridge-%E2%86%92-groot">Observation Flow (Sim → WBC → Bridge → GROOT)</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph SIM["Simulation"]
+        S1["Publish raw sensor data\nrt/lowstate (29 body motors + IMU)\nrt/dex3/*/state (7 hand motors/hand)\nrt/secondary_imu (torso IMU)\nrt/odostate (floating base)"]
+    end
+
+    subgraph WBC["WBC Control Loop"]
+        W1["Read DDS & assemble state\nbody_q[29] + hand_q[7+7] = whole_q[43]\n+ FK for wrist poses"]
+        W2["Publish assembled state\nG1Env/env_state_act\n{q[43], dq[43], wrist_pose[14], ...}"]
+        W1 --> W2
+    end
+
+    subgraph BRIDGE["Bridge"]
+        B1["Build GROOT observation\nvideo: ego_view (480x640)\nstate: legs/waist/arms/hands\nannotation: task description"]
+        B2["Send observation"]
+        B1 --> B2
+    end
+
+    subgraph GROOT["GROOT Server"]
+        G1["Receive observation\n& run inference"]
+    end
+
+    S1 -- "DDS" --> W1
+    W2 -- "ROS2" --> B1
+    B2 -- "ZMQ REQ" --> G1
+
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W2 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B2 fill:#9384f2,stroke:#7060d4,color:#fff
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style G1 fill:#c96830,stroke:#a04f18,color:#fff
+</div></code></pre>
+<h3 id="action-flow-groot-%E2%86%92-bridge-%E2%86%92-wbc-%E2%86%92-sim">Action Flow (GROOT → Bridge → WBC → Sim)</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph GROOT["GROOT Server"]
+        G1["Return action trajectory\nwaist[3], arms[7+7], hands[N+N]\nbase_height[1], navigate_cmd[3]"]
+    end
+
+    subgraph BRIDGE["Bridge"]
+        B1["Extract & publish goal\nupper_body_pose[17]\ntarget_time, navigate_cmd[3]\nbase_height_command: 0.74m"]
+    end
+
+    subgraph WBC["WBC Control Loop"]
+        direction TB
+        subgraph UPPER["InterpolationPolicy (Upper Body)"]
+            U1["scipy interp1d smooth interpolation\n-> arms[14] + waist[3] + hands[N]"]
+        end
+        subgraph LOWER["G1GearWbcPolicy (Lower Body, ONNX RL)"]
+            L1["86-dim obs x 6 history = 516-dim input\n-> 15-dim action (12 legs + 3 waist)\npolicy_1 (balance) / policy_2 (walk)"]
+        end
+        ASM["Assembly: q[43] = upper + lower\n(lower body overwrites waist)"]
+        U1 --> ASM
+        L1 --> ASM
+        W1["Send joint targets via DDS\nrt/lowcmd (29 body motors)\nrt/dex*/*/cmd (hand motors)"]
+        ASM --> W1
+    end
+
+    subgraph SIM["Simulation"]
+        S1["Read DDS commands & step physics\nPD: tau = tau_ff + kp*(q_cmd-q) + kd*(dq_cmd-dq)"]
+    end
+
+    G1 -- "ZMQ REP" --> B1
+    B1 -- "ROS2" --> UPPER
+    B1 -- "ROS2" --> LOWER
+    W1 -- "DDS" --> S1
+
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style G1 fill:#c96830,stroke:#a04f18,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style UPPER fill:#27ae60,stroke:#1a7a42,color:#fff
+    style U1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style LOWER fill:#e74c3c,stroke:#c0392b,color:#fff
+    style L1 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style ASM fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+</div></code></pre>
+<h3 id="key-characteristics">Key Characteristics</h3>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Processes</td>
+<td>3 (sim + WBC control loop + GROOT server) + bridge</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td>DDS (sim↔WBC) + ROS2 (WBC↔bridge) + ZMQ (bridge↔GROOT)</td>
+</tr>
+<tr>
+<td>Robot base</td>
+<td><strong>Free-floating</strong> (walks, balances)</td>
+</tr>
+<tr>
+<td>Balance controller</td>
+<td><strong>RL-trained ONNX policy</strong> (2 models: balance + walk)</td>
+</tr>
+<tr>
+<td>Lower body</td>
+<td>Actively controlled by RL policy at 50 Hz</td>
+</tr>
+<tr>
+<td>Hand type</td>
+<td>Configurable: Dex3 (7 DOF) or Dex1 (2 DOF)</td>
+</tr>
+<tr>
+<td>State dims</td>
+<td>43 DOF with Dex3, 33 DOF with Dex1</td>
+</tr>
+<tr>
+<td>Action dims</td>
+<td>43 DOF with Dex3, 33 DOF with Dex1</td>
+</tr>
+<tr>
+<td>Control frequency</td>
+<td>50 Hz (with 4 physics substeps at 200 Hz)</td>
+</tr>
+<tr>
+<td>Camera</td>
+<td>Ego-view + optional wrist cameras</td>
+</tr>
+<tr>
+<td>Action type</td>
+<td>Absolute targets (interpolated)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="3-side-by-side-comparison">3. Side-by-Side Comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Direct Control</th>
+<th>WBC Pipeline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Processes</strong></td>
+<td>2 (sim + GROOT)</td>
+<td>3+ (sim + WBC + GROOT + bridge)</td>
+</tr>
+<tr>
+<td><strong>Robot stability</strong></td>
+<td>Fixed base required</td>
+<td>Self-balancing (RL)</td>
+</tr>
+<tr>
+<td><strong>Walking</strong></td>
+<td>No</td>
+<td>Yes (velocity commands)</td>
+</tr>
+<tr>
+<td><strong>GROOT controls</strong></td>
+<td>Arms + waist + hands</td>
+<td>Arms + waist + hands (same)</td>
+</tr>
+<tr>
+<td><strong>Leg control</strong></td>
+<td>None (passive)</td>
+<td>RL policy (ONNX, 50 Hz)</td>
+</tr>
+<tr>
+<td><strong>Action application</strong></td>
+<td>Direct to joints</td>
+<td>Interpolated + safety-monitored</td>
+</tr>
+<tr>
+<td><strong>Action space</strong></td>
+<td>Mixed (relative arms)</td>
+<td>Absolute targets</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td>Clip to ±3.14</td>
+<td>Joint limits + velocity monitoring + startup ramp</td>
+</tr>
+<tr>
+<td><strong>Sim coupling</strong></td>
+<td>Tight (in eval script)</td>
+<td>Loose (DDS interface)</td>
+</tr>
+<tr>
+<td><strong>Real robot</strong></td>
+<td>Not supported</td>
+<td>Same code, same DDS interface</td>
+</tr>
+<tr>
+<td><strong>Sim backends</strong></td>
+<td>Isaac Sim or MuJoCo</td>
+<td>MuJoCo or RoboCasa (same DDS)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-groot-actually-controls-same-in-both">What GROOT Actually Controls (Same in Both)</h3>
+<p>In both architectures, the GROOT model predicts the <strong>same thing</strong>: upper body joint targets.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph GROOT_OUT["GROOT Output (23+ DOF)"]
+        direction TB
+        WAIST["waist: 3 DOF\n(yaw, roll, pitch)"]
+        LA["left_arm: 7 DOF\n(shoulder p/r/y, elbow, wrist r/p/y)"]
+        RA["right_arm: 7 DOF\n(same)"]
+        LH["left_hand: N DOF\n(1 for Dex1, 7 for Dex3)"]
+        RH["right_hand: N DOF\n(1 for Dex1, 7 for Dex3)"]
+        BH["base_height: 1 DOF"]
+        NAV["navigate_cmd: 3 DOF\n(vx, vy, omega)"]
+    end
+
+    style GROOT_OUT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style WAIST fill:#f5a623,stroke:#d48b0f,color:#fff
+    style LA fill:#c96830,stroke:#a04f18,color:#fff
+    style RA fill:#c96830,stroke:#a04f18,color:#fff
+    style LH fill:#d4944d,stroke:#b37530,color:#fff
+    style RH fill:#d4944d,stroke:#b37530,color:#fff
+    style BH fill:#8b6914,stroke:#6b5010,color:#fff
+    style NAV fill:#8b6914,stroke:#6b5010,color:#fff
+</div></code></pre>
+<p>The difference is what happens AFTER GROOT produces its output:</p>
+<ul>
+<li><strong>Direct Control</strong>: joint targets go straight to the sim PD controller. No balance, no interpolation, no safety checks.</li>
+<li><strong>WBC Pipeline</strong>: joint targets become a &quot;goal&quot; that the WBC policy interpolates toward while simultaneously running an RL balance controller for the legs.</li>
+</ul>
+<h3 id="why-wbc-matters-for-real-deployment">Why WBC Matters for Real Deployment</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph DC["Direct Control"]
+        direction TB
+        DC_GROOT["GROOT"] --> DC_JOINTS["Joints (direct)"]
+        DC_N1["No balance"]
+        DC_N2["No safety"]
+        DC_N3["Fixed base only"]
+    end
+
+    subgraph WBCP["WBC Pipeline"]
+        direction TB
+        WBC_GROOT["GROOT"] --> WBC_GOAL["Goal"]
+        WBC_GOAL --> WBC_INTERP["WBC interpolates smoothly"]
+        WBC_GOAL --> WBC_RL["RL balances legs"]
+        WBC_INTERP --> WBC_SAFE["Safety monitors all joints"]
+        WBC_RL --> WBC_SAFE
+        WBC_REAL["Same code runs on real robot"]
+    end
+
+    style DC fill:#e74c3c,stroke:#c0392b,color:#fff
+    style DC_GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style DC_JOINTS fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N1 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N2 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N3 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style WBCP fill:#2ecc71,stroke:#1e9650,color:#fff
+    style WBC_GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style WBC_GOAL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_INTERP fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_RL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_SAFE fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_REAL fill:#3dd87f,stroke:#2bb365,color:#fff
+</div></code></pre>
+<hr>
+<h2 id="4-our-dex1-modifications-to-the-wbc-pipeline">4. Our Dex1 Modifications to the WBC Pipeline</h2>
+<p>Our hospitality model was trained with <code>UNITREE_G1</code> embodiment on Dex1 data (1 DOF per hand), but NVIDIA's standard WBC pipeline uses Dex3 (7 DOF per hand). We parameterized the pipeline to support both.</p>
+<h3 id="what-changed">What Changed</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Change</th>
+<th>Files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Robot model</td>
+<td><code>hand_type=&quot;dex1&quot;</code> param, Dex1 URDF + meshes</td>
+<td><code>g1_supplemental_info.py</code>, <code>g1.py</code>, <code>g1_29dof_with_dex1.urdf</code></td>
+</tr>
+<tr>
+<td>DDS interface</td>
+<td>Dynamic topics <code>rt/dex1/*/cmd,state</code>, dof=2</td>
+<td><code>command_sender.py</code>, <code>state_processor.py</code></td>
+</tr>
+<tr>
+<td>Hand env</td>
+<td><code>G1Dex1Hand</code> class (2 prismatic DOF)</td>
+<td><code>g1_hand.py</code>, <code>g1_env.py</code></td>
+</tr>
+<tr>
+<td>RoboCasa sim</td>
+<td>Dex1 gripper MJCF + <code>G1Dex1</code> robot variant</td>
+<td><code>g1_dex1_hands.py</code>, <code>g1_robot.py</code>, MJCF XMLs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-did-not-change-auto-adapts">What Did NOT Change (Auto-Adapts)</h3>
+<ul>
+<li><code>G1DecoupledWholeBodyPolicy</code> — uses group indices from robot model, no hand-specific logic</li>
+<li><code>SyncEnv</code> — derives DOF counts from <code>RobotModel</code></li>
+<li><code>Gr00tObsActionConverter</code> — reads joint groups from <code>G1SupplementalInfo</code></li>
+<li>ONNX lower body policy — only controls legs+waist, hand-agnostic</li>
+</ul>
+<h3 id="dof-comparison">DOF Comparison</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Dex3 (standard)</th>
+<th>Dex1 (our model)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Body</strong></td>
+<td>29 DOF</td>
+<td>29 DOF</td>
+</tr>
+<tr>
+<td><strong>Left hand</strong></td>
+<td>7 DOF</td>
+<td>2 DOF</td>
+</tr>
+<tr>
+<td><strong>Right hand</strong></td>
+<td>7 DOF</td>
+<td>2 DOF</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>43 DOF</strong></td>
+<td><strong>33 DOF</strong></td>
+</tr>
+<tr>
+<td><strong>DDS hand topics</strong></td>
+<td><code>rt/dex3/*/</code></td>
+<td><code>rt/dex1/*/</code></td>
+</tr>
+<tr>
+<td><strong>URDF</strong></td>
+<td><code>g1_29dof_with_hand</code></td>
+<td><code>g1_29dof_with_dex1</code></td>
+</tr>
+<tr>
+<td><strong>Gym env</strong></td>
+<td><code>*_G1_gear_wbc</code></td>
+<td><code>*_G1Dex1_gear_wbc</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="5-running-inference">5. Running Inference</h2>
+<h3 id="direct-control-old">Direct Control (Old)</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># Terminal 1: GROOT server on Spark</span>
+python scripts/<span class="hljs-built_in">eval</span>/run_groot_server.py \
+    --model-path /path/to/checkpoint \
+    --embodiment-tag UNITREE_G1
+
+<span class="hljs-comment"># Terminal 2: Eval on workstation</span>
+python scripts/<span class="hljs-built_in">eval</span>/run_mujoco_towel_eval.py \
+    --groot-host 192.168.1.237 \
+    --groot-port 5555 \
+    --num-episodes 10
+</div></code></pre>
+<h3 id="wbc-pipeline-new-with-dex1">WBC Pipeline (New, with Dex1)</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># Terminal 1: GROOT server on Spark</span>
+python gr00t/<span class="hljs-built_in">eval</span>/run_gr00t_server.py \
+    --model-path /path/to/checkpoint \
+    --embodiment-tag UNITREE_G1 \
+    --use-sim-policy-wrapper
+
+<span class="hljs-comment"># Terminal 2: WBC eval on workstation</span>
+<span class="hljs-variable">$WBC_PY</span> gr00t/<span class="hljs-built_in">eval</span>/rollout_policy.py \
+    --n_episodes 5 \
+    --env_name gr00tlocomanip_g1_dex1_sim/LMPnPAppleToPlateDC_G1Dex1_gear_wbc \
+    --policy_client_host 192.168.1.237 \
+    --policy_client_port 5555 \
+    --n_action_steps 20
+</div></code></pre>
+
+</body>
+</html>

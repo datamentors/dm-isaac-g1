@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>GROOT_WBC_DEEP_DIVE.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid@10.3.1/dist/mermaid.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="gr00t-whole-body-control-wbc--deep-dive">GR00T Whole-Body Control (WBC) — Deep Dive</h1>
+<p>A comprehensive study of NVIDIA's <a href="https://github.com/NVlabs/GR00T-WholeBodyControl">GR00T-WholeBodyControl</a> repository: the architecture, every major component, how they interact, and where our Dex1 modifications fit in.</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-repository-overview">Repository Overview</a></li>
+<li><a href="#2-the-three-packages">The Three Packages</a></li>
+<li><a href="#3-decoupled_wbc--core-control-framework">decoupled_wbc — Core Control Framework</a></li>
+<li><a href="#4-gear_sonic--simulation--teleoperation">gear_sonic — Simulation &amp; Teleoperation</a></li>
+<li><a href="#5-gear_sonic_deploy--real-robot-c-stack">gear_sonic_deploy — Real Robot C++ Stack</a></li>
+<li><a href="#6-communication-architecture">Communication Architecture</a></li>
+<li><a href="#7-the-policy-system">The Policy System</a></li>
+<li><a href="#8-simulation-integration">Simulation Integration</a></li>
+<li><a href="#9-the-sonic-process">The SONIC Process</a></li>
+<li><a href="#10-our-dex1-modifications">Our Dex1 Modifications</a></li>
+<li><a href="#11-key-file-reference">Key File Reference</a></li>
+</ol>
+<hr>
+<h2 id="1-repository-overview">1. Repository Overview</h2>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph REPO["GR00T-WholeBodyControl Repository"]
+        direction TB
+        subgraph PKG1["decoupled_wbc/"]
+            D1["Core control framework\nPython, pip-installable\nPolicies, robot model, envs"]
+        end
+        subgraph PKG2["gear_sonic/"]
+            D2["Simulation & teleoperation\nPython, pip-installable\nMuJoCo bridge, VR teleop"]
+        end
+        subgraph PKG3["gear_sonic_deploy/"]
+            D3["Real robot deployment\nC++ with TensorRT\nJetson Orin, 500Hz control"]
+        end
+        subgraph EXT["external_dependencies/"]
+            D4["unitree_sdk2_python\nXRoboToolkit (PICO VR)"]
+        end
+        subgraph INST["install_scripts/"]
+            D5["install_pico.sh\ninstall_mujoco_sim.sh\ninstall_leap_sdk.sh"]
+        end
+    end
+
+    style PKG1 fill:#2ecc71,stroke:#1e9650,color:#fff
+    style PKG2 fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style PKG3 fill:#e07b39,stroke:#b35c1e,color:#fff
+    style EXT fill:#9b59b6,stroke:#7d3c98,color:#fff
+    style INST fill:#95a5a6,stroke:#7f8c8d,color:#fff
+    style REPO fill:#2c3e50,stroke:#1a252f,color:#fff
+</div></code></pre>
+<h3 id="what-lives-where">What Lives Where</h3>
+<table>
+<thead>
+<tr>
+<th>Directory</th>
+<th>Language</th>
+<th>Install</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decoupled_wbc/</code></td>
+<td>Python</td>
+<td><code>pip install -e decoupled_wbc/[full]</code></td>
+<td>Control policies, robot model, environments, RoboCasa integration</td>
+</tr>
+<tr>
+<td><code>gear_sonic/</code></td>
+<td>Python</td>
+<td><code>pip install -e gear_sonic/[sim]</code></td>
+<td>MuJoCo sim bridge, VR teleop, image streaming</td>
+</tr>
+<tr>
+<td><code>gear_sonic_deploy/</code></td>
+<td>C++</td>
+<td>CMake build</td>
+<td>Real-time control on Jetson/robot hardware</td>
+</tr>
+<tr>
+<td><code>external_dependencies/</code></td>
+<td>Mixed</td>
+<td>Vendored</td>
+<td>Unitree SDK2 Python + XRoboToolkit (PICO VR)</td>
+</tr>
+<tr>
+<td><code>install_scripts/</code></td>
+<td>Shell</td>
+<td>Run directly</td>
+<td>Environment setup (venvs, dependencies)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="key-design-principles">Key Design Principles</h3>
+<ol>
+<li><strong>Decoupled upper/lower body</strong> — GROOT controls arms+waist+hands; a separate RL policy controls legs for balance/locomotion</li>
+<li><strong>Hardware-agnostic interface</strong> — DDS (Unitree SDK2) is the universal transport; same code runs on real robot and in sim</li>
+<li><strong>Modular policies</strong> — Upper body (interpolation), lower body (ONNX RL), and whole-body (composition) are separate, swappable modules</li>
+<li><strong>Sim-to-real parity</strong> — MuJoCo simulation publishes the exact same DDS messages as the real robot</li>
+</ol>
+<hr>
+<h2 id="2-the-three-packages">2. The Three Packages</h2>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph TRAIN["Training (IsaacLab)"]
+        T1["RL policy training\nLower body balance/walk"]
+    end
+
+    subgraph DEC["decoupled_wbc (Python)"]
+        D1["Robot Model\n(Pinocchio)"]
+        D2["Policies\n(Interp + RL ONNX)"]
+        D3["G1Env\n(DDS I/O)"]
+        D4["RoboCasa\nIntegration"]
+    end
+
+    subgraph GS["gear_sonic (Python)"]
+        G1["MuJoCo Sim\n(base_sim.py)"]
+        G2["Unitree SDK2\nBridge"]
+        G3["Image\nStreaming"]
+        G4["VR Teleop\n(PICO)"]
+    end
+
+    subgraph GSD["gear_sonic_deploy (C++)"]
+        C1["TensorRT\nInference"]
+        C2["Real-time\nThreads"]
+        C3["DDS I/O\n(500 Hz)"]
+        C4["Jetson\nOrin"]
+    end
+
+    TRAIN -->|"ONNX models"| D2
+    TRAIN -->|"ONNX models"| C1
+    D3 <-->|"DDS"| G2
+    D2 --> D3
+    G1 <--> G2
+    GSD <-->|"DDS"| G2
+
+    style TRAIN fill:#f39c12,stroke:#d68910,color:#fff
+    style DEC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style GS fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style GSD fill:#e07b39,stroke:#b35c1e,color:#fff
+</div></code></pre>
+<h3 id="package-dependencies">Package Dependencies</h3>
+<pre class="hljs"><code><div>decoupled_wbc[full]:
+  numpy==1.26.4, scipy==1.15.3, torch
+  pinocchio (Pinocchio FK/IK), mujoco, onnxruntime
+  hydra-core, ray, pygame, pyrealsense2, lerobot
+
+gear_sonic[sim]:
+  numpy==1.26.4, scipy==1.15.3, torch
+  mujoco, tyro, pinocchio, pyyaml
+
+gear_sonic[teleop]:
+  pyzmq, msgpack, pinocchio, pyvista
+
+gear_sonic_deploy:
+  TensorRT, ONNX Runtime, CUDA Toolkit
+  Unitree SDK2 (C++), ROS2 Humble (optional)
+</div></code></pre>
+<hr>
+<h2 id="3-decoupledwbc--core-control-framework">3. decoupled_wbc — Core Control Framework</h2>
+<p>This is the heart of the system. It defines <strong>what</strong> the robot should do.</p>
+<h3 id="31-robot-model-controlrobotmodel">3.1 Robot Model (<code>control/robot_model/</code>)</h3>
+<p>The robot model is built on <strong>Pinocchio</strong> (rigid-body dynamics library) and provides FK, IK, Jacobians, and gravity compensation.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph RMODEL["RobotModel (Pinocchio-based)"]
+        direction TB
+        URDF["URDF Loading\ng1_29dof_with_hand.urdf (Dex3)\ng1_29dof_with_dex1.urdf (Dex1)"]
+        FK["Forward Kinematics\ncache_forward_kinematics(q)"]
+        IK["Inverse Kinematics\nframe_jacobian(frame, q)"]
+        GRAV["Gravity Compensation\ncompute_gravity_compensation_torques()"]
+        JOINTS["Joint Management\nget_joint_group_indices(groups)\nget_body_actuated_joints(q)"]
+    end
+
+    subgraph SUPP["G1SupplementalInfo"]
+        direction TB
+        GROUPS["Joint Groups\nlegs(12), waist(3), arms(14)\nhands(7×2 or 2×2)"]
+        LIMITS["Joint Limits\nper-joint min/max (rad or m)"]
+        DEFAULTS["Default Poses\nhigh_elbow / low_elbow"]
+        MAPPING["Joint Name Mapping\ngeneric ↔ robot-specific"]
+    end
+
+    URDF --> FK
+    FK --> IK
+    FK --> GRAV
+    SUPP --> RMODEL
+
+    style RMODEL fill:#2ecc71,stroke:#1e9650,color:#fff
+    style SUPP fill:#27ae60,stroke:#1a7a42,color:#fff
+</div></code></pre>
+<p><strong>Key classes:</strong></p>
+<ul>
+<li><strong><code>RobotModel</code></strong> — Wraps Pinocchio model. Loads URDF, provides FK (<code>cache_forward_kinematics</code>), frame poses (<code>frame_placement</code>), Jacobians (<code>frame_jacobian</code>), gravity compensation (<code>compute_gravity_compensation_torques</code>). Total DOF = 7 (floating base) + 29 (body) = 36.</li>
+<li><strong><code>ReducedRobotModel</code></strong> — Fixes certain joints to create lower-DOF models for constrained IK.</li>
+<li><strong><code>G1SupplementalInfo</code></strong> — Encodes everything not in the URDF: joint groups (hierarchical), joint limits, default poses, hand frame names, waist location mode.</li>
+<li><strong><code>instantiate_g1_robot_model()</code></strong> — Factory function in <code>instantiation/g1.py</code> that wires everything together.</li>
+</ul>
+<p><strong>Joint group hierarchy:</strong></p>
+<pre class="hljs"><code><div>body (29 DOF)
+├── legs (12)
+│   ├── left_leg (6): hip_pitch/roll/yaw, knee, ankle_pitch/roll
+│   └── right_leg (6): same
+├── waist (3): yaw, roll, pitch
+└── arms (14)
+    ├── left_arm (7): shoulder_p/r/y, elbow, wrist_r/p/y
+    └── right_arm (7): same
+
+hands (variable)
+├── left_hand: 7 DOF (Dex3) or 2 DOF (Dex1)
+└── right_hand: 7 DOF (Dex3) or 2 DOF (Dex1)
+
+Composite groups:
+  upper_body = arms + hands
+  lower_body = legs + waist (configurable)
+</div></code></pre>
+<p><strong>Waist location modes</strong> (critical for control split):</p>
+<ul>
+<li><code>LOWER_BODY</code> (default) — waist controlled by RL leg policy</li>
+<li><code>UPPER_BODY</code> — waist controlled by interpolation/IK with arms</li>
+<li><code>LOWER_AND_UPPER_BODY</code> — both policies claim waist (lower overwrites)</li>
+</ul>
+<h3 id="32-environment-system-controlenvsg1">3.2 Environment System (<code>control/envs/g1/</code>)</h3>
+<p>The environment is the robot's interface to hardware or simulation.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph G1ENV["G1Env (HumanoidEnv)"]
+        direction TB
+        BODY["G1Body\n29 DOF body actuators"]
+        HANDS["Hands Container\nleft + right"]
+        SIM["Simulator\n(MuJoCo or RoboCasa)"]
+        SAFETY["JointSafetyMonitor\nvelocity limits + ramp"]
+        ROS["ROS Manager\npublish/subscribe"]
+    end
+
+    subgraph BODY_DETAIL["G1Body Internals"]
+        BSP["BodyStateProcessor\nSubscribes rt/lowstate\n→ 148-dim state vector"]
+        BCS["BodyCommandSender\nPublishes rt/lowcmd\n→ 29 motor targets"]
+    end
+
+    subgraph HAND_DETAIL["Hand Internals"]
+        HSP["HandStateProcessor\nSubscribes rt/dex*/*/state"]
+        HCS["HandCommandSender\nPublishes rt/dex*/*/cmd"]
+    end
+
+    BODY --> BSP
+    BODY --> BCS
+    HANDS --> HSP
+    HANDS --> HCS
+
+    style G1ENV fill:#2ecc71,stroke:#1e9650,color:#fff
+    style BODY_DETAIL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style HAND_DETAIL fill:#3dd87f,stroke:#2bb365,color:#fff
+</div></code></pre>
+<p><strong>G1Env</strong> — Main environment class. Composes:</p>
+<ul>
+<li><code>G1Body</code> — manages 29 body joints via DDS</li>
+<li><code>G1Dex1Hand</code> or <code>G1ThreeFingerHand</code> — manages hand joints via DDS</li>
+<li><code>JointSafetyMonitor</code> — enforces velocity limits (arms: 6 rad/s, hands: 50 rad/s) with 2-second startup ramp</li>
+<li>Simulator (optional, for sim mode)</li>
+<li>ROS2 node (for bridge communication)</li>
+</ul>
+<p><strong>Key methods:</strong></p>
+<ul>
+<li><code>observe()</code> → returns <code>{q, dq, ddq, tau_est, floating_base_pose, floating_base_vel, wrist_pose, ...}</code></li>
+<li><code>queue_action(action_dict)</code> → maps from joint order to actuator order, sends via DDS</li>
+<li><code>get_eef_obs()</code> → FK-based wrist pose computation</li>
+</ul>
+<p><strong>State vector from real robot (148 dims):</strong></p>
+<pre class="hljs"><code><div>Position:  [x,y,z, qw,qx,qy,qz, q0..q28]     (7 + 29 = 36)
+Velocity:  [vx,vy,vz, wx,wy,wz, dq0..dq28]    (6 + 29 = 35)
+Torque:    [_, _, _, _, _, _, tau0..tau28]       (6 + 29 = 35)
+Accel:     [ax,ay,az, _, _, _, ddq0..ddq28]     (6 + 29 = 35)
+IMU:       [torso_qw,qx,qy,qz, wx,wy,wz]       (7)
+                                            Total: 148
+</div></code></pre>
+<h3 id="33-dds-interface-controlenvsg1utils">3.3 DDS Interface (<code>control/envs/g1/utils/</code>)</h3>
+<p><strong>BodyStateProcessor</strong> — subscribes to <code>rt/lowstate</code> (LowState_hg message type). Reads motor_state[i].{q, dq, tau_est} for all 29 body motors. Also reads <code>rt/secondary_imu</code> for torso quaternion/angular velocity. Outputs the 148-dim state vector.</p>
+<p><strong>BodyCommandSender</strong> — publishes to <code>rt/lowcmd</code> (LowCmd_hg). Sets motor_cmd[motor_index].{q, dq, tau, kp, kd, mode} for each motor. Uses <code>JOINT2MOTOR</code> mapping to convert from joint order to actuator order (they differ on the real robot).</p>
+<p><strong>HandStateProcessor</strong> — subscribes to <code>rt/dex3/{left,right}/state</code> or <code>rt/dex1/{left,right}/state</code>. Reads hand motor states.</p>
+<p><strong>HandCommandSender</strong> — publishes to <code>rt/dex3/{side}/cmd</code> or <code>rt/dex1/{side}/cmd</code>. Sets hand motor targets with appropriate mode bitfield.</p>
+<h3 id="34-joint-safety-monitor-controlenvsg1utilsjointsafetypy">3.4 Joint Safety Monitor (<code>control/envs/g1/utils/joint_safety.py</code>)</h3>
+<p>Enforces per-joint velocity limits to prevent damage:</p>
+<table>
+<thead>
+<tr>
+<th>Joint Group</th>
+<th>Velocity Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arms</td>
+<td>6.0 rad/s</td>
+</tr>
+<tr>
+<td>Hands</td>
+<td>50.0 rad/s</td>
+</tr>
+<tr>
+<td>Legs</td>
+<td>Not monitored (RL handles)</td>
+</tr>
+</tbody>
+</table>
+<p>Features:</p>
+<ul>
+<li><strong>Startup ramp</strong> — 2-second linear ramp from 0 to full velocity limit, prevents jerky starts</li>
+<li><strong>Action clamping</strong> — if commanded velocity exceeds limit, clamp the target position</li>
+<li>Optional Rerun visualization for debugging</li>
+</ul>
+<hr>
+<h2 id="4-gearsonic--simulation--teleoperation">4. gear_sonic — Simulation &amp; Teleoperation</h2>
+<p>This package provides the MuJoCo simulation environment and VR teleoperation stack.</p>
+<h3 id="41-what-is-%22sonic%22">4.1 What is &quot;SONIC&quot;?</h3>
+<p><strong>SONIC</strong> is NVIDIA's whole-body control foundation model — a unified policy trained on large-scale human motion data for natural locomotion and manipulation. The name appears in configurations as <code>sonic_model12</code> (the 12th iteration).</p>
+<p>Key capabilities:</p>
+<ul>
+<li>Single unified policy for walking, turning, height control, manipulation</li>
+<li>Real-time VR teleoperation (PICO VR headset)</li>
+<li>Kinematic planner for motion generation</li>
+<li>Supports G1 with 29 body DOF + 14 hand DOF (Dex3) or 4 hand DOF (Dex1)</li>
+</ul>
+<h3 id="42-mujoco-simulation-engine">4.2 MuJoCo Simulation Engine</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph SIM_ENGINE["MuJoCo Simulation Engine"]
+        direction TB
+        subgraph DEFAULT_ENV["DefaultEnv"]
+            MJ["MuJoCo Model/Data\n(scene_43dof.xml)"]
+            PHYS["Physics Step\n200 Hz (4 substeps at 50 Hz control)"]
+            PD["PD Torque Computation\ntau = tau_ff + kp*(q_des-q) + kd*(dq_des-dq)"]
+            OBS["Observation Preparation\nfloating_base, body_q/dq/ddq, hand_q/dq, IMU"]
+            FALL["Fall Detection\nheight < 0.2m → reset"]
+        end
+
+        subgraph BRIDGE["UnitreeSdk2Bridge"]
+            PUB["Publishers (Sim → WBC)\nrt/lowstate (29 body motors)\nrt/odostate (odometry)\nrt/secondary_imu (torso)\nrt/dex3/*/state (hands)"]
+            SUB["Subscribers (WBC → Sim)\nrt/lowcmd (body commands)\nrt/dex3/*/cmd (hand commands)"]
+        end
+
+        subgraph IMG["Image Streaming"]
+            RENDER["MuJoCo Renderer\n(offscreen)"]
+            SHM["Shared Memory\n(zero-copy transfer)"]
+            ZMQ_PUB["ZMQ PUB Socket\n(JPEG compressed)"]
+        end
+    end
+
+    OBS --> PUB
+    SUB --> PD
+    PD --> PHYS
+    PHYS --> OBS
+    RENDER --> SHM --> ZMQ_PUB
+
+    style SIM_ENGINE fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style DEFAULT_ENV fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style BRIDGE fill:#3498db,stroke:#2980b9,color:#fff
+    style IMG fill:#5dade2,stroke:#3498db,color:#fff
+</div></code></pre>
+<p><strong>DefaultEnv</strong> — The core MuJoCo environment:</p>
+<ul>
+<li>Loads <code>scene_43dof.xml</code> (G1 + scene)</li>
+<li>Steps physics at 200 Hz (4 substeps per 50 Hz control tick)</li>
+<li>Computes PD torques: <code>tau = tau_ff + kp*(q_des - q) + kd*(dq_des - dq)</code></li>
+<li>Detects falls (robot height &lt; 0.2m)</li>
+<li>Prepares observations from MuJoCo state</li>
+</ul>
+<p><strong>UnitreeSdk2Bridge</strong> — The key abstraction that makes sim-to-real possible:</p>
+<ul>
+<li><strong>Publishers</strong> (sim → WBC policy):
+<ul>
+<li><code>rt/lowstate</code> → 29 body motor states (q, dq, ddq, tau_est)</li>
+<li><code>rt/odostate</code> → floating base position/velocity/orientation</li>
+<li><code>rt/secondary_imu</code> → torso IMU (quaternion + angular velocity)</li>
+<li><code>rt/dex3/{left,right}/state</code> → hand motor states</li>
+</ul>
+</li>
+<li><strong>Subscribers</strong> (WBC policy → sim):
+<ul>
+<li><code>rt/lowcmd</code> → 29 body motor commands (q_des, dq_des, tau_ff, kp, kd)</li>
+<li><code>rt/dex3/{left,right}/cmd</code> → hand motor commands</li>
+</ul>
+</li>
+</ul>
+<p><strong>Image streaming</strong> — Runs in a separate subprocess to avoid blocking the sim:</p>
+<ol>
+<li>MuJoCo offscreen renderer captures camera images</li>
+<li>Images transferred via shared memory (zero-copy)</li>
+<li>JPEG-compressed and broadcast via ZMQ PUB socket</li>
+<li>Bridge or external systems subscribe to receive</li>
+</ol>
+<h3 id="43-configuration">4.3 Configuration</h3>
+<p><strong>SimLoopConfig (dataclass):</strong></p>
+<pre class="hljs"><code><div>wbc_version: <span class="hljs-string">"sonic_model12"</span>
+interface: <span class="hljs-string">"sim"</span>         <span class="hljs-comment"># or "real", "lo"</span>
+simulator: <span class="hljs-string">"mujoco"</span>
+sim_frequency: <span class="hljs-number">200</span>       <span class="hljs-comment"># Hz (physics)</span>
+control_frequency: <span class="hljs-number">50</span>    <span class="hljs-comment"># Hz (policy)</span>
+enable_waist: <span class="hljs-literal">True</span>
+with_hands: <span class="hljs-literal">True</span>
+enable_offscreen: <span class="hljs-literal">False</span>  <span class="hljs-comment"># camera rendering</span>
+enable_natural_walk: <span class="hljs-literal">False</span>
+</div></code></pre>
+<p><strong>WBC YAML</strong> (<code>g1_29dof_sonic_model12.yaml</code>):</p>
+<ul>
+<li>Robot type, scene XML path</li>
+<li>Per-motor PD gains (kp, kd)</li>
+<li>Motor velocity/effort limits</li>
+<li>Observation dimensions and scales</li>
+<li>History length (4 frames for temporal context)</li>
+</ul>
+<h3 id="44-vr-teleoperation">4.4 VR Teleoperation</h3>
+<p><strong>pico_manager_thread_server.py</strong> — Receives body tracking from PICO VR headset:</p>
+<ol>
+<li>PICO headset → SMPL human pose (body + hands)</li>
+<li>Server converts human pose → G1 joint angles via IK</li>
+<li>Publishes targets via ZMQ for WBC to interpolate toward</li>
+<li>Optional visualization with pyvista</li>
+</ol>
+<hr>
+<h2 id="5-gearsonicdeploy--real-robot-c-stack">5. gear_sonic_deploy — Real Robot C++ Stack</h2>
+<p>Production-grade C++ application for deploying policies on the actual robot hardware.</p>
+<h3 id="51-architecture">5.1 Architecture</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph DEPLOY["gear_sonic_deploy (C++ on Jetson Orin)"]
+        direction TB
+        subgraph THREADS["Four Real-Time Threads"]
+            INPUT["Input Thread\n100 Hz\nKeyboard / Gamepad / ZMQ / ROS2"]
+            CONTROL["Control Thread\n50 Hz\nObservation → TensorRT → Actions"]
+            PLANNER["Planner Thread\n10 Hz\nLocomotion trajectory planning"]
+            CMD["Command Writer\n500 Hz\nDDS motor command publishing"]
+        end
+
+        subgraph INFERENCE["TensorRT Inference"]
+            ENC["Encoder\n(model_encoder.onnx)"]
+            DEC["Decoder / Policy\n(model_decoder.onnx)"]
+            PLAN_ONNX["Planner\n(planner_sonic.onnx)"]
+        end
+
+        subgraph STATE["State Machine"]
+            S1["INIT\nRamp to default (3s)"]
+            S2["WAIT_FOR_CONTROL\nRobot ready"]
+            S3["CONTROL\nActive policy"]
+            S1 --> S2 --> S3
+        end
+    end
+
+    subgraph ROBOT["Physical G1 Robot"]
+        MOTORS["29 Body Motors\n+ 14 Hand Motors"]
+        SENSORS["IMU + Joint Encoders"]
+    end
+
+    CMD -- "DDS (rt/lowcmd)\n500 Hz" --> MOTORS
+    SENSORS -- "DDS (rt/lowstate)\n100 Hz" --> CONTROL
+
+    style DEPLOY fill:#e07b39,stroke:#b35c1e,color:#fff
+    style THREADS fill:#c96830,stroke:#a04f18,color:#fff
+    style INFERENCE fill:#f5a623,stroke:#d48b0f,color:#fff
+    style STATE fill:#d4944d,stroke:#b37530,color:#fff
+    style ROBOT fill:#95a5a6,stroke:#7f8c8d,color:#fff
+</div></code></pre>
+<h3 id="52-key-differences-from-python-stack">5.2 Key Differences from Python Stack</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>decoupled_wbc (Python)</th>
+<th>gear_sonic_deploy (C++)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Language</strong></td>
+<td>Python</td>
+<td>C++ (C++20)</td>
+</tr>
+<tr>
+<td><strong>Inference</strong></td>
+<td>ONNX Runtime (CPU)</td>
+<td>TensorRT (GPU, FP16, CUDA graphs)</td>
+</tr>
+<tr>
+<td><strong>Latency</strong></td>
+<td>~10-20ms</td>
+<td>&lt;1ms (CUDA graph captured)</td>
+</tr>
+<tr>
+<td><strong>Threads</strong></td>
+<td>Single loop at 50 Hz</td>
+<td>4 threads: 100/50/10/500 Hz</td>
+</tr>
+<tr>
+<td><strong>Target</strong></td>
+<td>Workstation</td>
+<td>Jetson Orin (on-robot)</td>
+</tr>
+<tr>
+<td><strong>CRC</strong></td>
+<td>No validation</td>
+<td>CRC validation on real hardware</td>
+</tr>
+<tr>
+<td><strong>Safety</strong></td>
+<td>Joint velocity limits</td>
+<td>+ CRC + emergency stop + state machine</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-input--output-interfaces">5.3 Input &amp; Output Interfaces</h3>
+<p><strong>Input interfaces</strong> (pluggable via <code>--input-type</code>):</p>
+<ul>
+<li><code>keyboard</code> — terminal keyboard control</li>
+<li><code>gamepad</code> — Xbox/gamepad</li>
+<li><code>zmq_manager</code> — network ZMQ server (for external control)</li>
+<li><code>ros2</code> — ROS2 topic subscription (<code>ControlPolicy/upper_body_pose</code>)</li>
+<li><code>manager</code> — intelligent fallback (gamepad → keyboard)</li>
+</ul>
+<p><strong>Output interfaces</strong> (via <code>--output-type</code>):</p>
+<ul>
+<li><code>zmq</code> — state broadcast over network</li>
+<li><code>ros2</code> — state broadcast via ROS2 (<code>G1Env/env_state_act</code>)</li>
+<li><code>all</code> — both simultaneously</li>
+</ul>
+<h3 id="54-deployment-flow">5.4 Deployment Flow</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># 1. Build</span>
+<span class="hljs-built_in">cd</span> gear_sonic_deploy &amp;&amp; ./deploy.sh
+
+<span class="hljs-comment"># 2. Run in simulation</span>
+./deploy.sh sim     <span class="hljs-comment"># Uses loopback interface (lo0)</span>
+
+<span class="hljs-comment"># 3. Run on real robot</span>
+./deploy.sh real    <span class="hljs-comment"># Auto-detects 192.168.123.x interface</span>
+</div></code></pre>
+<p>The <code>deploy.sh</code> script handles: TensorRT check, model file verification, system deps, environment setup, CMake build, and launches the executable with appropriate arguments.</p>
+<hr>
+<h2 id="6-communication-architecture">6. Communication Architecture</h2>
+<p>The entire system is built on three communication protocols, each serving a different purpose.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    subgraph PROTO["Communication Protocols"]
+        direction TB
+        subgraph DDS_LAYER["DDS (Unitree SDK2)"]
+            DDS_DESC["Real-time motor control\n< 1ms latency\nUsed between: Sim ↔ WBC, Robot ↔ WBC"]
+        end
+        subgraph ROS2_LAYER["ROS2 (msgpack over topics)"]
+            ROS_DESC["Goal commands & state broadcast\n~20ms latency\nUsed between: Bridge ↔ WBC Control Loop"]
+        end
+        subgraph ZMQ_LAYER["ZMQ (REQ/REP + PUB/SUB)"]
+            ZMQ_DESC["Policy inference & image streaming\n~50ms latency\nUsed between: Bridge ↔ GROOT Server"]
+        end
+    end
+
+    style DDS_LAYER fill:#e74c3c,stroke:#c0392b,color:#fff
+    style ROS2_LAYER fill:#3498db,stroke:#2980b9,color:#fff
+    style ZMQ_LAYER fill:#f39c12,stroke:#d68910,color:#fff
+</div></code></pre>
+<h3 id="61-dds-topics-unitree-sdk2">6.1 DDS Topics (Unitree SDK2)</h3>
+<p>The DDS layer provides the real-time motor-level interface. These are the same topics whether talking to a real robot or a MuJoCo simulation.</p>
+<p><strong>State topics (robot/sim → WBC):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Message Type</th>
+<th>Content</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rt/lowstate</code></td>
+<td><code>LowState_</code></td>
+<td>29 body motor states (q, dq, ddq, tau_est) + pelvis IMU</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/odostate</code></td>
+<td><code>OdoState_</code></td>
+<td>Floating base position/velocity (sim only)</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/secondary_imu</code></td>
+<td><code>IMUState_</code></td>
+<td>Torso IMU quaternion + angular velocity</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/dex3/{left,right}/state</code></td>
+<td><code>HandState_</code></td>
+<td>7 hand motor states per hand</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/dex1/{left,right}/state</code></td>
+<td><code>HandState_</code></td>
+<td>2 hand motor states per hand (our Dex1)</td>
+<td>500 Hz</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Command topics (WBC → robot/sim):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Message Type</th>
+<th>Content</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rt/lowcmd</code></td>
+<td><code>LowCmd_</code></td>
+<td>29 body motor targets (q, dq, tau, kp, kd)</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/dex3/{left,right}/cmd</code></td>
+<td><code>HandCmd_</code></td>
+<td>7 hand motor targets per hand</td>
+<td>500 Hz</td>
+</tr>
+<tr>
+<td><code>rt/dex1/{left,right}/cmd</code></td>
+<td><code>HandCmd_</code></td>
+<td>2 hand motor targets per hand (our Dex1)</td>
+<td>500 Hz</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62-ros2-topics-bridge-%E2%86%94-wbc">6.2 ROS2 Topics (Bridge ↔ WBC)</h3>
+<p>The ROS2 layer carries higher-level goal commands and assembled state between the WBC control loop and the bridge.</p>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Direction</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>G1Env/env_state_act</code></td>
+<td>WBC → Bridge</td>
+<td>Assembled whole-body state: q[43], dq[43], wrist_pose[14], action[43]</td>
+</tr>
+<tr>
+<td><code>ControlPolicy/upper_body_pose</code></td>
+<td>Bridge → WBC</td>
+<td>Target: upper_body_pose[17], target_time, navigate_cmd[3], base_height</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63-zmq-bridge-%E2%86%94-groot-server">6.3 ZMQ (Bridge ↔ GROOT Server)</h3>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Direction</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REQ/REP</td>
+<td>Bridge → GROOT → Bridge</td>
+<td>Observation dict in, 30-step action trajectory out</td>
+</tr>
+<tr>
+<td>PUB/SUB</td>
+<td>Sim → Bridge (images)</td>
+<td>Camera images (JPEG compressed, base64)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="7-the-policy-system">7. The Policy System</h2>
+<p>The core innovation: <strong>upper body and lower body are controlled by completely different policies</strong>, composed at runtime.</p>
+<h3 id="71-policy-hierarchy">7.1 Policy Hierarchy</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph COMPOSED["G1DecoupledWholeBodyPolicy"]
+        direction TB
+        subgraph UPPER["Upper Body: InterpolationPolicy"]
+            U_IN["Input: target_upper_body_pose[17]\n(waist[3] + left_arm[7] + right_arm[7])\n+ base_height_command, navigate_cmd"]
+            U_INTERP["scipy.interpolate.interp1d\nLinear interpolation with\nmax velocity constraints"]
+            U_OUT["Output: arms[14] + waist[3]\n(absolute joint targets)"]
+            U_IN --> U_INTERP --> U_OUT
+        end
+        subgraph LOWER["Lower Body: G1GearWbcPolicy (ONNX RL)"]
+            L_IN["Input: 86-dim observation\ncmd, height, rpy, omega, gravity,\nq, dq, last_action, clock"]
+            L_HIST["History: 6 frames stacked\n→ 516-dim (or 570-dim)"]
+            L_ONNX["ONNX Runtime Inference\npolicy_1 (balance) or policy_2 (walk)"]
+            L_OUT["Output: 15 joints\n12 legs + 3 waist"]
+            L_IN --> L_HIST --> L_ONNX --> L_OUT
+        end
+        MERGE["Assembly: q[full]\nupper_body[arms+hands] + lower_body[legs+waist]\n(lower body overwrites waist if both claim it)"]
+        U_OUT --> MERGE
+        L_OUT --> MERGE
+    end
+
+    style COMPOSED fill:#2c3e50,stroke:#1a252f,color:#fff
+    style UPPER fill:#3498db,stroke:#2980b9,color:#fff
+    style LOWER fill:#e74c3c,stroke:#c0392b,color:#fff
+    style MERGE fill:#2ecc71,stroke:#1e9650,color:#fff
+</div></code></pre>
+<h3 id="72-interpolationpolicy-upper-body">7.2 InterpolationPolicy (Upper Body)</h3>
+<p><strong>Purpose:</strong> Smoothly interpolate upper body joints toward targets received from the bridge (which come from GROOT inference).</p>
+<p><strong>Core class: <code>PoseTrajectoryInterpolator</code></strong></p>
+<ul>
+<li>Uses <code>scipy.interpolate.interp1d</code> for linear interpolation</li>
+<li>Enforces maximum change rate (velocity limit) when scheduling waypoints</li>
+<li>Garbage-collects old waypoints to prevent unbounded memory growth</li>
+</ul>
+<p><strong>Input (from bridge via ROS2):</strong></p>
+<pre class="hljs"><code><div>goal = {
+    <span class="hljs-string">"target_upper_body_pose"</span>: [<span class="hljs-number">17</span> floats],  <span class="hljs-comment"># waist(3) + left_arm(7) + right_arm(7)</span>
+    <span class="hljs-string">"target_time"</span>: float,                    <span class="hljs-comment"># when to reach this pose</span>
+    <span class="hljs-string">"base_height_command"</span>: [<span class="hljs-number">1</span> float],        <span class="hljs-comment"># robot base height (default 0.74m)</span>
+    <span class="hljs-string">"navigate_cmd"</span>: [<span class="hljs-number">3</span> floats],              <span class="hljs-comment"># [vx, vy, omega]</span>
+}
+</div></code></pre>
+<p><strong>Output (at each control tick):</strong></p>
+<pre class="hljs"><code><div>action = {
+    <span class="hljs-string">"target_upper_body_pose"</span>: [<span class="hljs-number">17</span> floats],   <span class="hljs-comment"># interpolated to current time</span>
+    <span class="hljs-string">"base_height_command"</span>: [<span class="hljs-number">1</span> float],
+    <span class="hljs-string">"navigate_cmd"</span>: [<span class="hljs-number">3</span> floats],
+}
+</div></code></pre>
+<h3 id="73-g1gearwbcpolicy-lower-body-rl">7.3 G1GearWbcPolicy (Lower Body RL)</h3>
+<p><strong>Purpose:</strong> Control legs for balance (standing) and locomotion (walking) using RL policies trained in IsaacLab.</p>
+<p><strong>Two ONNX models:</strong></p>
+<ul>
+<li><code>Balance.onnx</code> — used when <code>||navigate_cmd|| &lt; 0.05</code> (standing still)</li>
+<li><code>Walk.onnx</code> — used when <code>||navigate_cmd|| &gt;= 0.05</code> (moving)</li>
+</ul>
+<p><strong>Observation construction (86 dims per frame):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Dims</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cmd × cmd_scale</td>
+<td>3</td>
+<td>Navigate command [vx, vy, omega]</td>
+</tr>
+<tr>
+<td>base_height</td>
+<td>1</td>
+<td>Robot height</td>
+</tr>
+<tr>
+<td>omega × ang_vel_scale</td>
+<td>3</td>
+<td>Angular velocity (from IMU)</td>
+</tr>
+<tr>
+<td>gravity_direction</td>
+<td>3</td>
+<td>Projected gravity in body frame</td>
+</tr>
+<tr>
+<td>(q - defaults) × dof_pos_scale</td>
+<td>15</td>
+<td>Joint position offsets</td>
+</tr>
+<tr>
+<td>dq × dof_vel_scale</td>
+<td>15</td>
+<td>Joint velocities</td>
+</tr>
+<tr>
+<td>last_action</td>
+<td>15</td>
+<td>Previous action output</td>
+</tr>
+<tr>
+<td>clock_inputs</td>
+<td>4</td>
+<td>Gait phase (sin/cos at freq_cmd)</td>
+</tr>
+<tr>
+<td><strong>Total per frame</strong></td>
+<td><strong>86</strong></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>× 6 history frames</strong></td>
+<td><strong>516</strong></td>
+<td>(or 570 with additional features)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Action output:</strong></p>
+<pre class="hljs"><code><div>action = default_angles + raw_output * action_scale  <span class="hljs-comment"># 15 dims: 12 legs + 3 waist</span>
+</div></code></pre>
+<p><strong>Keyboard control (for manual testing):</strong></p>
+<ul>
+<li><code>w/s</code>: forward/backward, <code>a/d</code>: strafe, <code>q/e</code>: rotate</li>
+<li><code>1/2</code>: height up/down, <code>3-8</code>: roll/pitch/yaw</li>
+<li><code>]/o</code>: toggle policy on/off</li>
+</ul>
+<h3 id="74-g1decoupledwholebodypolicy-composition">7.4 G1DecoupledWholeBodyPolicy (Composition)</h3>
+<p><strong>Purpose:</strong> Merge upper and lower body actions into a single whole-body command.</p>
+<p><strong>Control flow:</strong></p>
+<pre class="hljs"><code><div>1. set_observation(obs)     → only passes to lower body policy
+2. set_goal(goal)           → splits into upper/lower goals:
+   - Upper: target_upper_body_pose, base_height, target_time
+   - Lower: toggle_stand_command, toggle_policy_action
+3. get_action(time):
+   a. upper_action = interpolation_policy.get_action(time)
+   b. Extract arm positions + base height + torso RPY (via FK)
+   c. lower_action = gear_wbc_policy.get_action(arms, height, rpy, cmd)
+   d. Merge: q[upper_indices] = upper, q[lower_indices] = lower
+   e. Return full q[43]
+</div></code></pre>
+<p><strong>Safety timeout:</strong> If no new goal received for 1 second (in teleop mode), resets to safe default pose.</p>
+<h3 id="75-policy-factory">7.5 Policy Factory</h3>
+<pre class="hljs"><code><div>get_wbc_policy(
+    robot_type=<span class="hljs-string">"g1"</span>,
+    robot_model=RobotModel,
+    wbc_config=config_dict,
+    init_time=time.monotonic()
+) → G1DecoupledWholeBodyPolicy
+</div></code></pre>
+<p>Creates the composed policy with appropriate upper (InterpolationPolicy) and lower (G1GearWbcPolicy) sub-policies based on configuration.</p>
+<hr>
+<h2 id="8-simulation-integration">8. Simulation Integration</h2>
+<h3 id="81-mujoco-simulation">8.1 MuJoCo Simulation</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph SIM_FLOW["Simulation Flow (200 Hz physics, 50 Hz control)"]
+        direction TB
+        STEP1["1. MuJoCo state → prepare_obs()"]
+        STEP2["2. PublishLowState(obs) via DDS"]
+        STEP3["3. WBC reads state, runs policy"]
+        STEP4["4. WBC publishes commands via DDS"]
+        STEP5["5. GetAction() reads commands"]
+        STEP6["6. compute_body_torques()\ntau = tau_ff + kp*(q_des-q) + kd*(dq_des-dq)"]
+        STEP7["7. mj_step() × 4 substeps"]
+        STEP8["8. Fall detection\n(height < 0.2m → reset)"]
+
+        STEP1 --> STEP2 --> STEP3 --> STEP4 --> STEP5 --> STEP6 --> STEP7 --> STEP8
+        STEP8 -.->|"next tick"| STEP1
+    end
+
+    style SIM_FLOW fill:#4a90d9,stroke:#2c5f8a,color:#fff
+</div></code></pre>
+<p><strong>Key: The simulation appears identical to the real robot</strong> from the WBC policy's perspective. It publishes the same DDS messages, subscribes to the same command topics. The WBC policy code doesn't know (or care) whether it's talking to a real robot or MuJoCo.</p>
+<h3 id="82-robocasa-integration">8.2 RoboCasa Integration</h3>
+<p>RoboCasa provides realistic manipulation environments (kitchens, tables, etc.) with rich object interactions.</p>
+<p><strong>Key classes:</strong></p>
+<ul>
+<li><code>Gr00tObsActionConverter</code> — converts between WBC joint order and RoboCasa/Robosuite joint order</li>
+<li><code>SyncEnv</code> — wraps RoboCasa environment with the WBC whole-body interface</li>
+<li>Handles action dict splitting: body joints → body part, gripper joints → gripper part</li>
+</ul>
+<p><strong>Environment naming convention:</strong></p>
+<pre class="hljs"><code><div>gr00tlocomanip_g1_sim/LMPnPAppleToPlateDC_G1_gear_wbc         (Dex3)
+gr00tlocomanip_g1_dex1_sim/LMPnPAppleToPlateDC_G1Dex1_gear_wbc (Dex1)
+</div></code></pre>
+<h3 id="83-simulatorfactory">8.3 SimulatorFactory</h3>
+<p>Creates the appropriate simulator based on config:</p>
+<pre class="hljs"><code><div>SimulatorFactory.create_simulator(config) → BaseSimulator <span class="hljs-keyword">or</span> RoboCasaG1EnvServer
+SimulatorFactory.start_simulator(sim)     → spawns threads/subprocesses
+</div></code></pre>
+<hr>
+<h2 id="9-the-sonic-process">9. The SONIC Process</h2>
+<p>SONIC (whole-body control foundation model) is the latest evolution of NVIDIA's WBC system. Here's how the complete SONIC process works end-to-end:</p>
+<h3 id="91-complete-system-flow">9.1 Complete System Flow</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph OPERATOR["Operator Input"]
+        VR["PICO VR Headset\n(body tracking)"]
+        KB["Keyboard/Gamepad"]
+        GROOT_S["GROOT Policy Server\n(inference)"]
+    end
+
+    subgraph BRIDGE_PROC["Bridge Process"]
+        direction TB
+        B_READ["Read env_state_act\n(from WBC via ROS2)"]
+        B_CAM["Read camera stream\n(from sim via ZMQ)"]
+        B_BUILD["Build GROOT observation\n(video + state + annotation)"]
+        B_QUERY["Query GROOT server\n(ZMQ REQ/REP)"]
+        B_EXTRACT["Extract upper body goal\nfrom 30-step trajectory"]
+        B_PUBLISH["Publish goal\n(ROS2: ControlPolicy/upper_body_pose)"]
+        B_READ --> B_BUILD
+        B_CAM --> B_BUILD
+        B_BUILD --> B_QUERY --> B_EXTRACT --> B_PUBLISH
+    end
+
+    subgraph WBC_PROC["WBC Control Loop (50 Hz)"]
+        direction TB
+        W_STATE["Read robot state\n(DDS: rt/lowstate + rt/dex*/*)"]
+        W_GOAL["Read goal\n(ROS2: ControlPolicy/upper_body_pose)"]
+        W_UPPER["InterpolationPolicy\n(upper body → smooth interpolation)"]
+        W_LOWER["G1GearWbcPolicy\n(lower body → ONNX RL balance/walk)"]
+        W_MERGE["Merge → full q[43]"]
+        W_CMD["Publish commands\n(DDS: rt/lowcmd + rt/dex*/*)"]
+        W_PUB["Publish state\n(ROS2: G1Env/env_state_act)"]
+
+        W_STATE --> W_UPPER
+        W_STATE --> W_LOWER
+        W_GOAL --> W_UPPER
+        W_GOAL --> W_LOWER
+        W_UPPER --> W_MERGE
+        W_LOWER --> W_MERGE
+        W_MERGE --> W_CMD
+        W_MERGE --> W_PUB
+    end
+
+    subgraph SIM_PROC["Simulation / Real Robot"]
+        PHYSICS["MuJoCo physics\nor real motor controllers"]
+    end
+
+    GROOT_S <-- "ZMQ" --> B_QUERY
+    VR --> B_BUILD
+    KB --> W_LOWER
+    B_PUBLISH -- "ROS2" --> W_GOAL
+    W_PUB -- "ROS2" --> B_READ
+    W_CMD -- "DDS" --> PHYSICS
+    PHYSICS -- "DDS" --> W_STATE
+
+    style OPERATOR fill:#f39c12,stroke:#d68910,color:#fff
+    style BRIDGE_PROC fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style WBC_PROC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style SIM_PROC fill:#4a90d9,stroke:#2c5f8a,color:#fff
+</div></code></pre>
+<h3 id="92-timing--frequencies">9.2 Timing &amp; Frequencies</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Frequency</th>
+<th>Latency Budget</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MuJoCo physics</td>
+<td>200 Hz</td>
+<td>5ms</td>
+</tr>
+<tr>
+<td>WBC control loop</td>
+<td>50 Hz</td>
+<td>20ms</td>
+</tr>
+<tr>
+<td>DDS command publishing</td>
+<td>500 Hz (deploy)</td>
+<td>2ms</td>
+</tr>
+<tr>
+<td>GROOT inference</td>
+<td>~5-10 Hz</td>
+<td>100-200ms</td>
+</tr>
+<tr>
+<td>Planner re-planning</td>
+<td>10 Hz</td>
+<td>100ms</td>
+</tr>
+<tr>
+<td>Image streaming</td>
+<td>30 Hz</td>
+<td>33ms</td>
+</tr>
+<tr>
+<td>VR tracking</td>
+<td>90 Hz</td>
+<td>11ms</td>
+</tr>
+</tbody>
+</table>
+<h3 id="93-sonic-vs-decoupled-wbc">9.3 SONIC vs Decoupled WBC</h3>
+<p>The <code>sonic_model12</code> configuration is the latest SONIC model. Key differences from older decoupled WBC:</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Decoupled WBC (older)</th>
+<th>SONIC (current)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lower body policy</td>
+<td>2 models (balance + walk)</td>
+<td>Unified foundation model</td>
+</tr>
+<tr>
+<td>Observation</td>
+<td>86 dims × 6 history</td>
+<td>120 dims × 4 history</td>
+</tr>
+<tr>
+<td>Training data</td>
+<td>RL only</td>
+<td>Large-scale human motion data</td>
+</tr>
+<tr>
+<td>Locomotion</td>
+<td>Basic walk/balance</td>
+<td>Natural human-like motion</td>
+</tr>
+<tr>
+<td>Planner</td>
+<td>None</td>
+<td>ONNX kinematic planner</td>
+</tr>
+<tr>
+<td>VR teleop</td>
+<td>Basic</td>
+<td>Full-body PICO integration</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="10-our-dex1-modifications">10. Our Dex1 Modifications</h2>
+<p>Our hospitality model was trained with <code>UNITREE_G1</code> embodiment on Dex1 data (1 DOF per hand). NVIDIA's standard pipeline uses Dex3 (7 DOF per hand). We parameterized the pipeline to support both.</p>
+<h3 id="101-what-changed">10.1 What Changed</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph CHANGES["Our Dex1 Modifications"]
+        direction TB
+        subgraph ROBOT_MOD["Robot Model Layer"]
+            RM1["G1SupplementalInfo\nhand_type='dex1' parameter\n2 prismatic DOF per hand"]
+            RM2["g1.py\nDex1 URDF loading"]
+            RM3["g1_29dof_with_dex1.urdf\n+ Dex1 mesh files"]
+        end
+        subgraph DDS_MOD["DDS Interface Layer"]
+            DD1["state_processor.py\nrt/dex1/*/state topics"]
+            DD2["command_sender.py\nrt/dex1/*/cmd topics"]
+        end
+        subgraph ENV_MOD["Environment Layer"]
+            EV1["g1_hand.py\nG1Dex1Hand class\n2 prismatic DOF"]
+            EV2["g1_env.py\nDex1 hand instantiation"]
+        end
+        subgraph ROBOCASA_MOD["RoboCasa Layer"]
+            RC1["g1_dex1_hands.py\nDex1 gripper MJCF"]
+            RC2["g1_robot.py\nG1Dex1 robot variant"]
+        end
+    end
+
+    style CHANGES fill:#e74c3c,stroke:#c0392b,color:#fff
+    style ROBOT_MOD fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DDS_MOD fill:#f25c4e,stroke:#d9453a,color:#fff
+    style ENV_MOD fill:#f25c4e,stroke:#d9453a,color:#fff
+    style ROBOCASA_MOD fill:#f25c4e,stroke:#d9453a,color:#fff
+</div></code></pre>
+<h3 id="102-what-auto-adapts-no-changes-needed">10.2 What Auto-Adapts (No Changes Needed)</h3>
+<p>These components derive DOF counts from the robot model, so they work with any hand type:</p>
+<ul>
+<li><code>G1DecoupledWholeBodyPolicy</code> — uses group indices from robot model</li>
+<li><code>SyncEnv</code> — derives DOF counts from <code>RobotModel</code></li>
+<li><code>Gr00tObsActionConverter</code> — reads joint groups from <code>G1SupplementalInfo</code></li>
+<li>ONNX lower body policy — only controls legs+waist, hand-agnostic</li>
+</ul>
+<h3 id="103-dof-comparison">10.3 DOF Comparison</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Dex3 (standard)</th>
+<th>Dex1 (ours)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Body</strong></td>
+<td>29 DOF</td>
+<td>29 DOF</td>
+</tr>
+<tr>
+<td><strong>Left hand</strong></td>
+<td>7 DOF (revolute)</td>
+<td>2 DOF (prismatic)</td>
+</tr>
+<tr>
+<td><strong>Right hand</strong></td>
+<td>7 DOF (revolute)</td>
+<td>2 DOF (prismatic)</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>43 DOF</strong></td>
+<td><strong>33 DOF</strong></td>
+</tr>
+<tr>
+<td><strong>DDS hand topics</strong></td>
+<td><code>rt/dex3/*/</code></td>
+<td><code>rt/dex1/*/</code></td>
+</tr>
+<tr>
+<td><strong>URDF</strong></td>
+<td><code>g1_29dof_with_hand</code></td>
+<td><code>g1_29dof_with_dex1</code></td>
+</tr>
+<tr>
+<td><strong>Gym env</strong></td>
+<td><code>*_G1_gear_wbc</code></td>
+<td><code>*_G1Dex1_gear_wbc</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="104-dex1-value-conversion">10.4 Dex1 Value Conversion</h3>
+<p>Physical range: [-0.02, 0.024] meters (prismatic)
+Training range: [5.4, 0.0] (inverted!)</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Physical → Training: inverted linear map</span>
+training_value = <span class="hljs-number">5.4</span> - (physical_value + <span class="hljs-number">0.02</span>) * (<span class="hljs-number">5.4</span> / <span class="hljs-number">0.044</span>)
+</div></code></pre>
+<hr>
+<h2 id="11-key-file-reference">11. Key File Reference</h2>
+<h3 id="decoupledwbc">decoupled_wbc/</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>control/robot_model/robot_model.py</code></td>
+<td><code>RobotModel</code> + <code>ReducedRobotModel</code> (Pinocchio wrapper)</td>
+</tr>
+<tr>
+<td><code>control/robot_model/supplemental_info/g1/g1_supplemental_info.py</code></td>
+<td>Joint groups, limits, defaults, hand configs</td>
+</tr>
+<tr>
+<td><code>control/robot_model/instantiation/g1.py</code></td>
+<td><code>instantiate_g1_robot_model()</code> factory</td>
+</tr>
+<tr>
+<td><code>control/envs/g1/g1_env.py</code></td>
+<td><code>G1Env</code> main environment class</td>
+</tr>
+<tr>
+<td><code>control/envs/g1/g1_body.py</code></td>
+<td><code>G1Body</code> body actuator interface</td>
+</tr>
+<tr>
+<td><code>control/envs/g1/g1_hand.py</code></td>
+<td><code>G1ThreeFingerHand</code>, <code>G1Dex1Hand</code></td>
+</tr>
+<tr>
+<td><code>control/envs/g1/utils/state_processor.py</code></td>
+<td>DDS subscribers (BodyStateProcessor, HandStateProcessor)</td>
+</tr>
+<tr>
+<td><code>control/envs/g1/utils/command_sender.py</code></td>
+<td>DDS publishers (BodyCommandSender, HandCommandSender)</td>
+</tr>
+<tr>
+<td><code>control/envs/g1/utils/joint_safety.py</code></td>
+<td><code>JointSafetyMonitor</code></td>
+</tr>
+<tr>
+<td><code>control/policy/interpolation_policy.py</code></td>
+<td><code>InterpolationPolicy</code> (upper body trajectory smoothing)</td>
+</tr>
+<tr>
+<td><code>control/policy/g1_gear_wbc_policy.py</code></td>
+<td><code>G1GearWbcPolicy</code> (lower body ONNX RL)</td>
+</tr>
+<tr>
+<td><code>control/policy/g1_decoupled_whole_body_policy.py</code></td>
+<td><code>G1DecoupledWholeBodyPolicy</code> (composition)</td>
+</tr>
+<tr>
+<td><code>control/policy/wbc_policy_factory.py</code></td>
+<td><code>get_wbc_policy()</code> factory</td>
+</tr>
+<tr>
+<td><code>control/main/teleop/run_g1_control_loop.py</code></td>
+<td>Main 50 Hz control loop</td>
+</tr>
+<tr>
+<td><code>control/main/teleop/configs/g1_gear_wbc.yaml</code></td>
+<td>WBC policy configuration</td>
+</tr>
+<tr>
+<td><code>dexmg/gr00trobocasa/</code></td>
+<td>RoboCasa integration (Gr00tObsActionConverter, SyncEnv)</td>
+</tr>
+<tr>
+<td><code>sim2mujoco/resources/robots/g1/policy/</code></td>
+<td>ONNX model files (Balance.onnx, Walk.onnx)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gearsonic">gear_sonic/</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/run_sim_loop.py</code></td>
+<td>Main simulation entry point</td>
+</tr>
+<tr>
+<td><code>scripts/pico_manager_thread_server.py</code></td>
+<td>VR teleop server</td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/base_sim.py</code></td>
+<td><code>DefaultEnv</code> MuJoCo simulation</td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/unitree_sdk2py_bridge.py</code></td>
+<td><code>UnitreeSdk2Bridge</code> DDS bridge</td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/simulator_factory.py</code></td>
+<td><code>SimulatorFactory</code></td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/configs.py</code></td>
+<td><code>BaseConfig</code>, <code>SimLoopConfig</code></td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/sensor_server.py</code></td>
+<td>ZMQ image streaming</td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/image_publish_utils.py</code></td>
+<td>Shared memory image transfer</td>
+</tr>
+<tr>
+<td><code>utils/mujoco_sim/wbc_configs/g1_29dof_sonic_model12.yaml</code></td>
+<td>SONIC model config</td>
+</tr>
+<tr>
+<td><code>data/robot_model/robot_model.py</code></td>
+<td>Pinocchio robot model (gear_sonic copy)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gearsonicdeploy">gear_sonic_deploy/</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>Main deployment script (build + run)</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/src/g1_deploy_onnx_ref.cpp</code></td>
+<td><code>G1Deploy</code> class (4 real-time threads)</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/include/control_policy.hpp</code></td>
+<td>TensorRT policy inference</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/include/encoder.hpp</code></td>
+<td>Observation encoder</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/include/localmotion_kplanner*.hpp</code></td>
+<td>Locomotion planner</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/include/input_interface/</code></td>
+<td>Input handlers (keyboard, gamepad, ZMQ, ROS2)</td>
+</tr>
+<tr>
+<td><code>src/g1/g1_deploy_onnx_ref/include/output_interface/</code></td>
+<td>Output handlers (ZMQ, ROS2)</td>
+</tr>
+<tr>
+<td><code>src/TRTInference/InferenceEngine.h</code></td>
+<td>TensorRT GPU inference wrapper</td>
+</tr>
+<tr>
+<td><code>policy/release/</code></td>
+<td>ONNX model files (encoder, decoder, planner)</td>
+</tr>
+<tr>
+<td><code>docker/Dockerfile.ros2</code></td>
+<td>Multi-platform Docker image</td>
+</tr>
+<tr>
+<td><code>CMakeLists.txt</code></td>
+<td>C++20 build config with TensorRT/CUDA</td>
+</tr>
+</tbody>
+</table>
+
+</body>
+</html>

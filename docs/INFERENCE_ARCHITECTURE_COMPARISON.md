@@ -12,22 +12,38 @@ Both use the same GROOT model server for policy inference, but differ fundamenta
 
 Simple 2-process setup: one simulation, one GROOT model server.
 
-```
-┌─────────────────────────────────────────────────┐
-│  Simulation Process (Isaac Sim or MuJoCo)        │
-│                                                   │
-│  env.reset()                                      │
-│  while not done:                                  │
-│    ┌──────────────────────────────────┐           │
-│    │ 1. Read joint positions (31 DOF) │           │
-│    │ 2. Render ego camera (480×640)   │           │
-│    │ 3. Build observation dict        │──► ZMQ ──►│── GROOT Server (Spark)
-│    │ 4. client.get_action(obs)        │◄── ZMQ ◄──│   port 5555
-│    │ 5. Extract action[t] from buffer │           │
-│    │ 6. Apply to joints directly      │           │
-│    │ 7. env.step(action)              │           │
-│    └──────────────────────────────────┘           │
-└─────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph SIM["Simulation Process (Isaac Sim / MuJoCo)"]
+        direction TB
+        S1["1. Read joint positions (31 DOF)"]
+        S2["2. Render ego camera (480x640)"]
+        S3["3. Build observation dict"]
+        S4["4. client.get_action(obs)"]
+        S5["5. Extract action[t] from buffer"]
+        S6["6. Apply to joints directly"]
+        S7["7. env.step(action)"]
+        S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
+        S7 -.->|"loop"| S1
+    end
+
+    subgraph GROOT["GROOT Server (Spark:5555)"]
+        MODEL["GROOT Policy Model"]
+    end
+
+    S3 -- "obs via ZMQ REQ" --> MODEL
+    MODEL -- "actions via ZMQ REP" --> S4
+
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style MODEL fill:#c96830,stroke:#a04f18,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S2 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S3 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S4 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S5 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S6 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style S7 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
 ```
 
 ### Observation Format
@@ -118,109 +134,177 @@ for t in range(num_action_steps):
 
 3-process architecture with decoupled control. The key innovation: **the GROOT model only controls the upper body, while a separate RL-trained policy controls the legs for balance and locomotion**.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  BRIDGE (external integration)                            │
-│  ├─ Subscribe env_state_act           ◄── FROM WBC CTRL  │
-│  ├─ Read camera stream (ZMQ PUB/SUB)                      │
-│  ├─ Call GROOT server (ZMQ REQ/REP)   ──► GROOT (Spark)   │
-│  ├─ Map model output → upper body goal                    │
-│  └─ Publish upper_body_pose + navigate_cmd                │
-└──────────────────────┬────────────────────────────────────┘
-                       │ ROS2 topics (msgpack)
-┌──────────────────────▼────────────────────────────────────┐
-│  WBC Control Loop (50 Hz)                                  │
-│  ├─ Read robot state from DDS (rt/lowstate, rt/dex*/*)     │
-│  ├─ G1DecoupledWholeBodyPolicy:                            │
-│  │   ├─ InterpolationPolicy (upper body: arms+waist+hands) │
-│  │   └─ G1GearWbcPolicy (lower body: legs via ONNX RL)    │
-│  ├─ Send joint commands via DDS (rt/lowcmd, rt/dex*/*)     │
-│  └─ Publish env_state_act for bridge                       │
-└──────────────────────┬────────────────────────────────────┘
-                       │ DDS topics (Unitree SDK2)
-┌──────────────────────▼────────────────────────────────────┐
-│  Simulation (MuJoCo or RoboCasa)                           │
-│  ├─ Physics step                                           │
-│  ├─ Publish sensor data → DDS                              │
-│  └─ Read joint commands ← DDS                              │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph GROOT["GROOT Server (Spark:5555)"]
+        GMODEL["GROOT Policy Model"]
+    end
+
+    subgraph BRIDGE["Bridge (External Integration)"]
+        B1["Subscribe env_state_act"]
+        B2["Read camera stream"]
+        B3["Call GROOT server"]
+        B4["Map output to upper body goal"]
+        B5["Publish upper_body_pose + navigate_cmd"]
+    end
+
+    subgraph WBC["WBC Control Loop (50 Hz)"]
+        W1["Read robot state from DDS"]
+        subgraph POLICY["G1DecoupledWholeBodyPolicy"]
+            INTERP["InterpolationPolicy\n(upper body: arms+waist+hands)"]
+            RLPOL["G1GearWbcPolicy\n(lower body: legs via ONNX RL)"]
+        end
+        W2["Send joint commands via DDS"]
+        W3["Publish env_state_act for bridge"]
+    end
+
+    subgraph SIM["Simulation (MuJoCo / RoboCasa)"]
+        P1["Physics step"]
+        P2["Publish sensor data via DDS"]
+        P3["Read joint commands via DDS"]
+    end
+
+    B3 -- "obs via ZMQ REQ" --> GMODEL
+    GMODEL -- "actions via ZMQ REP" --> B3
+
+    B5 -- "ROS2 topics\n(msgpack)" --> W1
+    W3 -- "ROS2 topics\n(msgpack)" --> B1
+
+    W2 -- "DDS topics\n(Unitree SDK2)" --> P3
+    P2 -- "DDS topics\n(Unitree SDK2)" --> W1
+
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style GMODEL fill:#c96830,stroke:#a04f18,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B2 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B3 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B4 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B5 fill:#9384f2,stroke:#7060d4,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style POLICY fill:#27ae60,stroke:#1a7a42,color:#fff
+    style INTERP fill:#3dd87f,stroke:#2bb365,color:#fff
+    style RLPOL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W2 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W3 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style P1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style P2 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style P3 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
 ```
 
 ### How the 3 Processes Communicate
 
-```
-GROOT Server ◄──ZMQ──► Bridge ──ROS2──► WBC Control Loop ◄──DDS──► Simulation
-   (Spark)              (gets obs,        (50 Hz motor         (physics +
-                         sends goal)       control)              sensors)
+```mermaid
+flowchart LR
+    GROOT["GROOT Server\n(Spark)"]
+    BRIDGE["Bridge\n(gets obs, sends goal)"]
+    WBC["WBC Control Loop\n(50 Hz motor control)"]
+    SIM["Simulation\n(physics + sensors)"]
+
+    GROOT <-- "ZMQ\nREQ/REP" --> BRIDGE
+    BRIDGE -- "ROS2\ntopics" --> WBC
+    WBC -- "ROS2\ntopics" --> BRIDGE
+    WBC <-- "DDS\ntopics" --> SIM
+
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
 ```
 
 The bridge **never talks to the sim directly**. It only reads published state from the WBC loop and publishes goal commands back.
 
 ### Observation Flow (Sim → WBC → Bridge → GROOT)
 
-```
-Step 1: Sim publishes raw sensor data via DDS
-  rt/lowstate      → 29 body motor states (q, dq, ddq, tau) + pelvis IMU
-  rt/dex3/*/state  → 7 hand motor states per hand (or rt/dex1/* for Dex1: 2 per hand)
-  rt/secondary_imu → torso IMU
-  rt/odostate      → floating base position/velocity (sim only)
+```mermaid
+flowchart LR
+    subgraph SIM["Simulation"]
+        S1["Publish raw sensor data\nrt/lowstate (29 body motors + IMU)\nrt/dex3/*/state (7 hand motors/hand)\nrt/secondary_imu (torso IMU)\nrt/odostate (floating base)"]
+    end
 
-Step 2: WBC control loop reads DDS and assembles whole-body state
-  body_q[29] + hand_q[7+7] → whole_q[43]  (via RobotModel joint reordering)
-  + FK for wrist poses
+    subgraph WBC["WBC Control Loop"]
+        W1["Read DDS & assemble state\nbody_q[29] + hand_q[7+7] = whole_q[43]\n+ FK for wrist poses"]
+        W2["Publish assembled state\nG1Env/env_state_act\n{q[43], dq[43], wrist_pose[14], ...}"]
+        W1 --> W2
+    end
 
-Step 3: WBC publishes assembled state via ROS2
-  G1Env/env_state_act → {q[43], dq[43], wrist_pose[14], action[43], ...}
+    subgraph BRIDGE["Bridge"]
+        B1["Build GROOT observation\nvideo: ego_view (480x640)\nstate: legs/waist/arms/hands\nannotation: task description"]
+        B2["Send observation"]
+        B1 --> B2
+    end
 
-Step 4: Bridge reads state and builds GROOT observation
-  observation = {
-      "video": {"ego_view": camera_image},
-      "state": {
-          "left_leg": q[0:6], "right_leg": q[6:12], "waist": q[12:15],
-          "left_arm": q[15:22], "right_arm": q[22:29],
-          "left_hand": q[29:36], "right_hand": q[36:43]
-      },
-      "annotation": {"human.task_description": [["pick up the apple"]]}
-  }
+    subgraph GROOT["GROOT Server"]
+        G1["Receive observation\n& run inference"]
+    end
 
-Step 5: Bridge sends observation to GROOT server via ZMQ
+    S1 -- "DDS" --> W1
+    W2 -- "ROS2" --> B1
+    B2 -- "ZMQ REQ" --> G1
+
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W2 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style B2 fill:#9384f2,stroke:#7060d4,color:#fff
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style G1 fill:#c96830,stroke:#a04f18,color:#fff
 ```
 
 ### Action Flow (GROOT → Bridge → WBC → Sim)
 
-```
-Step 1: GROOT returns action trajectory
-  action_dict = {waist[3], left_arm[7], right_arm[7], left_hand[N], right_hand[N],
-                 base_height[1], navigate_cmd[3]}
+```mermaid
+flowchart LR
+    subgraph GROOT["GROOT Server"]
+        G1["Return action trajectory\nwaist[3], arms[7+7], hands[N+N]\nbase_height[1], navigate_cmd[3]"]
+    end
 
-Step 2: Bridge extracts and publishes goal via ROS2
-  ControlPolicy/upper_body_pose = {
-      target_upper_body_pose[17]: [waist(3) + left_arm(7) + right_arm(7)],
-      target_time: when to reach this pose,
-      navigate_cmd[3]: [vx, vy, omega],
-      base_height_command: 0.74m default
-  }
+    subgraph BRIDGE["Bridge"]
+        B1["Extract & publish goal\nupper_body_pose[17]\ntarget_time, navigate_cmd[3]\nbase_height_command: 0.74m"]
+    end
 
-Step 3: WBC policy computes full joint command (THIS IS THE KEY DIFFERENCE)
-  ┌─ InterpolationPolicy (upper body):
-  │    scipy interp1d smoothly interpolates to target pose
-  │    → arms[14] + waist[3] + hands[N]
-  │
-  └─ G1GearWbcPolicy (lower body, ONNX RL):
-       86-dim obs (cmd, height, rpy, omega, gravity, q, dq, last_action)
-       × 6 history frames = 516-dim input
-       → ONNX inference → 15-dim action (12 legs + 3 waist)
-       Uses policy_1 (balance, ||cmd||<0.05) or policy_2 (walk)
+    subgraph WBC["WBC Control Loop"]
+        direction TB
+        subgraph UPPER["InterpolationPolicy (Upper Body)"]
+            U1["scipy interp1d smooth interpolation\n-> arms[14] + waist[3] + hands[N]"]
+        end
+        subgraph LOWER["G1GearWbcPolicy (Lower Body, ONNX RL)"]
+            L1["86-dim obs x 6 history = 516-dim input\n-> 15-dim action (12 legs + 3 waist)\npolicy_1 (balance) / policy_2 (walk)"]
+        end
+        ASM["Assembly: q[43] = upper + lower\n(lower body overwrites waist)"]
+        U1 --> ASM
+        L1 --> ASM
+        W1["Send joint targets via DDS\nrt/lowcmd (29 body motors)\nrt/dex*/*/cmd (hand motors)"]
+        ASM --> W1
+    end
 
-  Assembly: q[43] = upper_body[arms+hands] + lower_body[legs+waist]
-  (lower body overwrites waist when both claim it)
+    subgraph SIM["Simulation"]
+        S1["Read DDS commands & step physics\nPD: tau = tau_ff + kp*(q_cmd-q) + kd*(dq_cmd-dq)"]
+    end
 
-Step 4: WBC sends joint targets via DDS
-  rt/lowcmd         → 29 body motor targets (q, dq, tau, kp, kd)
-  rt/dex3/*/cmd     → 7 hand motor targets per hand (or rt/dex1/*: 2 per hand)
+    G1 -- "ZMQ REP" --> B1
+    B1 -- "ROS2" --> UPPER
+    B1 -- "ROS2" --> LOWER
+    W1 -- "DDS" --> S1
 
-Step 5: Sim reads DDS commands and steps physics
-  PD control: tau = tau_ff + kp*(q_cmd - q) + kd*(dq_cmd - dq)
+    style GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style G1 fill:#c96830,stroke:#a04f18,color:#fff
+    style BRIDGE fill:#7b68ee,stroke:#5a4cbf,color:#fff
+    style B1 fill:#9384f2,stroke:#7060d4,color:#fff
+    style WBC fill:#2ecc71,stroke:#1e9650,color:#fff
+    style UPPER fill:#27ae60,stroke:#1a7a42,color:#fff
+    style U1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style LOWER fill:#e74c3c,stroke:#c0392b,color:#fff
+    style L1 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style ASM fill:#3dd87f,stroke:#2bb365,color:#fff
+    style W1 fill:#3dd87f,stroke:#2bb365,color:#fff
+    style SIM fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style S1 fill:#6ba3e0,stroke:#4a7fb8,color:#fff
 ```
 
 ### Key Characteristics
@@ -261,15 +345,27 @@ Step 5: Sim reads DDS commands and steps physics
 
 In both architectures, the GROOT model predicts the **same thing**: upper body joint targets.
 
-```
-GROOT output (23 DOF):
-  waist:         3 DOF (yaw, roll, pitch)
-  left_arm:      7 DOF (shoulder_pitch/roll/yaw, elbow, wrist_roll/pitch/yaw)
-  right_arm:     7 DOF (same)
-  left_hand:     N DOF (1 for Dex1, 7 for Dex3)
-  right_hand:    N DOF (1 for Dex1, 7 for Dex3)
-  base_height:   1 DOF
-  navigate_cmd:  3 DOF (vx, vy, omega)
+```mermaid
+flowchart LR
+    subgraph GROOT_OUT["GROOT Output (23+ DOF)"]
+        direction TB
+        WAIST["waist: 3 DOF\n(yaw, roll, pitch)"]
+        LA["left_arm: 7 DOF\n(shoulder p/r/y, elbow, wrist r/p/y)"]
+        RA["right_arm: 7 DOF\n(same)"]
+        LH["left_hand: N DOF\n(1 for Dex1, 7 for Dex3)"]
+        RH["right_hand: N DOF\n(1 for Dex1, 7 for Dex3)"]
+        BH["base_height: 1 DOF"]
+        NAV["navigate_cmd: 3 DOF\n(vx, vy, omega)"]
+    end
+
+    style GROOT_OUT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style WAIST fill:#f5a623,stroke:#d48b0f,color:#fff
+    style LA fill:#c96830,stroke:#a04f18,color:#fff
+    style RA fill:#c96830,stroke:#a04f18,color:#fff
+    style LH fill:#d4944d,stroke:#b37530,color:#fff
+    style RH fill:#d4944d,stroke:#b37530,color:#fff
+    style BH fill:#8b6914,stroke:#6b5010,color:#fff
+    style NAV fill:#8b6914,stroke:#6b5010,color:#fff
 ```
 
 The difference is what happens AFTER GROOT produces its output:
@@ -279,13 +375,39 @@ The difference is what happens AFTER GROOT produces its output:
 
 ### Why WBC Matters for Real Deployment
 
-```
-Direct Control:                    WBC Pipeline:
-  GROOT → joints                     GROOT → goal
-  (no balance)                       WBC interpolates smoothly
-  (no safety)                        RL balances legs
-  (fixed base only)                  Safety monitors all joints
-                                     Same code runs on real robot
+```mermaid
+flowchart TB
+    subgraph DC["Direct Control"]
+        direction TB
+        DC_GROOT["GROOT"] --> DC_JOINTS["Joints (direct)"]
+        DC_N1["No balance"]
+        DC_N2["No safety"]
+        DC_N3["Fixed base only"]
+    end
+
+    subgraph WBCP["WBC Pipeline"]
+        direction TB
+        WBC_GROOT["GROOT"] --> WBC_GOAL["Goal"]
+        WBC_GOAL --> WBC_INTERP["WBC interpolates smoothly"]
+        WBC_GOAL --> WBC_RL["RL balances legs"]
+        WBC_INTERP --> WBC_SAFE["Safety monitors all joints"]
+        WBC_RL --> WBC_SAFE
+        WBC_REAL["Same code runs on real robot"]
+    end
+
+    style DC fill:#e74c3c,stroke:#c0392b,color:#fff
+    style DC_GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style DC_JOINTS fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N1 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N2 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style DC_N3 fill:#f25c4e,stroke:#d9453a,color:#fff
+    style WBCP fill:#2ecc71,stroke:#1e9650,color:#fff
+    style WBC_GROOT fill:#e07b39,stroke:#b35c1e,color:#fff
+    style WBC_GOAL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_INTERP fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_RL fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_SAFE fill:#3dd87f,stroke:#2bb365,color:#fff
+    style WBC_REAL fill:#3dd87f,stroke:#2bb365,color:#fff
 ```
 
 ---
@@ -312,17 +434,15 @@ Our hospitality model was trained with `UNITREE_G1` embodiment on Dex1 data (1 D
 
 ### DOF Comparison
 
-```
-                    Dex3 (standard)    Dex1 (our model)
-Body:               29 DOF             29 DOF
-Left hand:           7 DOF              2 DOF
-Right hand:          7 DOF              2 DOF
-Total:              43 DOF             33 DOF
-
-DDS hand topics:    rt/dex3/*/         rt/dex1/*/
-URDF:               g1_29dof_with_hand g1_29dof_with_dex1
-Gym env:            *_G1_gear_wbc      *_G1Dex1_gear_wbc
-```
+| | Dex3 (standard) | Dex1 (our model) |
+|---|---|---|
+| **Body** | 29 DOF | 29 DOF |
+| **Left hand** | 7 DOF | 2 DOF |
+| **Right hand** | 7 DOF | 2 DOF |
+| **Total** | **43 DOF** | **33 DOF** |
+| **DDS hand topics** | `rt/dex3/*/` | `rt/dex1/*/` |
+| **URDF** | `g1_29dof_with_hand` | `g1_29dof_with_dex1` |
+| **Gym env** | `*_G1_gear_wbc` | `*_G1Dex1_gear_wbc` |
 
 ---
 
