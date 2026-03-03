@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
+# DEPRECATED — Use environments/build/build.sh instead.
+#
+# This script has been replaced by:
+#   dm-isaac-g1/environments/build/build.sh    (full build + push to ECR)
+#   dm-isaac-g1/environments/build/update.sh   (pull latest + restart container)
+#
+# The new version includes: patches/ directory upload, date-tagged images,
+# --no-terminate debug flag, and reads ECR region from .env.
+# =============================================================================
+echo "DEPRECATED: Use environments/build/build.sh instead."
+echo "  cd $(cd "$(dirname "${BASH_SOURCE[0]}")/../build" && pwd)"
+echo "  ./build.sh"
+exit 1
+
+# =============================================================================
+# Original script below (kept for reference)
+# =============================================================================
 # Build dm-workstation Docker images on a temporary EC2 instance and push to ECR.
 #
 # Prerequisites:

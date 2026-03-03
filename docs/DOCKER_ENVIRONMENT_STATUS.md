@@ -49,7 +49,7 @@
 
 ### ECR Registry
 
-**Registry**: `260464233120.dkr.ecr.us-east-1.amazonaws.com/isaac-g1-sim-ft-rl`
+**Registry**: `260464233120.dkr.ecr.eu-west-1.amazonaws.com/isaac-g1-sim-ft-rl`
 
 | ECR Tag | Maps To | Last Pushed | Notes |
 |---------|---------|-------------|-------|
@@ -89,7 +89,17 @@
 ## Dockerfile Architecture
 
 ```
-Dockerfile.unitree (environments/workstation/)
+environments/workstation/
+├── Dockerfile.unitree            ← Multi-stage Dockerfile
+├── requirements-groot.txt        ← Python deps for groot stage
+└── patches/                      ← Git patches applied during build
+    └── robot_viser_av1_fallback.patch
+
+environments/build/
+├── build.sh                      ← Build on EC2 + push to ECR
+└── update.sh                     ← Pull from ECR + restart container
+
+Dockerfile.unitree stages:
 │
 ├── Stage 1: builder (nvidia/cuda:12.8.0-devel-ubuntu22.04)
 │   ├── Miniconda + unitree_sim_env (Python 3.11)
@@ -114,7 +124,7 @@ Dockerfile.unitree (environments/workstation/)
     ├── conda-forge ffmpeg (native .so for torchcodec)
     ├── torchcodec==0.4.0+cu128
     ├── GR00T-WholeBodyControl-dex1 (cloned)
-    ├── video2robot (cloned)
+    ├── video2robot (cloned + patches/ applied)
     ├── unitree_model (cloned from HuggingFace)
     └── → dm-workstation:latest → ECR latest
 ```
@@ -226,60 +236,74 @@ The container PYTHONPATH includes:
 
 ---
 
-## Rebuild & ECR Push Playbook
+## Build & Deploy
 
-### Prerequisites
+All build scripts live in `environments/build/`. The image is built on a temporary EC2 instance (~$1.50 per build) and pushed to ECR.
+
+### Build & Push to ECR (on EC2)
 
 ```bash
-# 1. Re-login to AWS SSO (requires browser)
+cd dm-isaac-g1/environments/build
+
+# Prerequisites: AWS SSO login
 aws sso login --profile elianomarques-dm
 
-# 2. Get ECR credentials
-source ../../.env
-aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE | \
-  docker login --username AWS --password-stdin $AWS_ECR_REGISTRY
+# Full build (base + groot) → push to ECR → terminate instance
+./build.sh
+
+# Build base stage only
+./build.sh --base
+
+# Keep instance alive after build (for debugging)
+./build.sh --no-terminate
+
+# Terminate leftover build instances
+./build.sh --cleanup-only
 ```
 
-### Build
+The build script automatically:
+- Launches a c5.4xlarge (16 vCPU, 32 GB, ~$0.68/hr)
+- Uploads `Dockerfile.unitree`, `requirements-groot.txt`, and `patches/` directory
+- Builds base + groot stages
+- Pushes to ECR with tags: `base-latest`, `latest`, and date tag (e.g., `20260303`)
+- Terminates the instance
+
+### Update Workstation Container
 
 ```bash
-cd /home/datamentors/dm-isaac-g1/environments/workstation
+cd dm-isaac-g1/environments/build
 
-# Build base (Stage 2) — stable, pushed to ECR
+# Pull latest from ECR + restart container
+./update.sh
+
+# Pull only (don't restart — useful if training is running)
+./update.sh --pull-only
+
+# Restart with current image (no pull)
+./update.sh --restart-only
+```
+
+> **WARNING**: Restarting the container kills any in-progress training. Check first:
+> `docker exec dm-workstation ps aux | grep python`
+
+### Build Context
+
+The build collects files from `environments/workstation/`:
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile.unitree` | Multi-stage Dockerfile (builder → base → groot) |
+| `requirements-groot.txt` | Python packages for GR00T stage |
+| `patches/*.patch` | Git patches applied during build (e.g., AV1 codec fallback) |
+
+### Manual Build (on workstation, for testing)
+
+```bash
+cd dm-isaac-g1/environments/workstation
+
+# Build locally (requires ~120 GB disk, ~2 hours)
 docker compose -f docker-compose.unitree.yml build base
-
-# Build groot (Stage 3) — full image
 docker compose -f docker-compose.unitree.yml build groot
-```
-
-### Push to ECR
-
-```bash
-source ../../.env
-
-# Tag and push base
-docker tag dm-workstation-base:latest $AWS_ECR_REGISTRY/$AWS_ECR_REPO:base-latest
-docker push $AWS_ECR_REGISTRY/$AWS_ECR_REPO:base-latest
-
-# Tag and push full
-docker tag dm-workstation:latest $AWS_ECR_REGISTRY/$AWS_ECR_REPO:latest
-docker push $AWS_ECR_REGISTRY/$AWS_ECR_REPO:latest
-```
-
-### Replace Running Container
-
-```bash
-# IMPORTANT: Wait for active training runs to finish first!
-# Check: docker exec dm-workstation ps aux | grep python
-
-# Stop old container
-docker compose -f docker-compose.unitree.yml stop groot
-
-# Remove old container (preserves image)
-docker compose -f docker-compose.unitree.yml rm groot
-
-# Start new container from rebuilt image
-docker compose -f docker-compose.unitree.yml up -d groot
 ```
 
 ---

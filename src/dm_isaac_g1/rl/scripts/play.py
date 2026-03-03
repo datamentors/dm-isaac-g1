@@ -70,6 +70,13 @@ def main():
 
     env_cfg.scene.num_envs = args_cli.num_envs
 
+    # Disable debug visualization (avoids CUDA/CPU device mismatch in velocity arrows)
+    if hasattr(env_cfg, "commands"):
+        for attr in dir(env_cfg.commands):
+            cmd = getattr(env_cfg.commands, attr, None)
+            if hasattr(cmd, "debug_vis"):
+                cmd.debug_vis = False
+
     log_dir = os.path.dirname(args_cli.checkpoint)
 
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
