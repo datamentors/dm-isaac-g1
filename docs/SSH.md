@@ -11,7 +11,7 @@ This guide explains how to connect to the Unitree G1 over SSH using the provided
 
 - IP: `192.168.1.122`
 - Username: `unitree`
-- Password: `123`
+- Password: *(ask team lead)*
 
 ## Steps
 
@@ -22,11 +22,7 @@ This guide explains how to connect to the Unitree G1 over SSH using the provided
 ssh unitree@192.168.1.122
 ```
 
-3. When prompted, enter the password:
-
-```text
-123
-```
+3. When prompted, enter the password (ask team lead for credentials).
 
 4. If this is your first time connecting, confirm the host key by typing `yes`.
 
