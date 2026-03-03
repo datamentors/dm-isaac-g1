@@ -57,7 +57,23 @@ deepspeed==0.17.6
 # MuJoCo evaluation dependencies
 # (custom G1 scenes with deformable objects)
 # -----------------------------------------------
-# mujoco: installed directly in Dockerfile (pip install mujoco==3.2.6)
+# mujoco: installed in Dockerfile builder stage (pip install mujoco==3.2.6)
 #   Requires MuJoCo 3.0+ for flexcomp deformable bodies (cloth/towel simulation).
 #   MuJoCo Menagerie (G1 MJCF model) is cloned in the Dockerfile.
 opencv-python-headless>=4.8.0
+
+# -----------------------------------------------
+# SSH / remote operations (workstation <-> spark transfers)
+# -----------------------------------------------
+paramiko==4.0.0
+bcrypt==5.0.0
+PyNaCl==1.6.2
+invoke==2.2.1
+argcomplete==3.6.3
+
+# -----------------------------------------------
+# RL + Mimic training utilities
+# -----------------------------------------------
+prettytable==3.17.0
+hidapi==0.15.0
+decord==0.6.0

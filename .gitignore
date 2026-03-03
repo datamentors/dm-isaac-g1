@@ -82,3 +82,8 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Vast.ai SSH keys and instance state
+cloud/vastai/vastai_ssh_key
+cloud/vastai/vastai_ssh_key.pub
+cloud/vastai/.instance_id

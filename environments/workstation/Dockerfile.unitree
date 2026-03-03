@@ -111,6 +111,11 @@ RUN pip install pin-pink meshcat && \
 # flatdict 4.1.0 is functionally compatible with isaaclab's pinned 4.0.1 requirement.
 RUN pip install flatdict
 
+# MuJoCo 3.2.6 — required for closed-loop eval with deformable objects (flexcomp towel/cloth).
+# MuJoCo Menagerie — standardized MJCF robot models (G1, Go1, etc.) used by eval scenes.
+RUN pip install mujoco==3.2.6 && \
+    git clone https://github.com/google-deepmind/mujoco_menagerie.git /home/code/mujoco_menagerie
+
 # ==============================
 # Stage 2: base — stable image pushed to ECR
 # Isaac Sim + IsaacLab + unitree stack, NO GR00T
@@ -163,6 +168,7 @@ RUN mkdir -p ~/.vnc && \
 COPY --from=builder /home/code/IsaacLab            /home/code/IsaacLab
 COPY --from=builder /home/code/unitree_sdk2_python  /home/code/unitree_sdk2_python
 COPY --from=builder /home/code/unitree_sim_isaaclab /home/code/unitree_sim_isaaclab
+COPY --from=builder /home/code/mujoco_menagerie     /home/code/mujoco_menagerie
 COPY --from=builder /cyclonedds                     /cyclonedds
 COPY --from=builder /opt/conda                      /opt/conda
 
