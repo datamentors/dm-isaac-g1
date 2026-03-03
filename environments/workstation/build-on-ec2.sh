@@ -303,8 +303,11 @@ echo "  This will take 75-115 minutes. You can monitor with:"
 echo "  ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP 'tail -f ~/build/build.log'"
 echo ""
 
-# Run build in background on the instance so SSH disconnects don't kill it
-remote_script "
+# Run build and push on the instance
+BASE_TAG="$ECR_REGISTRY/$ECR_REPO:base-latest"
+GROOT_TAG="$ECR_REGISTRY/$ECR_REPO:latest"
+
+remote "
 set -euo pipefail
 cd ~/build
 
@@ -313,7 +316,7 @@ echo '=== Build started at \$(date) ===' | tee build.log
 # Build base first (needed by groot)
 echo '>>> Building base stage...' | tee -a build.log
 sudo docker build --target base \
-    -t $ECR_REGISTRY/$ECR_REPO:base-latest \
+    -t '$BASE_TAG' \
     -f Dockerfile.unitree \
     . 2>&1 | tee -a build.log
 
@@ -322,31 +325,26 @@ echo '>>> Base build complete at \$(date)' | tee -a build.log
 if [ '$BUILD_TARGET' = 'groot' ]; then
     echo '>>> Building groot stage...' | tee -a build.log
     sudo docker build --target groot \
-        -t $ECR_REGISTRY/$ECR_REPO:latest \
+        -t '$GROOT_TAG' \
         -f Dockerfile.unitree \
         . 2>&1 | tee -a build.log
     echo '>>> Groot build complete at \$(date)' | tee -a build.log
 fi
 
 echo '=== Build finished at \$(date) ===' | tee -a build.log
-"
 
-# ---------- Push to ECR ----------
-log "Pushing images to ECR"
-remote_script "
-set -euo pipefail
-
-echo '>>> Pushing base-latest...'
-sudo docker push $ECR_REGISTRY/$ECR_REPO:base-latest
-echo '>>> base-latest pushed.'
+# Push to ECR
+echo '>>> Pushing base-latest...' | tee -a build.log
+sudo docker push '$BASE_TAG' 2>&1 | tee -a build.log
+echo '>>> base-latest pushed.' | tee -a build.log
 
 if [ '$BUILD_TARGET' = 'groot' ]; then
-    echo '>>> Pushing latest...'
-    sudo docker push $ECR_REGISTRY/$ECR_REPO:latest
-    echo '>>> latest pushed.'
+    echo '>>> Pushing latest...' | tee -a build.log
+    sudo docker push '$GROOT_TAG' 2>&1 | tee -a build.log
+    echo '>>> latest pushed.' | tee -a build.log
 fi
 
-echo '=== Push complete at \$(date) ==='
+echo '=== ALL DONE at \$(date) ===' | tee -a build.log
 "
 
 # ---------- Verify ----------

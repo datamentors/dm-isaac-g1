@@ -113,6 +113,9 @@ Dockerfile.unitree (environments/workstation/)
     ├── flash-attn==2.8.3 (compiled with nvcc)
     ├── conda-forge ffmpeg (native .so for torchcodec)
     ├── torchcodec==0.4.0+cu128
+    ├── GR00T-WholeBodyControl-dex1 (cloned)
+    ├── video2robot (cloned)
+    ├── unitree_model (cloned from HuggingFace)
     └── → dm-workstation:latest → ECR latest
 ```
 
@@ -146,6 +149,80 @@ Dockerfile.unitree (environments/workstation/)
 | `/workspace/Isaac-GR00T` | `/workspace/Isaac-GR00T` | GR00T framework (patched) |
 | `/home/datamentors/unitree_sim_isaaclab` | `/workspace/unitree_sim_isaaclab` | Unitree sim assets + tasks |
 | `/dev/dri` | `/dev/dri` | GPU display rendering |
+
+---
+
+## Git Repos in the Container
+
+The container uses repos from two sources: **bind-mounted** from the host (editable, survive container rebuild) and **baked into the image** (cloned during `docker build`, lost if not in Dockerfile).
+
+### Bind-Mounted Repos (host → container, live-editable)
+
+These are defined in `docker-compose.unitree.yml`. Changes are shared between host and container in real-time.
+
+| Container Path | Host Path | Git Remote | Purpose |
+|---|---|---|---|
+| `/workspace/dm-isaac-g1` | `/home/datamentors/dm-isaac-g1` | `datamentors/dm-isaac-g1` | This repo — source code, scripts, configs |
+| `/workspace/Isaac-GR00T` | `/workspace/Isaac-GR00T` | `NVIDIA/Isaac-GR00T` | GR00T framework (has our patches applied) |
+| `/workspace/unitree_sim_isaaclab` | `/home/datamentors/unitree_sim_isaaclab` | `unitreerobotics/unitree_sim_isaaclab` | USD assets, G1 task definitions |
+
+### Image-Internal Repos (baked into Docker image)
+
+These are cloned in the Dockerfile. They survive container restarts (`stop/start`) but are reset on container rebuild (`down/up`).
+
+| Container Path | Git Remote | Baked In Stage | Purpose |
+|---|---|---|---|
+| `/home/code/IsaacLab` | `isaac-sim/IsaacLab` (v2.2.0) | `builder` | IsaacLab framework — PYTHONPATH and `.pth` files point here |
+| `/home/code/unitree_sdk2_python` | `unitreerobotics/unitree_sdk2_python` | `builder` | Unitree robot SDK |
+| `/home/code/unitree_sim_isaaclab` | `unitreerobotics/unitree_sim_isaaclab` | `builder` | Duplicate of mounted repo (PYTHONPATH uses this one) |
+| `/home/code/mujoco_menagerie` | `google-deepmind/mujoco_menagerie` | `builder` | Standardized MJCF robot models |
+| `/workspace/GR00T-WholeBodyControl-dex1` | `NVlabs/GR00T-WholeBodyControl` | `groot` | WBC eval pipeline + decoupled_wbc |
+| `/workspace/video2robot` | `AIM-Intelligence/video2robot` | `groot` | Video → robot motion pipeline (PromptHMR + GMR) |
+| `/workspace/unitree_model` | `unitreerobotics/unitree_model` (HF) | `groot` | Unitree USD/URDF/MJCF models |
+
+### Post-Build Setup Required
+
+After pulling the image and starting the container, these steps are needed:
+
+```bash
+# 1. Clone repos on the HOST (if not already there)
+cd /home/datamentors
+git clone https://github.com/datamentors/dm-isaac-g1.git
+git clone https://github.com/unitreerobotics/unitree_sim_isaaclab.git
+
+cd /workspace
+git clone https://github.com/NVIDIA/Isaac-GR00T.git
+# Apply GR00T patches (see agent.md "Isaac-GR00T Upstream Patches")
+
+mkdir -p /workspace/datasets /workspace/datasets_inspire /workspace/checkpoints
+
+# 2. Start the container
+cd /home/datamentors/dm-isaac-g1/environments/workstation
+docker compose -f docker-compose.unitree.yml up -d groot
+
+# 3. Apply Dex1 patches inside the container (WBC eval only)
+docker exec dm-workstation bash -c "
+  cd /workspace/GR00T-WholeBodyControl-dex1
+  # Apply Dex1 DOF mapping, gripper conversion, IK solver patches
+  # See MEMORY.md 'WBC Dex1 Setup' and 'Key WBC Files' sections
+"
+
+# 4. Install dm-isaac-g1 as editable package
+docker exec dm-workstation conda run --no-capture-output -n unitree_sim_env \
+  pip install -e /workspace/dm-isaac-g1
+```
+
+### PYTHONPATH Resolution (Important)
+
+The container PYTHONPATH includes:
+```
+/workspace/dm-isaac-g1/src          ← bind-mounted (this repo)
+/workspace/Isaac-GR00T              ← bind-mounted (NVIDIA GR00T)
+/home/code/IsaacLab/source/...      ← image-internal (NOT /workspace/IsaacLab)
+/home/code/unitree_sim_isaaclab     ← image-internal (NOT /workspace/unitree_sim_isaaclab)
+```
+
+**Warning**: IsaacLab and unitree_sim_isaaclab are resolved from `/home/code/` (baked into image), NOT from `/workspace/` (bind mount). The bind-mounted `/workspace/unitree_sim_isaaclab` is used only for its USD assets via `PROJECT_ROOT`. Code imports come from the image-internal copy.
 
 ---
 

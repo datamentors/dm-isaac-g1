@@ -275,5 +275,24 @@ RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkg
 # Version 0.4.0 is pinned — DO NOT upgrade without testing ABI compatibility.
 RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128
 
+# ==============================
+# Clone workspace repos required at runtime
+# These repos are NOT bind-mounted — they live inside the image.
+# The dm-isaac-g1, Isaac-GR00T, and unitree_sim_isaaclab repos are
+# bind-mounted from the host at runtime (see docker-compose.unitree.yml).
+# ==============================
+WORKDIR /workspace
+
+# GR00T-WholeBodyControl (Dex1 branch) — WBC eval pipeline + decoupled_wbc package
+# NOTE: After cloning, our Dex1 patches must be applied (see docs/DOCKER_ENVIRONMENT_STATUS.md).
+RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBodyControl-dex1
+
+# video2robot — PromptHMR + GMR pipeline for converting human videos to robot motion
+RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
+
+# unitree_model — Unitree USD/URDF/MJCF models from HuggingFace
+RUN git lfs install && \
+    git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
+
 WORKDIR /home/code
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
