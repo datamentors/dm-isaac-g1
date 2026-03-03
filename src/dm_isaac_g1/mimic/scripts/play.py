@@ -118,7 +118,7 @@ def main():
     while simulation_app.is_running():
         with torch.inference_mode():
             actions = policy(obs)
-            obs, _, _, _, _ = env.step(actions)
+            obs, _, _, _ = env.step(actions)
         if args_cli.video:
             timestep += 1
             if timestep == args_cli.video_length:
