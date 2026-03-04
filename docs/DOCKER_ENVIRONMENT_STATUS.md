@@ -1,15 +1,21 @@
 # Docker Environment Status
 
-**Last updated**: 2026-03-03
+**Last updated**: 2026-03-04
 
 ## Infrastructure Overview
 
-| Machine | IP | Role | Container | Image |
-|---------|-----|------|-----------|-------|
-| **Blackwell Workstation** | 192.168.1.205 | Training + Simulation + Eval | `dm-workstation` | `dm-workstation:latest` |
-| **DGX Spark** | 192.168.1.237 | GROOT Inference Server | `groot-server` | `groot-inference:arm64` |
-| **Vast.ai** (on-demand) | Cloud | Multi-GPU Fine-tuning | (ephemeral) | `vastai/pytorch` + setup script |
-| **Local Mac** | - | Development, editing | (native) | No container |
+| Machine | IP | Arch | Role | Container | Image |
+|---------|-----|------|------|-----------|-------|
+| **Blackwell Workstation** | 192.168.1.205 | x86_64 | Training + Simulation + Eval | `dm-workstation` | `dm-workstation:latest` |
+| **DGX Spark 1** | 192.168.1.237 | ARM64 | Inference + Training + Eval | `dm-spark-workstation` | `dm-spark-workstation:latest` |
+| **DGX Spark 2** | 192.168.1.??? | ARM64 | Training + Eval | `dm-spark-workstation` | `dm-spark-workstation:latest` |
+| **DGX Spark 3** | 192.168.1.??? | ARM64 | Training + Eval | `dm-spark-workstation` | `dm-spark-workstation:latest` |
+| **DGX Spark 4** | 192.168.1.??? | ARM64 | Training + Eval | `dm-spark-workstation` | `dm-spark-workstation:latest` |
+| **Vast.ai** (on-demand) | Cloud | x86_64 | Multi-GPU Fine-tuning | (ephemeral) | `vastai/pytorch` + setup script |
+| **ECS** (on-demand) | Cloud | x86_64 | GPU training/eval | (ECS task) | ECR `isaac-g1-sim-ft-rl:latest` |
+| **Local Mac** | - | ARM64 | Development, editing | (native) | No container |
+
+> **DGX Spark fleet**: 4x GB10 (128 GB unified memory each) = 512 GB total GPU memory at zero marginal cost. See [SPARK_WORKSTATION_GUIDE.md](SPARK_WORKSTATION_GUIDE.md) for full fleet setup and use cases.
 
 ---
 
@@ -18,14 +24,19 @@
 | Process | Machine | Image | Container | Python Env | Status | Launch Command |
 |---------|---------|-------|-----------|------------|--------|----------------|
 | **GR00T Fine-tuning** (1-GPU) | Workstation | `dm-workstation:latest` | `dm-workstation` | `unitree_sim_env` (conda, py3.11) | Ready | `conda run -n unitree_sim_env torchrun launch_finetune.py` |
+| **GR00T Fine-tuning** (1-GPU) | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Ready | `python -u launch_finetune.py` |
 | **GR00T Fine-tuning** (8-GPU) | Vast.ai | `vastai/pytorch` | (cloud) | setup script | Ready (on-demand) | `cloud/vastai/launch.sh` |
 | **Isaac Sim Inference** | Workstation | `dm-workstation:latest` | `dm-workstation` | `unitree_sim_env` | Ready | `scripts/policy_inference_groot_g1.py` (needs VNC `:1`) |
 | **Isaac Lab RL Training** | Workstation | `dm-workstation:latest` | `dm-workstation` | `unitree_sim_env` | Ready | `scripts/training/launch_rl_military_march.sh` |
 | **Mimic/MimicGen Motion Tracking** | Workstation | `dm-workstation:latest` | `dm-workstation` | `unitree_sim_env` | Ready | `scripts/training/launch_mimic_ronaldo.sh` |
+| **Mimic Training (MuJoCo)** | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Ready | `python -u mimic/scripts/train.py --sim_backend mujoco` |
 | **MuJoCo Closed-Loop Eval** | Workstation | `dm-workstation:latest` | `dm-workstation` | `unitree_sim_env` | Ready | `scripts/eval/run_mujoco_towel_eval.py` |
+| **MuJoCo Closed-Loop Eval** | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Ready | `MUJOCO_GL=egl python run_mujoco_towel_eval.py` |
 | **WBC Eval (RoboCasa, 38 Dex1 envs)** | Workstation | `dm-workstation:latest` | `dm-workstation` | WBC `.venv` (py3.10) | Ready | `scripts/eval/run_official_eval.sh` |
-| **GROOT Inference Server** | Spark | `groot-inference:arm64` | `groot-server` | System py3 | Running | `run_gr00t_server.py --use-sim-policy-wrapper` |
+| **WBC Eval (RoboCasa, 38 Dex1 envs)** | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Ready | `MUJOCO_GL=egl python rollout_policy.py` |
+| **GROOT Inference Server** | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Running | `run_gr00t_server.py --use-sim-policy-wrapper` |
 | **Video2Robot Pipeline** | Workstation | `dm-workstation:latest` | `dm-workstation` | `phmr` conda env | Ready | `scripts/training/run_video2robot_ronaldo.sh` |
+| **Video2Robot Pipeline** | Spark (any) | `dm-spark-workstation:latest` | `dm-spark-workstation` | System py3 | Ready | `python extract_pose.py` + `retarget.py` |
 
 ---
 
@@ -39,13 +50,15 @@
 | `dm-workstation-base` | `latest` | `4497315fc101` | 42.1 GB | 2026-02-18 | Stable base: Isaac Sim + IsaacLab + Unitree (no GR00T) | `base-latest` |
 | `nvcr.io/nvidia/isaac-sim` | `5.1.0` | `f3563cb2ba0c` | 22.9 GB | - | Upstream reference (unused) | - |
 
-### Spark (192.168.1.237)
+### Spark Fleet (ARM64 Grace Hopper, GB10 128 GB)
 
-| Image | Tag | ID | Size | Purpose |
-|-------|-----|-----|------|---------|
-| `groot-inference` | `arm64` | `f1a22dc19097` | 23.4 GB | GROOT neural net server (ARM64 Grace Hopper) |
-| `dm-spark-inference` | `latest` | - | 23.4 GB | Alternative build (created, never started) |
-| `nvcr.io/nvidia/pytorch` | `25.04-py3` | - | 22.4 GB | Base for Spark inference image |
+| Image | Tag | Size | Purpose | Dockerfile |
+|-------|-----|------|---------|-----------|
+| `dm-spark-workstation` | `latest` | ~28 GB | Full workstation: GR00T + MuJoCo + WBC + training | `environments/spark/Dockerfile.spark` |
+| `groot-inference` | `arm64` | 23.4 GB | Legacy inference-only (Spark 1 only) | `dm-groot-inference/Dockerfile.arm64` |
+| `nvcr.io/nvidia/pytorch` | `25.04-py3` | 22.4 GB | Base for all Spark images | (NVIDIA NGC) |
+
+See [SPARK_WORKSTATION_GUIDE.md](SPARK_WORKSTATION_GUIDE.md) for fleet setup, use cases, and ARM64 compatibility notes.
 
 ### ECR Registry
 
@@ -127,6 +140,28 @@ Dockerfile.unitree stages:
     ├── video2robot (cloned + patches/ applied)
     ├── unitree_model (cloned from HuggingFace)
     └── → dm-workstation:latest → ECR latest
+
+environments/spark/
+├── Dockerfile                        ← Inference-only (existing, legacy)
+├── Dockerfile.spark                  ← Full workstation for Spark fleet (NEW)
+├── docker-compose.yml                ← Inference-only compose (existing)
+├── docker-compose.spark.yml          ← Full workstation compose (NEW)
+├── setup.sh                          ← Host setup script
+└── pyproject.toml                    ← Inference deps (legacy)
+
+Dockerfile.spark (single-stage, ARM64):
+│
+└── nvcr.io/nvidia/pytorch:25.04-py3 (NVIDIA ARM64 PyTorch)
+    ├── System deps (MuJoCo EGL, ffmpeg, build tools)
+    ├── GR00T framework (patched pyproject.toml for ARM64)
+    ├── MuJoCo 3.2.6 + Menagerie
+    ├── Training deps (DeepSpeed, wandb, RSL-RL)
+    ├── IK libs (pinocchio, pink)
+    ├── GR00T-WholeBodyControl-dex1 (cloned)
+    ├── video2robot (cloned)
+    ├── unitree_model (cloned from HuggingFace)
+    ├── NOT: flash-attn, torchcodec, Isaac Sim, IsaacLab
+    └── → dm-spark-workstation:latest
 ```
 
 ---

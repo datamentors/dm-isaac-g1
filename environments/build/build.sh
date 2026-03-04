@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Build dm-workstation Docker image on a temporary EC2 instance and push to ECR.
+# Build dm-workstation or dm-spark Docker images on a temporary EC2 instance
+# and push to ECR.
 #
-# Launches a cheap build instance, uploads the full build context (Dockerfile,
-# requirements, patches), builds the image, pushes to ECR, and terminates.
+# Launches a temp build instance matching the target architecture, uploads the
+# build context, builds the image, pushes to ECR, and terminates.
 #
 # Prerequisites:
 #   1. AWS SSO login:  aws sso login --profile elianomarques-dm
 #   2. SSH key:        ~/.ssh/id_ed25519  (will be imported as EC2 key pair)
 #
 # Usage:
-#   ./build.sh                    # Full build (base + groot), push to ECR
-#   ./build.sh --base             # Build base stage only
-#   ./build.sh --groot            # Build groot stage only (requires base already built)
-#   ./build.sh --cleanup-only     # Terminate any leftover build instance
-#   ./build.sh --no-terminate     # Keep instance alive after build (for debugging)
+#   ./build.sh                    # Build workstation (x86_64, base + groot)
+#   ./build.sh --base             # Build workstation base stage only
+#   ./build.sh --groot            # Build workstation groot stage only
+#   ./build.sh --spark            # Build Spark image (ARM64 Graviton)
+#   ./build.sh --cleanup-only     # Terminate any leftover build instances
+#   ./build.sh --no-terminate     # Keep instance alive after build
 #
-# Cost: ~$1.50 for a 2-hour build on c5.4xlarge
+# Cost:
+#   Workstation (c5.4xlarge x86_64): ~$1.50 for a 2-hour build
+#   Spark (c7g.4xlarge ARM64):       ~$1.20 for a 1-hour build
 # =============================================================================
 set -euo pipefail
 
@@ -24,6 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSTATION_DIR="$REPO_ROOT/environments/workstation"
+SPARK_DIR="$REPO_ROOT/environments/spark"
 
 source "$REPO_ROOT/.env"
 
@@ -33,15 +38,16 @@ REGION="${AWS_ECR_REGION:-${AWS_REGION:-eu-west-1}}"
 ECR_REGISTRY="${AWS_ECR_REGISTRY}"
 ECR_REPO="${AWS_ECR_REPO}"
 
-INSTANCE_TYPE="c5.4xlarge"  # 16 vCPU, 32 GB — no GPU needed for build
-VOLUME_SIZE=150             # GB gp3 — peak build uses ~120 GB
+# Spark uses a separate ECR repo (ARM64 images can't share tags with x86_64)
+ECR_REPO_SPARK="${AWS_ECR_REPO_SPARK:-isaac-g1-spark}"
+
 KEY_NAME="dm-docker-build"
-TAG_NAME="dm-docker-build"
 SSH_KEY="$HOME/.ssh/id_ed25519"
 SSH_PUB="$HOME/.ssh/id_ed25519.pub"
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR"
 
-BUILD_TARGET="groot"  # default: base + groot
+BUILD_TARGET="groot"  # default: base + groot (workstation)
+BUILD_PLATFORM="workstation"  # workstation or spark
 NO_TERMINATE=false
 CLEANUP_ONLY=false
 
@@ -50,14 +56,30 @@ for arg in "$@"; do
     case "$arg" in
         --base)          BUILD_TARGET="base" ;;
         --groot)         BUILD_TARGET="groot" ;;
+        --spark)         BUILD_PLATFORM="spark"; BUILD_TARGET="spark" ;;
         --no-terminate)  NO_TERMINATE=true ;;
         --cleanup-only)  CLEANUP_ONLY=true ;;
         -h|--help)
-            head -20 "$0" | tail -15
+            head -24 "$0" | tail -19
             exit 0 ;;
         *) echo "Unknown arg: $arg"; exit 1 ;;
     esac
 done
+
+# Platform-specific configuration
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    INSTANCE_TYPE="c7g.4xlarge"    # 16 vCPU ARM64 Graviton3, 32 GB
+    VOLUME_SIZE=100                # Spark image is smaller (~28 GB)
+    TAG_NAME="dm-docker-build-spark"
+    AMI_FILTER="ubuntu/images/hvm-ssd/ubuntu-noble-24.04-arm64-server-*"
+    ACTIVE_ECR_REPO="$ECR_REPO_SPARK"
+else
+    INSTANCE_TYPE="c5.4xlarge"     # 16 vCPU x86_64, 32 GB
+    VOLUME_SIZE=150                # Workstation image is larger (~42 GB)
+    TAG_NAME="dm-docker-build"
+    AMI_FILTER="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+    ACTIVE_ECR_REPO="$ECR_REPO"
+fi
 
 # ---------- Helpers ----------
 aws_cmd() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
@@ -72,7 +94,7 @@ remote_script() {
 }
 
 cleanup_instance() {
-    log "Looking for existing build instances..."
+    log "Looking for existing build instances ($TAG_NAME)..."
     local ids
     ids=$(aws_cmd ec2 describe-instances \
         --filters "Name=tag:Name,Values=$TAG_NAME" \
@@ -104,12 +126,14 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 if $CLEANUP_ONLY; then
-    cleanup_instance
+    # Clean up both workstation and spark build instances
+    TAG_NAME="dm-docker-build" cleanup_instance
+    TAG_NAME="dm-docker-build-spark" cleanup_instance
     exit 0
 fi
 
 # ---------- Preflight ----------
-log "Preflight checks"
+log "Preflight checks (platform: $BUILD_PLATFORM)"
 
 if [ ! -f "$SSH_KEY" ]; then
     echo "ERROR: SSH key not found: $SSH_KEY"
@@ -123,33 +147,43 @@ if ! aws_cmd sts get-caller-identity > /dev/null 2>&1; then
 fi
 echo "  AWS session valid."
 
-if ! aws_cmd ecr describe-repositories --repository-names "$ECR_REPO" > /dev/null 2>&1; then
-    echo "ERROR: ECR repo '$ECR_REPO' not found in $REGION"
-    exit 1
-fi
-echo "  ECR repo: $ECR_REGISTRY/$ECR_REPO"
-
-# ---------- Collect build context ----------
-log "Collecting build context from environments/workstation/"
-
-# Required files
-for f in "$WORKSTATION_DIR/Dockerfile.unitree" "$WORKSTATION_DIR/requirements-groot.txt"; do
-    if [ ! -f "$f" ]; then
-        echo "ERROR: Missing: $f"
+# Ensure ECR repo exists (create if needed for spark)
+if ! aws_cmd ecr describe-repositories --repository-names "$ACTIVE_ECR_REPO" > /dev/null 2>&1; then
+    if [ "$BUILD_PLATFORM" = "spark" ]; then
+        echo "  Creating ECR repo: $ACTIVE_ECR_REPO"
+        aws_cmd ecr create-repository --repository-name "$ACTIVE_ECR_REPO" > /dev/null
+    else
+        echo "ERROR: ECR repo '$ACTIVE_ECR_REPO' not found in $REGION"
         exit 1
     fi
-done
+fi
+echo "  ECR repo: $ECR_REGISTRY/$ACTIVE_ECR_REPO"
 
-BUILD_FILES=(
-    "$WORKSTATION_DIR/Dockerfile.unitree"
-    "$WORKSTATION_DIR/requirements-groot.txt"
-)
-
-# Include patches directory if it exists
-if [ -d "$WORKSTATION_DIR/patches" ]; then
-    PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -name '*.patch' | wc -l | tr -d ' ')
-    echo "  Found $PATCH_COUNT patch file(s)"
-    BUILD_FILES+=("$WORKSTATION_DIR/patches")
+# ---------- Collect build context ----------
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    log "Collecting build context from environments/spark/"
+    if [ ! -f "$SPARK_DIR/Dockerfile.spark" ]; then
+        echo "ERROR: Missing: $SPARK_DIR/Dockerfile.spark"
+        exit 1
+    fi
+    BUILD_FILES=("$SPARK_DIR/Dockerfile.spark")
+else
+    log "Collecting build context from environments/workstation/"
+    for f in "$WORKSTATION_DIR/Dockerfile.unitree" "$WORKSTATION_DIR/requirements-groot.txt"; do
+        if [ ! -f "$f" ]; then
+            echo "ERROR: Missing: $f"
+            exit 1
+        fi
+    done
+    BUILD_FILES=(
+        "$WORKSTATION_DIR/Dockerfile.unitree"
+        "$WORKSTATION_DIR/requirements-groot.txt"
+    )
+    if [ -d "$WORKSTATION_DIR/patches" ]; then
+        PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -name '*.patch' | wc -l | tr -d ' ')
+        echo "  Found $PATCH_COUNT patch file(s)"
+        BUILD_FILES+=("$WORKSTATION_DIR/patches")
+    fi
 fi
 
 echo "  Build files:"
@@ -170,18 +204,18 @@ if ! aws_cmd ec2 describe-key-pairs --key-names "$KEY_NAME" > /dev/null 2>&1; th
 fi
 echo "  Key pair: $KEY_NAME"
 
-# ---------- Ubuntu AMI ----------
-log "Finding Ubuntu 22.04 AMI"
+# ---------- AMI ----------
+log "Finding AMI ($AMI_FILTER)"
 AMI_ID=$(aws_cmd ec2 describe-images \
     --owners 099720109477 \
     --filters \
-        "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*" \
+        "Name=name,Values=$AMI_FILTER" \
         "Name=state,Values=available" \
     --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
     --output text)
 
 if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
-    echo "ERROR: Ubuntu 22.04 AMI not found"
+    echo "ERROR: AMI not found for filter: $AMI_FILTER"
     exit 1
 fi
 echo "  AMI: $AMI_ID"
@@ -234,7 +268,7 @@ fi
 echo "  IAM: $IAM_PROFILE_NAME"
 
 # ---------- Launch instance ----------
-log "Launching $INSTANCE_TYPE"
+log "Launching $INSTANCE_TYPE ($BUILD_PLATFORM)"
 INSTANCE_ID=$(aws_cmd ec2 run-instances \
     --image-id "$AMI_ID" \
     --instance-type "$INSTANCE_TYPE" \
@@ -306,56 +340,87 @@ aws ecr get-login-password --region $REGION | \
 "
 
 # ---------- Build ----------
-BASE_TAG="$ECR_REGISTRY/$ECR_REPO:base-latest"
-GROOT_TAG="$ECR_REGISTRY/$ECR_REPO:latest"
-DATE_TAG="$ECR_REGISTRY/$ECR_REPO:$(date +%Y%m%d)"
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    # ── Spark ARM64 build ──
+    SPARK_TAG="$ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    DATE_TAG="$ECR_REGISTRY/$ACTIVE_ECR_REPO:$(date +%Y%m%d)"
 
-log "Building Docker image (target: $BUILD_TARGET)"
-echo "  Monitor build: ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP 'tail -f ~/build/build.log'"
+    log "Building Spark image (ARM64)"
+    echo "  Monitor: ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP 'tail -f ~/build/build.log'"
 
-remote "
-set -euo pipefail
-cd ~/build
+    remote "
+    set -euo pipefail
+    cd ~/build
 
-echo '=== Build started at \$(date) ===' | tee build.log
+    echo '=== Spark build started at \$(date) ===' | tee build.log
 
-# Always build base first
-echo '>>> Building base stage...' | tee -a build.log
-sudo docker build --target base \
-    -t '$BASE_TAG' \
-    -f Dockerfile.unitree \
-    . 2>&1 | tee -a build.log
-echo '>>> Base complete at \$(date)' | tee -a build.log
-
-if [ '$BUILD_TARGET' = 'groot' ]; then
-    echo '>>> Building groot stage...' | tee -a build.log
-    sudo docker build --target groot \
-        -t '$GROOT_TAG' \
+    sudo docker build \
+        -t '$SPARK_TAG' \
         -t '$DATE_TAG' \
-        -f Dockerfile.unitree \
+        -f Dockerfile.spark \
         . 2>&1 | tee -a build.log
-    echo '>>> Groot complete at \$(date)' | tee -a build.log
-fi
 
-echo '=== Build finished at \$(date) ===' | tee -a build.log
+    echo '=== Build finished at \$(date) ===' | tee -a build.log
 
-# Push to ECR
-echo '>>> Pushing base-latest...' | tee -a build.log
-sudo docker push '$BASE_TAG' 2>&1 | tee -a build.log
-
-if [ '$BUILD_TARGET' = 'groot' ]; then
     echo '>>> Pushing latest...' | tee -a build.log
-    sudo docker push '$GROOT_TAG' 2>&1 | tee -a build.log
+    sudo docker push '$SPARK_TAG' 2>&1 | tee -a build.log
+
     echo '>>> Pushing date tag...' | tee -a build.log
     sudo docker push '$DATE_TAG' 2>&1 | tee -a build.log
-fi
 
-echo '=== ALL DONE at \$(date) ===' | tee -a build.log
-"
+    echo '=== ALL DONE at \$(date) ===' | tee -a build.log
+    "
+else
+    # ── Workstation x86_64 build ──
+    BASE_TAG="$ECR_REGISTRY/$ACTIVE_ECR_REPO:base-latest"
+    GROOT_TAG="$ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    DATE_TAG="$ECR_REGISTRY/$ACTIVE_ECR_REPO:$(date +%Y%m%d)"
+
+    log "Building workstation image (target: $BUILD_TARGET)"
+    echo "  Monitor: ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP 'tail -f ~/build/build.log'"
+
+    remote "
+    set -euo pipefail
+    cd ~/build
+
+    echo '=== Build started at \$(date) ===' | tee build.log
+
+    echo '>>> Building base stage...' | tee -a build.log
+    sudo docker build --target base \
+        -t '$BASE_TAG' \
+        -f Dockerfile.unitree \
+        . 2>&1 | tee -a build.log
+    echo '>>> Base complete at \$(date)' | tee -a build.log
+
+    if [ '$BUILD_TARGET' = 'groot' ]; then
+        echo '>>> Building groot stage...' | tee -a build.log
+        sudo docker build --target groot \
+            -t '$GROOT_TAG' \
+            -t '$DATE_TAG' \
+            -f Dockerfile.unitree \
+            . 2>&1 | tee -a build.log
+        echo '>>> Groot complete at \$(date)' | tee -a build.log
+    fi
+
+    echo '=== Build finished at \$(date) ===' | tee -a build.log
+
+    echo '>>> Pushing base-latest...' | tee -a build.log
+    sudo docker push '$BASE_TAG' 2>&1 | tee -a build.log
+
+    if [ '$BUILD_TARGET' = 'groot' ]; then
+        echo '>>> Pushing latest...' | tee -a build.log
+        sudo docker push '$GROOT_TAG' 2>&1 | tee -a build.log
+        echo '>>> Pushing date tag...' | tee -a build.log
+        sudo docker push '$DATE_TAG' 2>&1 | tee -a build.log
+    fi
+
+    echo '=== ALL DONE at \$(date) ===' | tee -a build.log
+    "
+fi
 
 # ---------- Verify ----------
 log "ECR images"
-aws_cmd ecr describe-images --repository-name "$ECR_REPO" \
+aws_cmd ecr describe-images --repository-name "$ACTIVE_ECR_REPO" \
     --query 'sort_by(imageDetails, &imagePushedAt)[-3:].{tags:imageTags,pushed:imagePushedAt,sizeMB:to_string(div(imageSizeInBytes,`1048576`))}' \
     --output table
 
@@ -373,24 +438,42 @@ fi
 # ---------- Summary ----------
 echo ""
 echo "=========================================="
-echo "  BUILD & PUSH COMPLETE"
+echo "  BUILD & PUSH COMPLETE ($BUILD_PLATFORM)"
 echo "=========================================="
 echo ""
-echo "  ECR images:"
-echo "    $ECR_REGISTRY/$ECR_REPO:base-latest"
-if [ "$BUILD_TARGET" = "groot" ]; then
-    echo "    $ECR_REGISTRY/$ECR_REPO:latest"
-    echo "    $ECR_REGISTRY/$ECR_REPO:$(date +%Y%m%d)"
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    echo "  ECR images:"
+    echo "    $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    echo "    $ECR_REGISTRY/$ACTIVE_ECR_REPO:$(date +%Y%m%d)"
+    echo ""
+    echo "  Pull on Spark:"
+    echo "    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
+    echo "    docker pull $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    echo "    docker tag $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest dm-spark-workstation:latest"
+else
+    echo "  ECR images:"
+    echo "    $ECR_REGISTRY/$ACTIVE_ECR_REPO:base-latest"
+    if [ "$BUILD_TARGET" = "groot" ]; then
+        echo "    $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+        echo "    $ECR_REGISTRY/$ACTIVE_ECR_REPO:$(date +%Y%m%d)"
+    fi
+    echo ""
+    echo "  Pull on workstation:"
+    echo "    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
+    echo "    docker pull $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    echo "    docker tag $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest dm-workstation:latest"
 fi
 echo ""
-echo "  Pull on workstation:"
-echo "    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
-echo "    docker pull $ECR_REGISTRY/$ECR_REPO:latest"
-echo "    docker tag $ECR_REGISTRY/$ECR_REPO:latest dm-workstation:latest"
-echo ""
 echo "  Update running container:"
-echo "    cd dm-isaac-g1/environments/workstation"
-echo "    docker compose -f docker-compose.unitree.yml stop groot"
-echo "    docker compose -f docker-compose.unitree.yml rm -f groot"
-echo "    docker compose -f docker-compose.unitree.yml up -d groot"
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    echo "    cd dm-isaac-g1/environments/spark"
+    echo "    docker compose -f docker-compose.spark.yml stop workstation"
+    echo "    docker compose -f docker-compose.spark.yml rm -f workstation"
+    echo "    docker compose -f docker-compose.spark.yml up -d workstation"
+else
+    echo "    cd dm-isaac-g1/environments/workstation"
+    echo "    docker compose -f docker-compose.unitree.yml stop groot"
+    echo "    docker compose -f docker-compose.unitree.yml rm -f groot"
+    echo "    docker compose -f docker-compose.unitree.yml up -d groot"
+fi
 echo ""

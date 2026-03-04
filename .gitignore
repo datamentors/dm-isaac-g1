@@ -88,3 +88,8 @@ temp/
 cloud/vastai/vastai_ssh_key
 cloud/vastai/vastai_ssh_key.pub
 cloud/vastai/.instance_id
+
+# ECS SSH keys and ephemeral state
+cloud/ecs/*.pem
+cloud/ecs/.cluster-config
+cloud/ecs/.last-task-arn
