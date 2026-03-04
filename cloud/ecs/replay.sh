@@ -55,37 +55,34 @@ nvidia-smi || { echo "ERROR: No GPU available"; exit 1; }
 
 # ── Setup Vulkan ─────────────────────────────────────────────────────────────
 # Isaac Sim's PhysX discovers GPUs through Vulkan (not CUDA directly).
-# We try NVIDIA hardware Vulkan first; fall back to Mesa lavapipe (CPU) if unavailable.
+# The host installs libnvidia-vulkan-producer.so and nvidia_icd.json via UserData.
+# These are bind-mounted into the container at /host-nvidia-libs and /host-vulkan-icd.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR"
 
-# Ensure NVIDIA Vulkan ICD manifest exists (nvidia-container-toolkit may not create it)
+# Copy the host's nvidia_icd.json (which points to libnvidia-vulkan-producer.so)
 NVIDIA_ICD=/usr/share/vulkan/icd.d/nvidia_icd.json
-if [[ ! -f "$NVIDIA_ICD" ]]; then
-    mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d
-    echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libGLX_nvidia.so.0","api_version":"1.3"}}' > "$NVIDIA_ICD"
+mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d
+if [[ -f /host-vulkan-icd/nvidia_icd.json ]]; then
+    cp /host-vulkan-icd/nvidia_icd.json "$NVIDIA_ICD"
+    cp /host-vulkan-icd/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
+    echo "Copied host nvidia_icd.json:"
+    cat "$NVIDIA_ICD"
+else
+    echo "WARNING: /host-vulkan-icd/nvidia_icd.json not found (host volume not mounted?)"
+    # Fallback: create ICD pointing to libnvidia-vulkan-producer.so
+    echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libnvidia-vulkan-producer.so","api_version":"1.3"}}' > "$NVIDIA_ICD"
     cp "$NVIDIA_ICD" /etc/vulkan/icd.d/nvidia_icd.json
 fi
 
-# Install NVIDIA Vulkan/GLX libraries if not already present.
-# These provide libGLX_nvidia.so.0 and libnvidia-glvkspirv.so which are required
-# for NVIDIA hardware Vulkan. On ECS, the nvidia-container-toolkit often doesn't
-# mount these because the host AMI only has compute drivers installed.
-# We detect the host driver version from nvidia-smi and install the matching package.
-if ! ldconfig -p 2>/dev/null | grep -q libGLX_nvidia; then
-    echo "NVIDIA Vulkan/GLX libraries not found — installing..."
-    DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
-    if [[ -n "$DRIVER_VERSION" ]]; then
-        echo "Host driver major version: $DRIVER_VERSION"
-        apt-get update -qq 2>/dev/null
-        # Try server variant first, then regular
-        apt-get install -y -qq "libnvidia-gl-${DRIVER_VERSION}-server" 2>/dev/null \
-            || apt-get install -y -qq "libnvidia-gl-${DRIVER_VERSION}" 2>/dev/null \
-            || echo "WARNING: Could not install libnvidia-gl-${DRIVER_VERSION}"
-        ldconfig 2>/dev/null || true
-    else
-        echo "WARNING: Could not detect host driver version from nvidia-smi"
-    fi
+# Add host NVIDIA libs to library search path
+if [[ -d /host-nvidia-libs ]]; then
+    export LD_LIBRARY_PATH="/host-nvidia-libs:${LD_LIBRARY_PATH:-}"
+    ldconfig /host-nvidia-libs 2>/dev/null || true
+    echo "Host NVIDIA libs:"
+    ls /host-nvidia-libs/libnvidia-vulkan* 2>/dev/null || echo "  (no libnvidia-vulkan-producer.so found)"
+else
+    echo "WARNING: /host-nvidia-libs not mounted — NVIDIA Vulkan may not work"
 fi
 
 # Ensure Mesa lavapipe is available as fallback
@@ -97,11 +94,6 @@ fi
 
 # Set Vulkan ICD — NVIDIA primary, lavapipe fallback
 export VK_ICD_FILENAMES="$NVIDIA_ICD:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
-if ldconfig -p 2>/dev/null | grep -q libGLX_nvidia; then
-    echo "Vulkan configured: NVIDIA hardware (primary) + lavapipe (fallback)"
-else
-    echo "WARNING: libGLX_nvidia still not found after install attempt — Isaac Sim may not find GPU"
-fi
 
 # Diagnostic: show Vulkan state
 echo "VK_ICD_FILENAMES=$VK_ICD_FILENAMES"

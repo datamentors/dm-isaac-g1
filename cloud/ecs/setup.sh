@@ -267,16 +267,56 @@ fi
 # User data for ECS instances: register with cluster
 USER_DATA=$(cat << USERDATA | base64
 #!/bin/bash
+
+# ECS configuration
 echo ECS_CLUSTER=${CLUSTER_NAME} >> /etc/ecs/ecs.config
 echo ECS_ENABLE_GPU_SUPPORT=true >> /etc/ecs/ecs.config
-echo ECS_AVAILABLE_LOGGING_DRIVERS='["json-file","awslogs"]' >> /etc/ecs/ecs.config
+echo 'ECS_AVAILABLE_LOGGING_DRIVERS=["json-file","awslogs"]' >> /etc/ecs/ecs.config
 echo ECS_ENABLE_EXECUTE_COMMAND=true >> /etc/ecs/ecs.config
+
+# Load NVIDIA DRM kernel module for Vulkan/rendering support (creates /dev/dri/)
+modprobe nvidia-drm modeset=1 2>/dev/null || true
+
+# Install full NVIDIA Vulkan support on the host.
+# The ECS GPU AMI only includes compute driver libs, not graphics/Vulkan.
+# Isaac Sim and other rendering apps need the Vulkan producer library.
+# We extract it from the NVIDIA .run installer matching the host driver version.
+# The resulting libs are bind-mounted into containers via ECS task definition volumes.
+DRIVER_VERSION=\$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
+if [ -n "\$DRIVER_VERSION" ]; then
+    if [ ! -f /usr/lib64/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} ]; then
+        echo "Installing NVIDIA Vulkan support for driver \${DRIVER_VERSION}..."
+        DRIVER_URL="https://us.download.nvidia.com/tesla/\${DRIVER_VERSION}/NVIDIA-Linux-x86_64-\${DRIVER_VERSION}.run"
+        curl -sL "\$DRIVER_URL" -o /tmp/nvidia-driver.run
+        chmod +x /tmp/nvidia-driver.run
+        /tmp/nvidia-driver.run --extract-only --target /tmp/nvidia-driver 2>/dev/null || true
+        if [ -d /tmp/nvidia-driver ]; then
+            cp -f /tmp/nvidia-driver/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/ 2>/dev/null || true
+            ln -sf libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/libnvidia-vulkan-producer.so 2>/dev/null || true
+            mkdir -p /etc/vulkan/icd.d /usr/share/vulkan/icd.d
+            cat > /usr/share/vulkan/icd.d/nvidia_icd.json << VICD
+{
+    "file_format_version" : "1.0.0",
+    "ICD": {
+        "library_path": "libnvidia-vulkan-producer.so.\${DRIVER_VERSION}",
+        "api_version" : "1.3"
+    }
+}
+VICD
+            cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/
+            ldconfig
+            echo "NVIDIA Vulkan support installed successfully"
+        fi
+        rm -rf /tmp/nvidia-driver /tmp/nvidia-driver.run
+    fi
+fi
 
 # Install AWS CLI v2 for S3 operations inside tasks
 if ! command -v aws &>/dev/null; then
     curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
     unzip -q /tmp/awscliv2.zip -d /tmp
     /tmp/aws/install
+    rm -rf /tmp/awscliv2.zip /tmp/aws
 fi
 
 # Note: VNC (TurboVNC), Chrome, XFCE4 are already in the ECR Docker image.

@@ -67,11 +67,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Vulkan configuration — NVIDIA ICD manifest for PhysX GPU discovery + lavapipe fallback.
+# On ECS, the host's libnvidia-vulkan-producer.so is bind-mounted at /host-nvidia-libs.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # NVIDIA Vulkan ICD manifest — PhysX discovers GPUs through Vulkan, not CUDA directly.
+# Default points to libnvidia-vulkan-producer.so; on ECS, host ICD overrides at runtime.
 RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
-    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
+    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libnvidia-vulkan-producer.so", "api_version": "1.3"}}' \
     > /usr/share/vulkan/icd.d/nvidia_icd.json && \
     cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
 

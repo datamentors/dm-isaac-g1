@@ -80,9 +80,11 @@ aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 
 # Vulkan ICD setup command (shared across all containers)
 # Isaac Sim's PhysX discovers GPUs through Vulkan, so we need the NVIDIA Vulkan ICD.
-# We also install Mesa lavapipe as a CPU fallback. The NVIDIA ICD manifest points to
-# libGLX_nvidia.so.0, which nvidia-container-toolkit mounts into the container at runtime.
-VULKAN_SETUP_CMD='mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d /tmp/xdg 2>/dev/null; test -f /usr/share/vulkan/icd.d/nvidia_icd.json || { echo eyJmaWxlX2Zvcm1hdF92ZXJzaW9uIjoiMS4wLjAiLCJJQ0QiOnsibGlicmFyeV9wYXRoIjoibGliR0xYX252aWRpYS5zby4wIiwiYXBpX3ZlcnNpb24iOiIxLjMifX0= | base64 -d > /usr/share/vulkan/icd.d/nvidia_icd.json; cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; }; ldconfig -p 2>/dev/null | grep -q libGLX_nvidia || { DV=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1); apt-get update -qq 2>/dev/null; apt-get install -y -qq libnvidia-gl-${DV:-550}-server 2>/dev/null || apt-get install -y -qq libnvidia-gl-${DV:-550} 2>/dev/null; ldconfig 2>/dev/null; }; test -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json || { apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; }; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json; export XDG_RUNTIME_DIR=/tmp/xdg'
+# The host UserData (launch template v3) installs libnvidia-vulkan-producer.so and
+# nvidia_icd.json. We bind-mount these into the container via /host-nvidia-libs and
+# /host-vulkan-icd volumes. This command copies the host ICD into the container's
+# Vulkan ICD directory, registers host libs with ldconfig, and ensures lavapipe fallback.
+VULKAN_SETUP_CMD='mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d /tmp/xdg 2>/dev/null; test -f /host-vulkan-icd/nvidia_icd.json && { cp /host-vulkan-icd/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json; cp /host-vulkan-icd/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; }; ldconfig /host-nvidia-libs 2>/dev/null; test -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json || { apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; }; cat /usr/share/vulkan/icd.d/nvidia_icd.json 2>/dev/null; ls /host-nvidia-libs/libnvidia-vulkan* 2>/dev/null || true'
 
 # VNC + XFCE4 desktop startup command (shared across all containers)
 # Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
@@ -164,6 +166,7 @@ register_task_def() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
+                {"name": "LD_LIBRARY_PATH", "value": "/host-nvidia-libs"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
@@ -184,7 +187,9 @@ register_task_def() {
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
             "mountPoints": [
-                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"},
+                {"sourceVolume": "nvidia-host-libs", "containerPath": "/host-nvidia-libs", "readOnly": true},
+                {"sourceVolume": "nvidia-host-vulkan", "containerPath": "/host-vulkan-icd", "readOnly": true}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -227,7 +232,9 @@ register_task_def() {
         }
     ],
     "volumes": [
-        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
 EOF
@@ -378,6 +385,7 @@ cmd_replay() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
+                {"name": "LD_LIBRARY_PATH", "value": "/host-nvidia-libs"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
@@ -399,7 +407,9 @@ cmd_replay() {
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
             "mountPoints": [
-                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"},
+                {"sourceVolume": "nvidia-host-libs", "containerPath": "/host-nvidia-libs", "readOnly": true},
+                {"sourceVolume": "nvidia-host-vulkan", "containerPath": "/host-vulkan-icd", "readOnly": true}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -442,7 +452,9 @@ cmd_replay() {
         }
     ],
     "volumes": [
-        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
 EOF
@@ -533,6 +545,7 @@ cmd_sim2sim() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
+                {"name": "LD_LIBRARY_PATH", "value": "/host-nvidia-libs"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
@@ -552,7 +565,9 @@ cmd_sim2sim() {
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
             "mountPoints": [
-                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"},
+                {"sourceVolume": "nvidia-host-libs", "containerPath": "/host-nvidia-libs", "readOnly": true},
+                {"sourceVolume": "nvidia-host-vulkan", "containerPath": "/host-vulkan-icd", "readOnly": true}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -595,7 +610,9 @@ cmd_sim2sim() {
         }
     ],
     "volumes": [
-        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
 EOF
@@ -760,6 +777,7 @@ cmd_shell() {
             "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; echo '=== Container ready ==='; sleep 86400"],
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
+                {"name": "LD_LIBRARY_PATH", "value": "/host-nvidia-libs"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
@@ -771,6 +789,10 @@ cmd_shell() {
                 {"name": "WANDB_API_KEY", "value": "${WANDB_API_KEY:-}"},
                 {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-dm-isaac-g1}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
+            ],
+            "mountPoints": [
+                {"sourceVolume": "nvidia-host-libs", "containerPath": "/host-nvidia-libs", "readOnly": true},
+                {"sourceVolume": "nvidia-host-vulkan", "containerPath": "/host-vulkan-icd", "readOnly": true}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -788,6 +810,10 @@ cmd_shell() {
                 ]
             }
         }
+    ],
+    "volumes": [
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
 TASKEOF
