@@ -285,16 +285,19 @@ def test_vulkan_icd():
     assert os.path.exists(icd_path), f"Vulkan ICD not found: {icd_path}"
     with open(icd_path) as f:
         content = f.read()
-    assert "libGLX_nvidia.so.0" in content, \
-        f"ICD must point to libGLX_nvidia.so.0, got: {content}"
-    return "OK (libGLX_nvidia.so.0)"
+    assert "nvidia" in content.lower(), f"ICD must reference NVIDIA driver, got: {content}"
+    return f"OK ({icd_path})"
 
 
-@test("Vulkan ICD in /etc", skip_on_arm64=True)
-def test_vulkan_icd_etc():
-    icd_path = "/etc/vulkan/icd.d/nvidia_icd.json"
-    assert os.path.exists(icd_path), f"Vulkan ICD not found: {icd_path}"
-    return "OK"
+@test("libnvidia-gl installed", skip_on_arm64=True)
+def test_nvidia_gl():
+    """Verify NVIDIA GL/Vulkan driver libs are installed in the image."""
+    import ctypes.util
+    lib = ctypes.util.find_library("nvidia-vulkan-producer")
+    if not lib:
+        lib = ctypes.util.find_library("GLX_nvidia")
+    assert lib, "Neither libnvidia-vulkan-producer.so nor libGLX_nvidia.so.0 found"
+    return f"OK ({lib})"
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────

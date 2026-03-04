@@ -132,29 +132,24 @@ ENV ACCEPT_EULA=Y
 ENV OMNI_KIT_ACCEPT_EULA=Y
 
 # Vulkan configuration for GPU rendering.
-# Isaac Sim's PhysX discovers GPUs through Vulkan, so NVIDIA Vulkan must be available.
-# nvidia-container-toolkit mounts libGLX_nvidia.so.0 into the container when
-# NVIDIA_DRIVER_CAPABILITIES=all is set. The ICD manifest points to this lib.
-# Mesa lavapipe (mesa-vulkan-drivers) is installed as a CPU fallback.
+# Isaac Sim's PhysX discovers GPUs through Vulkan. We install the NVIDIA GL/Vulkan
+# driver libraries directly so the image is self-contained (no reliance on
+# nvidia-container-toolkit version or host lib mounts for Vulkan).
+# libnvidia-gl-550 provides: libGLX_nvidia.so.0, libnvidia-vulkan-producer.so,
+# libnvidia-glvkspirv, and the correct nvidia_icd.json.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
-# Runtime system dependencies
+# Runtime system dependencies + NVIDIA Vulkan/GL driver libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa git git-lfs curl wget \
     zenity unzip vim htop tmux \
     xorg libxext6 libxrender1 libxtst6 libxi6 \
     libglib2.0-0 libvulkan1 vulkan-tools \
     mesa-vulkan-drivers \
+    libnvidia-gl-550 \
     ncurses-term dbus-x11 \
     xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
-
-# NVIDIA Vulkan ICD manifest — points to libGLX_nvidia.so.0 which nvidia-container-toolkit
-# automatically mounts into the container. Works on both ECS and workstation.
-RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
-    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
-    > /usr/share/vulkan/icd.d/nvidia_icd.json && \
-    cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
 
 # Google Chrome — required for AWS SSO authentication in the browser
 # Installed via official Google apt repo for latest stable release.

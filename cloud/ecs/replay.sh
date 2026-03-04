@@ -55,8 +55,8 @@ nvidia-smi || { echo "ERROR: No GPU available"; exit 1; }
 
 # ── Setup Vulkan ─────────────────────────────────────────────────────────────
 # Isaac Sim's PhysX discovers GPUs through Vulkan (not CUDA directly).
-# The Docker image includes the correct NVIDIA Vulkan ICD manifest pointing to
-# libGLX_nvidia.so.0 (mounted by nvidia-container-toolkit at runtime).
+# The Docker image includes libnvidia-gl-550 which provides all NVIDIA Vulkan/GL
+# driver libraries directly — no reliance on nvidia-container-toolkit mounts.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR"
 

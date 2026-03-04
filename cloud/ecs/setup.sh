@@ -357,7 +357,33 @@ if [[ "$LT_EXISTS" == "None" || -z "$LT_EXISTS" ]]; then
             }]
         }" >/dev/null
 else
-    log "Launch template exists: $LT_EXISTS"
+    log "Updating launch template: $LT_EXISTS"
+    aws_cmd ec2 create-launch-template-version \
+        --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+        --launch-template-data "{
+            \"ImageId\": \"$AMI_ID\",
+            \"InstanceType\": \"$INSTANCE_TYPE\",
+            \"KeyName\": \"$KEY_NAME\",
+            \"SecurityGroupIds\": [\"$SG_ID\"],
+            \"IamInstanceProfile\": {\"Name\": \"$ROLE_NAME\"},
+            \"BlockDeviceMappings\": [{
+                \"DeviceName\": \"/dev/xvda\",
+                \"Ebs\": {\"VolumeSize\": $DISK_SIZE_GB, \"VolumeType\": \"gp3\", \"Iops\": 6000, \"Throughput\": 400}
+            }],
+            \"UserData\": \"$USER_DATA\",
+            \"TagSpecifications\": [{
+                \"ResourceType\": \"instance\",
+                \"Tags\": [{\"Key\": \"Name\", \"Value\": \"dm-isaac-g1-ecs-gpu\"}, {\"Key\": \"Project\", \"Value\": \"dm-isaac-g1\"}]
+            }]
+        }" --source-version 1 >/dev/null
+    # Set the new version as default so ASG uses it
+    LATEST_VER=$(aws_cmd ec2 describe-launch-template-versions \
+        --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+        --query 'LaunchTemplateVersions[-1].VersionNumber' --output text)
+    aws_cmd ec2 modify-launch-template \
+        --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
+        --default-version "$LATEST_VER" >/dev/null
+    log "Launch template updated to version $LATEST_VER (set as default)"
 fi
 
 # ── 9. Auto Scaling Group ────────────────────────────────────────────────────
