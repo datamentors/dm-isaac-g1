@@ -369,6 +369,7 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
     echo '=== Spark build started at \$(date) ===' | tee build.log
 
     sudo docker build \
+        --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
         -t '$SPARK_TAG' \
         -t '$DATE_TAG' \
         -f Dockerfile.spark \
@@ -409,6 +410,7 @@ else
     if [ '$BUILD_TARGET' = 'groot' ]; then
         echo '>>> Building groot stage...' | tee -a build.log
         sudo docker build --target groot \
+            --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
             -t '$GROOT_TAG' \
             -t '$DATE_TAG' \
             -f Dockerfile.unitree \

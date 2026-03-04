@@ -65,9 +65,15 @@ RUN python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.
 # Go back to main workspace
 WORKDIR /workspace
 
-# dm-isaac-g1 — baked in as fallback (can be overridden by bind mount at runtime)
-RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
-    cd /workspace/dm-isaac-g1 && pip install -e .
+# dm-isaac-g1 — baked in as fallback (PRIVATE repo, can be overridden by bind mount at runtime)
+ARG GITHUB_TOKEN=""
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    else \
+        git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    fi && \
+    cd /workspace/dm-isaac-g1 && pip install -e . && \
+    cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
 # Create cache directories
 RUN mkdir -p /workspace/.cache/huggingface /workspace/.cache/torch

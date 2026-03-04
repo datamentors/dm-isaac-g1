@@ -204,9 +204,15 @@ RUN uv pip install --system torchcodec wandb
 # ==========================================
 WORKDIR /workspace
 
-# dm-isaac-g1 — main G1 training/inference project
-RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
-    cd /workspace/dm-isaac-g1 && /isaac-sim/python.sh -m pip install -e .
+# dm-isaac-g1 — main G1 training/inference project (PRIVATE repo)
+ARG GITHUB_TOKEN=""
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    else \
+        git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    fi && \
+    cd /workspace/dm-isaac-g1 && /isaac-sim/python.sh -m pip install -e . && \
+    cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
 # Isaac-GR00T — NVIDIA's GR00T framework
 RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T

@@ -158,11 +158,18 @@ RUN pip install pin-pink meshcat 2>/dev/null || \
 # ---------- Clone Workspace Repos ----------
 WORKDIR /workspace
 
-# dm-isaac-g1 — our main G1 training/inference project
+ARG GITHUB_TOKEN=""
+
+# dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
 # Installed as editable so `import dm_isaac_g1` works immediately.
 # On Spark, bind-mounted from host at runtime; baked in as fallback.
-RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
-    cd /workspace/dm-isaac-g1 && pip install -e .
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    else \
+        git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    fi && \
+    cd /workspace/dm-isaac-g1 && pip install -e . && \
+    cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
 # Isaac-GR00T — NVIDIA's GR00T framework (baked in as fallback)
 RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T

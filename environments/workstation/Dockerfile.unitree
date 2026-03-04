@@ -285,18 +285,36 @@ RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytor
 # We clone them here so the image works in both environments.
 # At runtime, bind mounts override these baked-in copies on the workstation.
 # On ECS, users run `git pull` inside the container for latest code.
+#
+# GITHUB_TOKEN: Required to clone private repos (dm-isaac-g1, unitree_rl_lab).
+# Passed as build arg; credentials are cleared after cloning.
+# The build instance is temporary and terminated after push.
 # ==============================
 WORKDIR /workspace
 
-# dm-isaac-g1 — our main G1 training/inference project
+ARG GITHUB_TOKEN=""
+
+# dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
 # Installed as editable so `import dm_isaac_g1` works immediately.
-RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    else \
+        git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
+    fi && \
     cd /workspace/dm-isaac-g1 && uv pip install --system -e .
 
-# unitree_rl_lab — Unitree's RL training framework (RSL-RL based)
+# unitree_rl_lab — Unitree's RL training framework (PRIVATE repo)
 # Required for: RL training scripts, deploy config export, sim2sim pipeline
-RUN git clone https://github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab && \
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab; \
+    else \
+        git clone https://github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab; \
+    fi && \
     cd /workspace/unitree_rl_lab && uv pip install --system -e .
+
+# Clean git credentials from cloned repos (remove token from .git/config remote URLs)
+RUN cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git && \
+    cd /workspace/unitree_rl_lab && git remote set-url origin https://github.com/datamentors/unitree_rl_lab.git
 
 # Isaac-GR00T — NVIDIA's GR00T framework (inference + fine-tuning)
 RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
