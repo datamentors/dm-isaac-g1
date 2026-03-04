@@ -131,11 +131,10 @@ ENV ACCEPT_EULA=Y
 # Correct env var that isaacsim pip package checks to skip interactive EULA
 ENV OMNI_KIT_ACCEPT_EULA=Y
 
-# Vulkan configuration for ECS GPU instances.
-# AWS ECS GPU AMI NVIDIA driver is compute-only (no Vulkan support in kernel module).
-# Mesa lavapipe (CPU Vulkan 1.3) provides software rendering for Isaac Sim headless mode.
-# CUDA compute still uses the NVIDIA GPU normally.
-ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+# Vulkan configuration for GPU rendering.
+# Isaac Sim's PhysX discovers GPUs through Vulkan, so NVIDIA Vulkan must be available.
+# We provide both NVIDIA ICD (hardware GPU) and Mesa lavapipe (CPU fallback).
+# VK_ICD_FILENAMES is set at runtime by the entrypoint/replay script to prefer NVIDIA.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # Runtime system dependencies
@@ -148,6 +147,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ncurses-term dbus-x11 \
     xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
+
+# NVIDIA Vulkan ICD manifest — tells the Vulkan loader where to find the NVIDIA driver.
+# The nvidia-container-toolkit mounts libGLX_nvidia.so.0 into the container at runtime,
+# but doesn't always create the ICD manifest. We create it so PhysX can find the GPU.
+# Mesa lavapipe is also installed above as a CPU fallback for environments without GPU Vulkan.
+RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
+    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
+    > /usr/share/vulkan/icd.d/nvidia_icd.json && \
+    cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
 
 # Google Chrome — required for AWS SSO authentication in the browser
 # Installed via official Google apt repo for latest stable release.

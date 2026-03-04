@@ -66,12 +66,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Vulkan configuration for ECS GPU instances.
-# AWS ECS GPU AMI NVIDIA driver is compute-only (no Vulkan support in kernel module).
-# Mesa lavapipe (CPU Vulkan 1.3) provides software rendering for Isaac Sim headless mode.
-# CUDA compute still uses the NVIDIA GPU normally.
-ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+# Vulkan configuration — NVIDIA ICD manifest for PhysX GPU discovery + lavapipe fallback.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
+
+# NVIDIA Vulkan ICD manifest — PhysX discovers GPUs through Vulkan, not CUDA directly.
+RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
+    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
+    > /usr/share/vulkan/icd.d/nvidia_icd.json && \
+    cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
 
 # Install TurboVNC for remote visualization
 RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb -O /tmp/turbovnc.deb && \

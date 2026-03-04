@@ -79,12 +79,10 @@ err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR:${NC} $*" >&2; }
 aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 
 # Vulkan ICD setup command (shared across all containers)
-# Installs Mesa Vulkan (lavapipe) for software Vulkan rendering.
-# The AWS ECS GPU AMI's NVIDIA driver is compute-only — its kernel module
-# doesn't support Vulkan, so hardware Vulkan is not possible.
-# Lavapipe (CPU-based Vulkan 1.3) works as a reliable fallback for Isaac Sim
-# headless rendering and ONNX export. CUDA/GPU compute still works normally.
-VULKAN_SETUP_CMD='if [ ! -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]; then echo Installing Mesa Vulkan lavapipe; apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; fi; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json; export XDG_RUNTIME_DIR=/tmp/xdg; mkdir -p /tmp/xdg 2>/dev/null'
+# Isaac Sim's PhysX discovers GPUs through Vulkan, so we need the NVIDIA Vulkan ICD.
+# We also install Mesa lavapipe as a CPU fallback. The NVIDIA ICD manifest points to
+# libGLX_nvidia.so.0, which nvidia-container-toolkit mounts into the container at runtime.
+VULKAN_SETUP_CMD='mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d /tmp/xdg 2>/dev/null; if [ ! -f /usr/share/vulkan/icd.d/nvidia_icd.json ]; then printf "{\"file_format_version\":\"1.0.0\",\"ICD\":{\"library_path\":\"libGLX_nvidia.so.0\",\"api_version\":\"1.3\"}}" > /usr/share/vulkan/icd.d/nvidia_icd.json; cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json; fi; if [ ! -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]; then apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; fi; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json; export XDG_RUNTIME_DIR=/tmp/xdg'
 
 # VNC + XFCE4 desktop startup command (shared across all containers)
 # Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
@@ -166,7 +164,7 @@ register_task_def() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
-                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
+                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
                 {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
@@ -380,7 +378,7 @@ cmd_replay() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
-                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
+                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
                 {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
@@ -535,7 +533,7 @@ cmd_sim2sim() {
             "cpu": 6144,
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
-                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
+                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
                 {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
@@ -762,7 +760,7 @@ cmd_shell() {
             "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; echo '=== Container ready ==='; sleep 86400"],
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
-                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
+                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
                 {"name": "ACCEPT_EULA", "value": "Y"},
                 {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
