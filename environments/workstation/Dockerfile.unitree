@@ -358,21 +358,11 @@ RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
 
 # Patch: robot_viser.py AV1 codec fallback — use original_h264.mp4 when original.mp4 is AV1-encoded
 # Skipped if visualization/robot_viser.py doesn't exist (upstream repo restructured).
-RUN python -c "\
-import pathlib; \
-p = pathlib.Path('video2robot/visualization/robot_viser.py'); \
-if not p.exists(): \
-    print('[skip] video2robot/visualization/robot_viser.py not found — patch not needed'); \
-    exit(0); \
-t = p.read_text(); \
-t = t.replace( \
-    'video_path = project_dir / \"original.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists():\n        raise SystemExit(f\"original.mp4 not found: {video_path}\")', \
-    'video_path = project_dir / \"original.mp4\"\n    video_path_h264 = project_dir / \"original_h264.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists() and not video_path_h264.exists():\n        raise SystemExit(f\"No video found: tried {video_path} and {video_path_h264}\")\n    if not video_path.exists():\n        video_path = video_path_h264'); \
-t = t.replace( \
-    'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:', \
-    'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    # Fallback to H264 version if original (possibly AV1) yielded no frames\n    if not frames and video_path.name == \"original.mp4\" and video_path_h264.exists():\n        print(f\"[RobotViser] original.mp4 unreadable (AV1?), trying {video_path_h264.name}\")\n        video_path = video_path_h264\n        frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:'); \
-p.write_text(t); \
-print('Patched robot_viser.py with AV1 fallback')"
+COPY patches/robot_viser_av1_fallback.patch /tmp/
+RUN test -f video2robot/visualization/robot_viser.py \
+    && cd video2robot && git apply /tmp/robot_viser_av1_fallback.patch \
+    && echo "[ok] Patched robot_viser.py with AV1 fallback" \
+    || echo "[skip] robot_viser.py not found in upstream — patch not needed"
 
 # unitree_model — Unitree USD/URDF/MJCF models from HuggingFace
 RUN git lfs install && \
