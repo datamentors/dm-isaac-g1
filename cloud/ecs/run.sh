@@ -84,7 +84,7 @@ aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 # doesn't support Vulkan, so hardware Vulkan is not possible.
 # Lavapipe (CPU-based Vulkan 1.3) works as a reliable fallback for Isaac Sim
 # headless rendering and ONNX export. CUDA/GPU compute still works normally.
-VULKAN_SETUP_CMD='if [ ! -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]; then echo "Installing Mesa Vulkan (lavapipe)..."; apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; fi; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json; export XDG_RUNTIME_DIR=/tmp/xdg; mkdir -p /tmp/xdg 2>/dev/null'
+VULKAN_SETUP_CMD='if [ ! -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]; then echo Installing Mesa Vulkan lavapipe; apt-get update -qq 2>/dev/null; apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null; fi; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json; export XDG_RUNTIME_DIR=/tmp/xdg; mkdir -p /tmp/xdg 2>/dev/null'
 
 # VNC + XFCE4 desktop startup command (shared across all containers)
 # Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
@@ -168,6 +168,9 @@ register_task_def() {
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
+                {"name": "ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ALLOW_ROOT", "value": "1"},
                 {"name": "MOTION_NAME", "value": "${motion}"},
                 {"name": "TASK_ID", "value": "${task_id}"},
                 {"name": "MAX_ITERATIONS", "value": "${max_iter}"},
@@ -379,6 +382,9 @@ cmd_replay() {
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
+                {"name": "ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ALLOW_ROOT", "value": "1"},
                 {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
                 {"name": "TASK_ID", "value": "${TASK_ID}"},
                 {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
@@ -531,6 +537,9 @@ cmd_sim2sim() {
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
+                {"name": "ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ALLOW_ROOT", "value": "1"},
                 {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
                 {"name": "TASK_ID", "value": "${TASK_ID}"},
                 {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
@@ -755,6 +764,9 @@ cmd_shell() {
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
                 {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
+                {"name": "ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ALLOW_ROOT", "value": "1"},
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
                 {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},

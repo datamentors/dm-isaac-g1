@@ -62,7 +62,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     ncurses-term \
     dbus-x11 \
+    mesa-vulkan-drivers \
+    vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
+
+# Vulkan configuration for ECS GPU instances.
+# AWS ECS GPU AMI NVIDIA driver is compute-only (no Vulkan support in kernel module).
+# Mesa lavapipe (CPU Vulkan 1.3) provides software rendering for Isaac Sim headless mode.
+# CUDA compute still uses the NVIDIA GPU normally.
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # Install TurboVNC for remote visualization
 RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb -O /tmp/turbovnc.deb && \
