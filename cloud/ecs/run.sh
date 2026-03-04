@@ -233,7 +233,7 @@ register_task_def() {
     ],
     "volumes": [
         {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
-        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/opt/nvidia-vulkan"}},
         {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
@@ -453,7 +453,7 @@ cmd_replay() {
     ],
     "volumes": [
         {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
-        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/opt/nvidia-vulkan"}},
         {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
@@ -611,7 +611,7 @@ cmd_sim2sim() {
     ],
     "volumes": [
         {"name": "training-data", "host": {"sourcePath": "/opt/training"}},
-        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/opt/nvidia-vulkan"}},
         {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }
@@ -812,7 +812,7 @@ cmd_shell() {
         }
     ],
     "volumes": [
-        {"name": "nvidia-host-libs", "host": {"sourcePath": "/usr/lib64"}},
+        {"name": "nvidia-host-libs", "host": {"sourcePath": "/opt/nvidia-vulkan"}},
         {"name": "nvidia-host-vulkan", "host": {"sourcePath": "/usr/share/vulkan/icd.d"}}
     ]
 }

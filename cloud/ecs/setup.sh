@@ -293,6 +293,10 @@ if [ -n "\$DRIVER_VERSION" ]; then
         if [ -d /tmp/nvidia-driver ]; then
             cp -f /tmp/nvidia-driver/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/ 2>/dev/null || true
             ln -sf libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/libnvidia-vulkan-producer.so 2>/dev/null || true
+            # Also copy to dedicated dir for container bind-mounting (avoids exposing all of /usr/lib64)
+            mkdir -p /opt/nvidia-vulkan
+            cp -f /tmp/nvidia-driver/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /opt/nvidia-vulkan/ 2>/dev/null || true
+            ln -sf libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /opt/nvidia-vulkan/libnvidia-vulkan-producer.so 2>/dev/null || true
             mkdir -p /etc/vulkan/icd.d /usr/share/vulkan/icd.d
             cat > /usr/share/vulkan/icd.d/nvidia_icd.json << VICD
 {
