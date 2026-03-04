@@ -68,6 +68,7 @@ TASK_ARN=""
 CHECKPOINT_FILE=""
 VIDEO_LENGTH=""
 HF_REPO=""
+HEADLESS="true"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -513,9 +514,10 @@ cmd_sim2sim() {
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
                 {"name": "VIDEO_LENGTH", "value": "${VIDEO_LENGTH:-10}"},
+                {"name": "HEADLESS", "value": "${HEADLESS}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; bash /opt/training/scripts/sim2sim.sh"],
+            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/sim2sim.sh"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -951,6 +953,7 @@ while [[ $# -gt 0 ]]; do
         --checkpoint)     CHECKPOINT_FILE="$2"; shift 2 ;;
         --video-length)   VIDEO_LENGTH="$2"; shift 2 ;;
         --hf-repo)        HF_REPO="$2"; shift 2 ;;
+        --gui)            HEADLESS="false"; shift ;;
         *) err "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -996,6 +999,7 @@ case "$COMMAND" in
         echo "  --checkpoint <file>     Specific checkpoint file for replay (default: latest)"
         echo "  --video-length <n>      Video length in steps for replay (default: 300)"
         echo "  --hf-repo <repo>        HuggingFace repo for replay upload (optional)"
+        echo "  --gui                   Run sim2sim in GUI mode (MuJoCo viewer via VNC)"
         echo ""
         echo "Examples:"
         echo "  $0 submit --task mimic --motion cr7_06_tiktok_uefa"
@@ -1007,6 +1011,7 @@ case "$COMMAND" in
         echo "  $0 replay --task mimic --motion video_007 --hf-repo datamentorshf/dm-g1-video007-mimic"
         echo "  $0 sim2sim --task rl --task-id DM-G1-29dof-FALCON"
         echo "  $0 sim2sim --task mimic --motion cr7_06_tiktok_uefa"
+        echo "  $0 sim2sim --task rl --task-id DM-G1-29dof-FALCON --gui  # VNC interactive"
         echo "  $0 shell                                   # interactive GPU container"
         echo "  $0 exec --task-arn <arn>                   # bash into container"
         echo "  $0 ssh                                     # SSH into EC2 instance"
