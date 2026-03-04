@@ -71,7 +71,7 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
     INSTANCE_TYPE="c7g.4xlarge"    # 16 vCPU ARM64 Graviton3, 32 GB
     VOLUME_SIZE=100                # Spark image is smaller (~28 GB)
     TAG_NAME="dm-docker-build-spark"
-    AMI_FILTER="ubuntu/images/hvm-ssd/ubuntu-noble-24.04-arm64-server-*"
+    AMI_FILTER="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"
     ACTIVE_ECR_REPO="$ECR_REPO_SPARK"
 else
     INSTANCE_TYPE="c5.4xlarge"     # 16 vCPU x86_64, 32 GB
@@ -230,7 +230,7 @@ SG_ID=$(aws_cmd ec2 describe-security-groups \
 if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
     SG_ID=$(aws_cmd ec2 create-security-group \
         --group-name "$SG_NAME" \
-        --description "Docker image build — SSH only" \
+        --description "Docker image build - SSH only" \
         --query 'GroupId' --output text)
     aws_cmd ec2 authorize-security-group-ingress \
         --group-id "$SG_ID" --protocol tcp --port 22 --cidr 0.0.0.0/0 > /dev/null
@@ -306,14 +306,28 @@ for i in $(seq 1 30); do
 done
 
 # ---------- Install Docker ----------
-log "Installing Docker"
+log "Installing Docker + AWS CLI"
 remote_script '
 set -euo pipefail
 sudo apt-get update -qq
-sudo apt-get install -y -qq docker.io awscli > /dev/null 2>&1
+sudo apt-get install -y -qq docker.io unzip > /dev/null 2>&1
 sudo systemctl enable docker && sudo systemctl start docker
 sudo usermod -aG docker ubuntu
-echo "Docker $(docker --version | cut -d, -f1 | cut -d" " -f3)"
+
+# AWS CLI v2 (awscli apt package not available on Noble ARM64)
+if ! command -v aws &> /dev/null; then
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "aarch64" ]; then
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscli.zip
+    else
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+    fi
+    unzip -qq /tmp/awscli.zip -d /tmp
+    sudo /tmp/aws/install
+    rm -rf /tmp/awscli.zip /tmp/aws
+fi
+echo "Docker $(docker --version | cut -d, -f1 | cut -d\" \" -f3)"
+echo "AWS CLI $(aws --version | cut -d/ -f2 | cut -d\" \" -f1)"
 '
 
 # ---------- Upload build context ----------

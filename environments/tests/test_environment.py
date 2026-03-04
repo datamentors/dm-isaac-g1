@@ -309,7 +309,7 @@ def test_flash_attn():
     return f"flash-attn {flash_attn.__version__}"
 
 
-@test("torchcodec", skip_on_arm64=True)
+@test("torchcodec")
 def test_torchcodec():
     import torchcodec
     return f"torchcodec {torchcodec.__version__}"

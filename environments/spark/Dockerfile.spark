@@ -20,8 +20,10 @@
 # What's NOT available on ARM64:
 #   - Isaac Sim (x86_64 only)
 #   - IsaacLab (depends on Isaac Sim)
-#   - flash-attn (no ARM64 build — model uses standard attention)
-#   - torchcodec (no ARM64 wheels — use av/decord instead)
+#
+# ARM64 notes:
+#   - flash-attn: included in NVIDIA base container (works on Grace Hopper)
+#   - torchcodec: no PyPI wheels — built from source during image build (v0.5 for PyTorch 2.7)
 #
 # Build:
 #   docker build -f Dockerfile.spark -t dm-spark-workstation:latest .
@@ -63,8 +65,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas-dev \
     libegl1-mesa-dev \
     libgles2-mesa-dev \
-    # Video processing
+    # Video processing + FFmpeg dev headers (for building torchcodec from source)
     ffmpeg \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavcodec-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -83,8 +93,8 @@ RUN sed -i 's/requires-python = "==3.10.*"/requires-python = ">=3.10"/g' pyproje
     sed -i 's/torch==2.7.1/torch>=2.5.0/g' pyproject.toml && \
     sed -i 's/torchvision==0.22.1/torchvision>=0.20.0/g' pyproject.toml && \
     sed -i 's/transformers==4.51.3/transformers>=4.40.0,<5.0.0/g' pyproject.toml && \
-    sed -i 's/"torchcodec==0.4.0",/# "torchcodec==0.4.0",  # Not available on ARM64/g' pyproject.toml && \
-    sed -i 's/"flash-attn==2.7.4.post1",/# "flash-attn==2.7.4.post1",  # Not available on ARM64/g' pyproject.toml
+    sed -i 's/"torchcodec==0.4.0",/# "torchcodec==0.4.0",  # Built from source below/g' pyproject.toml && \
+    sed -i 's/"flash-attn==2.7.4.post1",/# "flash-attn==2.7.4.post1",  # Already in NVIDIA base container/g' pyproject.toml
 
 # Fix NVIDIA container's constraint file
 RUN sed -i 's/dm-tree==0.1.9/dm-tree==0.1.8/g' /etc/pip/constraint.txt 2>/dev/null || true
@@ -96,9 +106,21 @@ RUN pip install --no-deps -e . && \
     peft termcolor tyro datasets gymnasium omegaconf pyzmq deepspeed wandb \
     transformers==4.51.3
 
-# Verify GR00T
+# ---------- TorchCodec (from source for ARM64) ----------
+# No PyPI wheels for aarch64. Build v0.5 from source (compatible with PyTorch 2.7).
+# Required by GR00T's dataset loaders (lerobot_episode_loader, video_utils, experiment).
+RUN cd /tmp && \
+    git clone --depth 1 --branch v0.5.0 https://github.com/pytorch/torchcodec.git && \
+    cd torchcodec && \
+    ENABLE_CUDA=0 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 \
+    pip wheel . --no-build-isolation --no-binary=torchcodec -w /tmp/tc_wheel && \
+    pip install /tmp/tc_wheel/torchcodec*.whl && \
+    rm -rf /tmp/torchcodec /tmp/tc_wheel
+
+# Verify GR00T + torchcodec
 RUN python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')" && \
-    python -c "import gr00t; print('GR00T imported successfully')"
+    python -c "import gr00t; print('GR00T imported successfully')" && \
+    python -c "import torchcodec; print(f'torchcodec {torchcodec.__version__}')"
 
 # ---------- MuJoCo + Menagerie ----------
 # MuJoCo 3.2.6 for closed-loop eval (flexcomp deformable objects)
