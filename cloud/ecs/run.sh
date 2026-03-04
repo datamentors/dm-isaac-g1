@@ -10,6 +10,8 @@
 #
 # Commands:
 #   submit    Upload data + register task + run on ECS
+#   replay    Run replay/export on a trained model (export ONNX/JIT + record video)
+#   sim2sim   Validate exported policy in MuJoCo (Isaac Lab → MuJoCo transfer)
 #   shell     Launch a long-running GPU container for interactive work
 #   exec      Get a bash shell into a running container (ECS Exec)
 #   status    Check running/pending tasks
@@ -23,6 +25,9 @@
 #   ./run.sh submit --task mimic --motion cr7_06_tiktok_uefa --max-iterations 50000
 #   ./run.sh submit --task rl --task-id DM-G1-29dof-FALCON
 #   ./run.sh submit --task rl --task-id DM-G1-29dof-SoFTA --max-iterations 30000
+#   ./run.sh replay --task mimic --motion cr7_06_tiktok_uefa
+#   ./run.sh replay --task rl --task-id DM-G1-29dof-FALCON
+#   ./run.sh sim2sim --task rl --task-id DM-G1-29dof-FALCON
 #   ./run.sh shell                          # launch interactive GPU container
 #   ./run.sh exec --task-arn <arn>           # get bash shell into running container
 #   ./run.sh status
@@ -60,6 +65,9 @@ MOTION_NAME=""
 TASK_ID=""
 MAX_ITERATIONS=""
 TASK_ARN=""
+CHECKPOINT_FILE=""
+VIDEO_LENGTH=""
+HF_REPO=""
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -68,6 +76,11 @@ warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] WARNING:${NC} $*"; }
 err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR:${NC} $*" >&2; }
 
 aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
+
+# VNC + XFCE4 desktop startup command (shared across all containers)
+# Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
+# Uses -noxstartup to bypass TurboVNC's session detection (which fails to find xfce.desktop).
+VNC_STARTUP_CMD='rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null; /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 -noxstartup 2>/dev/null; export DISPLAY=:1; nohup dbus-launch startxfce4 &>/dev/null &'
 
 # ── Upload Training Data ─────────────────────────────────────────────────────
 upload_data() {
@@ -97,10 +110,12 @@ upload_data() {
         log "Uploaded: s3://${S3_BUCKET}/tasks/mimic/${motion}/"
     fi
 
-    # Upload training scripts
+    # Upload training/replay/sim2sim scripts
     aws_cmd s3 cp "$SCRIPT_DIR/train_mimic.sh" "s3://${S3_BUCKET}/scripts/train_mimic.sh"
     aws_cmd s3 cp "$SCRIPT_DIR/train_rl.sh" "s3://${S3_BUCKET}/scripts/train_rl.sh"
-    log "Uploaded training scripts"
+    aws_cmd s3 cp "$SCRIPT_DIR/replay.sh" "s3://${S3_BUCKET}/scripts/replay.sh"
+    aws_cmd s3 cp "$SCRIPT_DIR/sim2sim.sh" "s3://${S3_BUCKET}/scripts/sim2sim.sh"
+    log "Uploaded training/replay/sim2sim scripts"
 }
 
 # ── Register Task Definition ─────────────────────────────────────────────────
@@ -151,7 +166,7 @@ register_task_def() {
                 {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-${wandb_project}}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "/opt/training/scripts/${train_script}"],
+            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/${train_script}"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -297,6 +312,292 @@ cmd_submit() {
     echo "$task_arn" > "$SCRIPT_DIR/.last-task-arn"
 }
 
+# ── Replay (export + video) ────────────────────────────────────────────────────
+cmd_replay() {
+    [[ -z "$TASK_TYPE" ]] && { err "Must specify --task (mimic or rl)"; exit 1; }
+
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        [[ -z "$TASK_ID" ]] && { err "RL replay requires --task-id (e.g., DM-G1-29dof-FALCON)"; exit 1; }
+        if [[ -z "$MOTION_NAME" ]]; then
+            MOTION_NAME=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//' | tr '[:upper:]' '[:lower:]')
+        fi
+    else
+        [[ -z "$MOTION_NAME" ]] && { err "Mimic replay requires --motion"; exit 1; }
+        if [[ -z "$TASK_ID" ]]; then
+            local init_py="$REPO_ROOT/src/dm_isaac_g1/mimic/tasks/${MOTION_NAME}/__init__.py"
+            if [[ -f "$init_py" ]]; then
+                TASK_ID=$(sed -n 's/.*id="\([^"]*\)".*/\1/p' "$init_py" | head -1)
+            fi
+        fi
+        [[ -z "$TASK_ID" ]] && { err "Could not determine task ID for motion: $MOTION_NAME"; exit 1; }
+    fi
+
+    log "=== Submitting ECS Replay Job ==="
+    log "Task: $TASK_TYPE, Motion: $MOTION_NAME, Task ID: $TASK_ID"
+
+    # Upload scripts (including replay.sh)
+    upload_data "$TASK_TYPE" "$MOTION_NAME"
+
+    # Register a task definition for replay
+    local family="dm-replay-${MOTION_NAME}"
+
+    local tmpfile
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    cat > "$tmpfile" << EOF
+{
+    "family": "${family}",
+    "taskRoleArn": "${TASK_ROLE_ARN}",
+    "executionRoleArn": "${EXEC_ROLE_ARN}",
+    "networkMode": "host",
+    "requiresCompatibilities": ["EC2"],
+    "containerDefinitions": [
+        {
+            "name": "replay",
+            "image": "${ECR_IMAGE}",
+            "essential": true,
+            "resourceRequirements": [
+                {"type": "GPU", "value": "1"}
+            ],
+            "memory": 28000,
+            "cpu": 6144,
+            "environment": [
+                {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
+                {"name": "TASK_ID", "value": "${TASK_ID}"},
+                {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
+                {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
+                {"name": "AWS_REGION", "value": "${AWS_REGION}"},
+                {"name": "CHECKPOINT_FILE", "value": "${CHECKPOINT_FILE:-}"},
+                {"name": "VIDEO_LENGTH", "value": "${VIDEO_LENGTH:-300}"},
+                {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},
+                {"name": "HF_REPO", "value": "${HF_REPO:-}"},
+                {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
+            ],
+            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; bash /opt/training/scripts/replay.sh"],
+            "dependsOn": [
+                {"containerName": "data-sync", "condition": "SUCCESS"}
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "replay-${MOTION_NAME}"
+                }
+            },
+            "linuxParameters": {
+                "initProcessEnabled": true,
+                "sharedMemorySize": 8192
+            }
+        },
+        {
+            "name": "data-sync",
+            "image": "amazon/aws-cli:latest",
+            "essential": false,
+            "memory": 512,
+            "cpu": 256,
+            "command": [
+                "s3", "sync",
+                "s3://${S3_BUCKET}/scripts/", "/opt/training/scripts/",
+                "--region", "${AWS_REGION}"
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "data-sync"
+                }
+            }
+        }
+    ],
+    "volumes": [
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+    ]
+}
+EOF
+
+    local revision
+    revision=$(aws_cmd ecs register-task-definition \
+        --cli-input-json "file://${tmpfile}" \
+        --query "taskDefinition.revision" --output text)
+    rm -f "$tmpfile"
+    log "Registered: ${family}:${revision}"
+
+    # Run the task
+    local task_arn
+    task_arn=$(aws_cmd ecs run-task \
+        --cluster "$CLUSTER_NAME" \
+        --task-definition "${family}:${revision}" \
+        --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER_NAME,weight=1" \
+        --count 1 \
+        --enable-execute-command \
+        --started-by "run.sh-replay" \
+        --tags "key=TaskId,value=$TASK_ID" "key=Task,value=replay" \
+        --query "tasks[0].taskArn" --output text)
+
+    echo "$task_arn" > "$SCRIPT_DIR/.last-task-arn"
+
+    log ""
+    log "=== Replay Job Submitted ==="
+    log "Task ARN:    $task_arn"
+    log "Cluster:     $CLUSTER_NAME"
+    log "Definition:  ${family}:${revision}"
+    log ""
+    log "Monitor with:"
+    log "  $0 status"
+    log "  $0 logs --task-arn $task_arn"
+    log ""
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        local task_clean=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//')
+        log "Results will be in: s3://${S3_BUCKET}/Models/RL/${task_clean}/exported/"
+    else
+        log "Results will be in: s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/exported/"
+    fi
+}
+
+# ── Sim2Sim (Isaac Lab → MuJoCo) ─────────────────────────────────────────────
+cmd_sim2sim() {
+    [[ -z "$TASK_TYPE" ]] && { err "Must specify --task (mimic or rl)"; exit 1; }
+
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        [[ -z "$TASK_ID" ]] && { err "RL sim2sim requires --task-id"; exit 1; }
+        if [[ -z "$MOTION_NAME" ]]; then
+            MOTION_NAME=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//' | tr '[:upper:]' '[:lower:]')
+        fi
+    else
+        [[ -z "$MOTION_NAME" ]] && { err "Mimic sim2sim requires --motion"; exit 1; }
+        if [[ -z "$TASK_ID" ]]; then
+            local init_py="$REPO_ROOT/src/dm_isaac_g1/mimic/tasks/${MOTION_NAME}/__init__.py"
+            if [[ -f "$init_py" ]]; then
+                TASK_ID=$(sed -n 's/.*id="\([^"]*\)".*/\1/p' "$init_py" | head -1)
+            fi
+        fi
+        [[ -z "$TASK_ID" ]] && { err "Could not determine task ID for motion: $MOTION_NAME"; exit 1; }
+    fi
+
+    log "=== Submitting ECS Sim2Sim Job ==="
+    log "Task: $TASK_TYPE, Motion: $MOTION_NAME, Task ID: $TASK_ID"
+
+    upload_data "$TASK_TYPE" "$MOTION_NAME"
+
+    local family="dm-sim2sim-${MOTION_NAME}"
+    local tmpfile
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    cat > "$tmpfile" << EOF
+{
+    "family": "${family}",
+    "taskRoleArn": "${TASK_ROLE_ARN}",
+    "executionRoleArn": "${EXEC_ROLE_ARN}",
+    "networkMode": "host",
+    "requiresCompatibilities": ["EC2"],
+    "containerDefinitions": [
+        {
+            "name": "sim2sim",
+            "image": "${ECR_IMAGE}",
+            "essential": true,
+            "resourceRequirements": [
+                {"type": "GPU", "value": "1"}
+            ],
+            "memory": 28000,
+            "cpu": 6144,
+            "environment": [
+                {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
+                {"name": "TASK_ID", "value": "${TASK_ID}"},
+                {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
+                {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
+                {"name": "AWS_REGION", "value": "${AWS_REGION}"},
+                {"name": "VIDEO_LENGTH", "value": "${VIDEO_LENGTH:-10}"},
+                {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
+            ],
+            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; bash /opt/training/scripts/sim2sim.sh"],
+            "dependsOn": [
+                {"containerName": "data-sync", "condition": "SUCCESS"}
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "sim2sim-${MOTION_NAME}"
+                }
+            },
+            "linuxParameters": {
+                "initProcessEnabled": true,
+                "sharedMemorySize": 8192
+            }
+        },
+        {
+            "name": "data-sync",
+            "image": "amazon/aws-cli:latest",
+            "essential": false,
+            "memory": 512,
+            "cpu": 256,
+            "command": [
+                "s3", "sync",
+                "s3://${S3_BUCKET}/scripts/", "/opt/training/scripts/",
+                "--region", "${AWS_REGION}"
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "data-sync"
+                }
+            }
+        }
+    ],
+    "volumes": [
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+    ]
+}
+EOF
+
+    local revision
+    revision=$(aws_cmd ecs register-task-definition \
+        --cli-input-json "file://${tmpfile}" \
+        --query "taskDefinition.revision" --output text)
+    rm -f "$tmpfile"
+    log "Registered: ${family}:${revision}"
+
+    local task_arn
+    task_arn=$(aws_cmd ecs run-task \
+        --cluster "$CLUSTER_NAME" \
+        --task-definition "${family}:${revision}" \
+        --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER_NAME,weight=1" \
+        --count 1 \
+        --enable-execute-command \
+        --started-by "run.sh-sim2sim" \
+        --tags "key=TaskId,value=$TASK_ID" "key=Task,value=sim2sim" \
+        --query "tasks[0].taskArn" --output text)
+
+    echo "$task_arn" > "$SCRIPT_DIR/.last-task-arn"
+
+    log ""
+    log "=== Sim2Sim Job Submitted ==="
+    log "Task ARN:    $task_arn"
+    log ""
+    log "Monitor: $0 logs --task-arn $task_arn"
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        local task_clean=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//')
+        log "Videos will be in: s3://${S3_BUCKET}/Models/RL/${task_clean}/sim2sim/"
+    else
+        log "Videos will be in: s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/sim2sim/"
+    fi
+}
+
 # ── Status ────────────────────────────────────────────────────────────────────
 cmd_status() {
     log "=== ECS Cluster Status ==="
@@ -421,7 +722,7 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null && echo 'VNC started on :5901' && sleep 86400"],
+            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && ${VNC_STARTUP_CMD} && echo 'VNC+XFCE started on :5901' && sleep 86400"],
             "environment": [
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
@@ -606,14 +907,13 @@ cmd_vnc() {
         --query "tasks[0].containers[?lastStatus=='RUNNING'].name | [0]" --output text 2>/dev/null)
     [[ -z "$container" || "$container" == "None" ]] && container="workspace"
 
-    # Start VNC server inside the container via ECS Exec
-    # TurboVNC is at /opt/TurboVNC/bin/vncserver, password pre-set to "datament"
+    # Start VNC + XFCE desktop inside the container via ECS Exec
     aws_cmd ecs execute-command \
         --cluster "$CLUSTER_NAME" \
         --task "$arn" \
         --container "$container" \
         --interactive \
-        --command "bash -c '/opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null; echo VNC started on display :1'"
+        --command "bash -c '${VNC_STARTUP_CMD}; sleep 3; echo VNC+XFCE started on display :1'"
 
     log ""
     log "=== VNC Ready ==="
@@ -648,12 +948,17 @@ while [[ $# -gt 0 ]]; do
         --task-id)        TASK_ID="$2"; shift 2 ;;
         --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
         --task-arn)       TASK_ARN="$2"; shift 2 ;;
+        --checkpoint)     CHECKPOINT_FILE="$2"; shift 2 ;;
+        --video-length)   VIDEO_LENGTH="$2"; shift 2 ;;
+        --hf-repo)        HF_REPO="$2"; shift 2 ;;
         *) err "Unknown option: $1"; exit 1 ;;
     esac
 done
 
 case "$COMMAND" in
     submit)   cmd_submit ;;
+    replay)   cmd_replay ;;
+    sim2sim)  cmd_sim2sim ;;
     shell)    cmd_shell ;;
     exec)     cmd_exec ;;
     ssh)      cmd_ssh ;;
@@ -668,6 +973,8 @@ case "$COMMAND" in
         echo ""
         echo "Commands (training):"
         echo "  submit    Upload data and run training on ECS"
+        echo "  replay    Export policy + record replay video on ECS"
+        echo "  sim2sim   Validate exported policy in MuJoCo (Isaac Lab -> MuJoCo)"
         echo "  status    Show cluster and task status"
         echo "  logs      Stream training logs (CloudWatch)"
         echo "  list      List recent tasks"
@@ -686,12 +993,20 @@ case "$COMMAND" in
         echo "  --task-id <id>          Gymnasium task ID (required for rl, e.g. DM-G1-29dof-FALCON)"
         echo "  --max-iterations <n>    Max training iterations (default: 30000 mimic, 50000 rl)"
         echo "  --task-arn <arn>        Task ARN for logs/stop/exec"
+        echo "  --checkpoint <file>     Specific checkpoint file for replay (default: latest)"
+        echo "  --video-length <n>      Video length in steps for replay (default: 300)"
+        echo "  --hf-repo <repo>        HuggingFace repo for replay upload (optional)"
         echo ""
         echo "Examples:"
         echo "  $0 submit --task mimic --motion cr7_06_tiktok_uefa"
         echo "  $0 submit --task rl --task-id DM-G1-29dof-FALCON"
         echo "  $0 submit --task rl --task-id DM-G1-29dof-SoFTA --max-iterations 30000"
         echo "  $0 submit --task rl --task-id DM-G1-29dof-TWIST"
+        echo "  $0 replay --task mimic --motion cr7_06_tiktok_uefa"
+        echo "  $0 replay --task rl --task-id DM-G1-29dof-FALCON"
+        echo "  $0 replay --task mimic --motion video_007 --hf-repo datamentorshf/dm-g1-video007-mimic"
+        echo "  $0 sim2sim --task rl --task-id DM-G1-29dof-FALCON"
+        echo "  $0 sim2sim --task mimic --motion cr7_06_tiktok_uefa"
         echo "  $0 shell                                   # interactive GPU container"
         echo "  $0 exec --task-arn <arn>                   # bash into container"
         echo "  $0 ssh                                     # SSH into EC2 instance"
