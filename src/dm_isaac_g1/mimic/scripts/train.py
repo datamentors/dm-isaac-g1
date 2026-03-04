@@ -72,9 +72,11 @@ def main():
         agent_cfg.logger = "wandb"
         agent_cfg.wandb_project = args_cli.log_project_name
 
-    # Log directory
+    # Log directory — use MOTION_NAME env var as run name for WandB identification
+    motion_name = os.environ.get("MOTION_NAME", "")
+    run_name = f"{motion_name}_seed{args_cli.seed}" if motion_name else f"seed_{args_cli.seed}"
     log_root = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    log_dir = os.path.join(log_root, f"seed_{args_cli.seed}")
+    log_dir = os.path.join(log_root, run_name)
     os.makedirs(log_dir, exist_ok=True)
 
     # Dump configs

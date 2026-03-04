@@ -30,6 +30,17 @@ S3_BUCKET="${S3_BUCKET:?S3_BUCKET is required}"
 AWS_REGION="${AWS_REGION:-eu-west-1}"
 WANDB_PROJECT="${WANDB_PROJECT:-dm-isaac-g1}"
 WORKSPACE="/workspace"
+mkdir -p "$WORKSPACE"
+
+# ── Install AWS CLI if missing ────────────────────────────────────────────────
+if ! command -v aws &>/dev/null; then
+    echo "Installing AWS CLI..."
+    pip install --quiet awscli 2>/dev/null || {
+        curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+        unzip -q /tmp/awscliv2.zip -d /tmp && /tmp/aws/install
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+    }
+fi
 
 # Derive task ID from motion name if not provided
 # Convention: cr7_06_tiktok_uefa -> DM-G1-29dof-Mimic-CR7-06-TikTokUEFA
@@ -41,28 +52,78 @@ fi
 echo "=== GPU Status ==="
 nvidia-smi || { echo "ERROR: No GPU available"; exit 1; }
 
+# ── Configure Git Auth ────────────────────────────────────────────────────────
+REPO_URL="https://github.com/datamentors/dm-isaac-g1.git"
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git"
+    git config --global credential.helper store
+    echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+    echo "Git auth configured via GITHUB_TOKEN"
+else
+    echo "WARNING: GITHUB_TOKEN not set — git operations may fail for private repos"
+fi
+
 # ── Pull Latest Code ──────────────────────────────────────────────────────────
 echo "=== Updating dm-isaac-g1 ==="
 cd "$WORKSPACE"
 
 if [[ -d "dm-isaac-g1/.git" ]]; then
     cd dm-isaac-g1
-    git pull --ff-only origin main 2>/dev/null || git pull --ff-only 2>/dev/null || {
+    git fetch origin main 2>/dev/null || true
+    git reset --hard origin/main 2>/dev/null || git pull --ff-only 2>/dev/null || {
         echo "Git pull failed, using existing code"
     }
+    echo "dm-isaac-g1 at commit: $(git rev-parse --short HEAD)"
     cd "$WORKSPACE"
 elif [[ -d "dm-isaac-g1" ]]; then
-    echo "dm-isaac-g1 exists but not a git repo, using as-is"
+    echo "dm-isaac-g1 exists but not a git repo — removing and cloning fresh"
+    rm -rf dm-isaac-g1
+    git clone "$REPO_URL" dm-isaac-g1
+    echo "dm-isaac-g1 at commit: $(cd dm-isaac-g1 && git rev-parse --short HEAD)"
 else
     echo "Cloning dm-isaac-g1..."
-    git clone https://github.com/datamentors/dm-isaac-g1.git 2>/dev/null || {
-        echo "WARNING: Could not clone repo. Will use data from S3."
+    git clone "$REPO_URL" dm-isaac-g1 || {
+        echo "ERROR: Could not clone repo."
+        exit 1
     }
+    echo "dm-isaac-g1 at commit: $(cd dm-isaac-g1 && git rev-parse --short HEAD)"
+fi
+
+# ── Activate conda env early (before pip installs) ───────────────────────────
+if command -v conda &>/dev/null; then
+    eval "$(conda shell.bash hook)"
+    conda activate unitree_sim_env 2>/dev/null || true
+    echo "Conda env: $(conda info --envs | grep '*' || echo 'base')"
 fi
 
 # Install dm-isaac-g1 as editable package if setup.py/pyproject.toml exists
 if [[ -f "$WORKSPACE/dm-isaac-g1/pyproject.toml" ]]; then
     pip install -e "$WORKSPACE/dm-isaac-g1" --quiet 2>/dev/null || true
+fi
+
+# ── Install unitree_rl_lab (required dependency, public repo) ────────────────
+if ! python -c "import unitree_rl_lab" 2>/dev/null; then
+    echo "Installing unitree_rl_lab..."
+    if [[ ! -d "$WORKSPACE/unitree_rl_lab" ]]; then
+        git clone https://github.com/unitreerobotics/unitree_rl_lab.git "$WORKSPACE/unitree_rl_lab"
+    fi
+    # Patch UNITREE_MODEL_DIR to point to workspace
+    sed -i 's|UNITREE_MODEL_DIR = "path/to/unitree_model"|UNITREE_MODEL_DIR = "/workspace/unitree_model"|' \
+        "$WORKSPACE/unitree_rl_lab/source/unitree_rl_lab/unitree_rl_lab/assets/robots/unitree.py"
+    pip install -e "$WORKSPACE/unitree_rl_lab/source/unitree_rl_lab" --quiet || {
+        echo "ERROR: Failed to install unitree_rl_lab"
+        pip install -e "$WORKSPACE/unitree_rl_lab/source/unitree_rl_lab" 2>&1 | tail -20
+    }
+fi
+
+# ── Download robot model assets from S3 ──────────────────────────────────────
+if [[ ! -d "$WORKSPACE/unitree_model/G1" ]]; then
+    echo "Downloading Unitree G1 model assets..."
+    mkdir -p "$WORKSPACE"
+    aws s3 cp "s3://${S3_BUCKET}/assets/unitree_model_g1.tar.gz" /tmp/unitree_model_g1.tar.gz --region "$AWS_REGION"
+    tar xzf /tmp/unitree_model_g1.tar.gz -C "$WORKSPACE/"
+    rm -f /tmp/unitree_model_g1.tar.gz
+    echo "Model assets extracted to $WORKSPACE/unitree_model/"
 fi
 
 # ── Download Training Data from S3 ───────────────────────────────────────────
@@ -88,12 +149,6 @@ echo "Iterations: $MAX_ITERATIONS"
 echo "Time: $(date -u)"
 
 cd "$WORKSPACE/dm-isaac-g1"
-
-# Activate the conda environment if available
-if command -v conda &>/dev/null; then
-    eval "$(conda shell.bash hook)"
-    conda activate unitree_sim_env 2>/dev/null || true
-fi
 
 python -u src/dm_isaac_g1/mimic/scripts/train.py \
     --task "$TASK_ID" \

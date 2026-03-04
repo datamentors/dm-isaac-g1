@@ -55,6 +55,7 @@ EXEC_ROLE_ARN="${EXEC_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/dm-isaac-g1-ecs-
 
 TASK_TYPE=""
 MOTION_NAME=""
+TASK_ID=""
 MAX_ITERATIONS=30000
 TASK_ARN=""
 
@@ -104,12 +105,14 @@ register_task_def() {
     local task="$1"
     local motion="$2"
     local max_iter="$3"
+    local task_id="$4"
     local family="dm-${task}-${motion}"
 
-    log "Registering task definition: $family"
+    log "Registering task definition: $family (task_id=$task_id)" >&2
 
-    local task_def
-    task_def=$(cat << EOF
+    local tmpfile
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    cat > "$tmpfile" << EOF
 {
     "family": "${family}",
     "taskRoleArn": "${TASK_ROLE_ARN}",
@@ -128,15 +131,19 @@ register_task_def() {
             "cpu": 6144,
             "environment": [
                 {"name": "MOTION_NAME", "value": "${motion}"},
-                {"name": "TASK_ID", "value": "DM-G1-29dof-Mimic-${motion}"},
+                {"name": "TASK_ID", "value": "${task_id}"},
                 {"name": "MAX_ITERATIONS", "value": "${max_iter}"},
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
-                {"name": "HF_TOKEN", "value": "${HF_TOKEN}"},
-                {"name": "WANDB_API_KEY", "value": "${WANDB_API_KEY}"},
-                {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-dm-isaac-g1}"}
+                {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},
+                {"name": "WANDB_API_KEY", "value": "${WANDB_API_KEY:-}"},
+                {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-dm-isaac-g1}"},
+                {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
             "command": ["bash", "/opt/training/scripts/train_mimic.sh"],
+            "dependsOn": [
+                {"containerName": "data-sync", "condition": "SUCCESS"}
+            ],
             "mountPoints": [
                 {"sourceVolume": "training-data", "containerPath": "/opt/training"}
             ],
@@ -182,14 +189,14 @@ register_task_def() {
     ]
 }
 EOF
-    )
 
     local revision
-    revision=$(echo "$task_def" | aws_cmd ecs register-task-definition \
-        --cli-input-json "file:///dev/stdin" \
+    revision=$(aws_cmd ecs register-task-definition \
+        --cli-input-json "file://${tmpfile}" \
         --query "taskDefinition.revision" --output text)
+    rm -f "$tmpfile"
 
-    log "Registered: ${family}:${revision}"
+    log "Registered: ${family}:${revision}" >&2
     echo "${family}:${revision}"
 }
 
@@ -198,15 +205,27 @@ cmd_submit() {
     [[ -z "$TASK_TYPE" ]] && { err "Must specify --task (e.g., mimic)"; exit 1; }
     [[ -z "$MOTION_NAME" ]] && { err "Must specify --motion (e.g., cr7_06_tiktok_uefa)"; exit 1; }
 
+    # Auto-detect task ID from the task's __init__.py (gym.register id)
+    if [[ -z "$TASK_ID" ]]; then
+        local init_py="$REPO_ROOT/src/dm_isaac_g1/mimic/tasks/${MOTION_NAME}/__init__.py"
+        if [[ -f "$init_py" ]]; then
+            TASK_ID=$(sed -n 's/.*id="\([^"]*\)".*/\1/p' "$init_py" | head -1)
+        fi
+    fi
+    if [[ -z "$TASK_ID" ]]; then
+        TASK_ID="DM-G1-29dof-Mimic-${MOTION_NAME}"
+        warn "Could not auto-detect task ID, using: $TASK_ID"
+    fi
+
     log "=== Submitting ECS Training Job ==="
-    log "Task: $TASK_TYPE, Motion: $MOTION_NAME, Iterations: $MAX_ITERATIONS"
+    log "Task: $TASK_TYPE, Motion: $MOTION_NAME, Task ID: $TASK_ID, Iterations: $MAX_ITERATIONS"
 
     # Upload data
     upload_data "$TASK_TYPE" "$MOTION_NAME"
 
     # Register task definition
     local task_def_rev
-    task_def_rev=$(register_task_def "$TASK_TYPE" "$MOTION_NAME" "$MAX_ITERATIONS")
+    task_def_rev=$(register_task_def "$TASK_TYPE" "$MOTION_NAME" "$MAX_ITERATIONS" "$TASK_ID")
 
     # Run the task
     log "Submitting task to ECS cluster..."
@@ -346,8 +365,9 @@ cmd_shell() {
     local family="dm-interactive-shell"
 
     # Register a long-running task definition (sleep for 24h)
-    local task_def
-    task_def=$(cat << TASKEOF
+    local tmpfile
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    cat > "$tmpfile" << TASKEOF
 {
     "family": "${family}",
     "taskRoleArn": "${TASK_ROLE_ARN}",
@@ -367,7 +387,11 @@ cmd_shell() {
             "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 2>/dev/null && echo 'VNC started on :5901' && sleep 86400"],
             "environment": [
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
-                {"name": "AWS_REGION", "value": "${AWS_REGION}"}
+                {"name": "AWS_REGION", "value": "${AWS_REGION}"},
+                {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},
+                {"name": "WANDB_API_KEY", "value": "${WANDB_API_KEY:-}"},
+                {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-dm-isaac-g1}"},
+                {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -385,12 +409,12 @@ cmd_shell() {
     ]
 }
 TASKEOF
-    )
 
     local revision
-    revision=$(echo "$task_def" | aws_cmd ecs register-task-definition \
-        --cli-input-json "file:///dev/stdin" \
+    revision=$(aws_cmd ecs register-task-definition \
+        --cli-input-json "file://${tmpfile}" \
         --query "taskDefinition.revision" --output text)
+    rm -f "$tmpfile"
     log "Registered: ${family}:${revision}"
 
     # Launch the task
@@ -584,6 +608,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --task)           TASK_TYPE="$2"; shift 2 ;;
         --motion)         MOTION_NAME="$2"; shift 2 ;;
+        --task-id)        TASK_ID="$2"; shift 2 ;;
         --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
         --task-arn)       TASK_ARN="$2"; shift 2 ;;
         *) err "Unknown option: $1"; exit 1 ;;
