@@ -138,6 +138,10 @@ ENV OMNI_KIT_ACCEPT_EULA=Y
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # Runtime system dependencies
+# libnvidia-gl-550-server provides libGLX_nvidia.so.0 and libnvidia-glvkspirv.so
+# required for NVIDIA Vulkan (PhysX GPU discovery). The exact driver version may differ
+# from the host — nvidia-container-toolkit will override with host-matching libs at runtime.
+# We install it in the image as a fallback for environments where the toolkit doesn't inject them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa git git-lfs curl wget \
     zenity unzip vim htop tmux \
@@ -146,7 +150,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mesa-vulkan-drivers \
     ncurses-term dbus-x11 \
     xfce4 xfce4-terminal xfce4-taskmanager \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    libnvidia-gl-550-server \
+    && rm -rf /var/lib/apt/lists/* 2>/dev/null || true
 
 # NVIDIA Vulkan ICD manifest — tells the Vulkan loader where to find the NVIDIA driver.
 # The nvidia-container-toolkit mounts libGLX_nvidia.so.0 into the container at runtime,
