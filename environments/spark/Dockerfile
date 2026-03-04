@@ -72,7 +72,7 @@ RUN if [ -n "$GITHUB_TOKEN" ]; then \
     else \
         git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
     fi && \
-    cd /workspace/dm-isaac-g1 && pip install -e . && \
+    cd /workspace/dm-isaac-g1 && pip install --ignore-requires-python -e . && \
     cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
 # Create cache directories

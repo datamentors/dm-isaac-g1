@@ -86,11 +86,11 @@ aws_cmd() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 log() { echo -e "\n\033[1;34m==>\033[0m \033[1m$*\033[0m"; }
 
 remote() {
-    ssh $SSH_OPTS -i "$SSH_KEY" ubuntu@"$PUBLIC_IP" "$@"
+    ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=180 $SSH_OPTS -i "$SSH_KEY" ubuntu@"$PUBLIC_IP" "$@"
 }
 
 remote_script() {
-    ssh $SSH_OPTS -i "$SSH_KEY" ubuntu@"$PUBLIC_IP" "bash -s" <<< "$1"
+    ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=180 $SSH_OPTS -i "$SSH_KEY" ubuntu@"$PUBLIC_IP" "bash -s" <<< "$1"
 }
 
 cleanup_instance() {
