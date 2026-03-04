@@ -277,43 +277,37 @@ echo ECS_ENABLE_EXECUTE_COMMAND=true >> /etc/ecs/ecs.config
 # Load NVIDIA DRM kernel module for Vulkan/rendering support (creates /dev/dri/)
 modprobe nvidia-drm modeset=1 2>/dev/null || true
 
-# Install full NVIDIA Vulkan support on the host.
-# The ECS GPU AMI only includes compute driver libs, not graphics/Vulkan.
-# Isaac Sim and other rendering apps need the Vulkan producer library.
-# We extract it from the NVIDIA .run installer matching the host driver version.
-# The resulting libs are bind-mounted into containers via ECS task definition volumes.
-DRIVER_VERSION=\$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
-if [ -n "\$DRIVER_VERSION" ]; then
-    if [ ! -f /usr/lib64/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} ]; then
-        echo "Installing NVIDIA Vulkan support for driver \${DRIVER_VERSION}..."
-        DRIVER_URL="https://us.download.nvidia.com/tesla/\${DRIVER_VERSION}/NVIDIA-Linux-x86_64-\${DRIVER_VERSION}.run"
-        curl -sL "\$DRIVER_URL" -o /tmp/nvidia-driver.run
-        chmod +x /tmp/nvidia-driver.run
-        /tmp/nvidia-driver.run --extract-only --target /tmp/nvidia-driver 2>/dev/null || true
-        if [ -d /tmp/nvidia-driver ]; then
-            cp -f /tmp/nvidia-driver/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/ 2>/dev/null || true
-            ln -sf libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /usr/lib64/libnvidia-vulkan-producer.so 2>/dev/null || true
-            # Also copy to dedicated dir for container bind-mounting (avoids exposing all of /usr/lib64)
-            mkdir -p /opt/nvidia-vulkan
-            cp -f /tmp/nvidia-driver/libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /opt/nvidia-vulkan/ 2>/dev/null || true
-            ln -sf libnvidia-vulkan-producer.so.\${DRIVER_VERSION} /opt/nvidia-vulkan/libnvidia-vulkan-producer.so 2>/dev/null || true
-            mkdir -p /etc/vulkan/icd.d /usr/share/vulkan/icd.d
-            cat > /usr/share/vulkan/icd.d/nvidia_icd.json << VICD
-{
-    "file_format_version" : "1.0.0",
-    "ICD": {
-        "library_path": "libnvidia-vulkan-producer.so.\${DRIVER_VERSION}",
-        "api_version" : "1.3"
-    }
-}
-VICD
-            cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/
-            ldconfig
-            echo "NVIDIA Vulkan support installed successfully"
-        fi
-        rm -rf /tmp/nvidia-driver /tmp/nvidia-driver.run
-    fi
-fi
+# ── Upgrade nvidia-container-toolkit for Vulkan/graphics support ─────────────
+# The default ECS GPU AMI ships with libnvidia-container v1.0.0 which does NOT
+# mount Vulkan/graphics libraries into containers. Isaac Sim requires Vulkan for
+# PhysX GPU discovery. Upgrading to nvidia-container-toolkit >= 1.12.0 makes the
+# toolkit automatically inject libnvidia-vulkan-producer.so, nvidia_icd.json, and
+# all graphics libs when NVIDIA_DRIVER_CAPABILITIES=all is set.
+# See: https://github.com/aws/amazon-ecs-agent/issues/2835
+echo "Upgrading nvidia-container-toolkit for Vulkan support..."
+
+# Stop ECS agent and Docker before upgrading
+systemctl stop ecs 2>/dev/null || true
+
+# Remove old nvidia-container packages
+yum remove -y libnvidia-container1 libnvidia-container-tools \
+    nvidia-container-toolkit nvidia-container-toolkit-base 2>/dev/null || true
+
+# Add NVIDIA container toolkit repo
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+    | tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+
+# Install latest nvidia-container-toolkit
+yum install -y nvidia-container-toolkit
+
+# Configure Docker runtime with nvidia
+nvidia-ctk runtime configure --runtime=docker
+
+# Restart Docker and ECS agent
+systemctl restart docker
+systemctl start ecs 2>/dev/null || true
+
+echo "nvidia-container-toolkit version: \$(nvidia-ctk --version 2>/dev/null || echo unknown)"
 
 # Install AWS CLI v2 for S3 operations inside tasks
 if ! command -v aws &>/dev/null; then

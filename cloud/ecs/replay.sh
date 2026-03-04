@@ -55,49 +55,18 @@ nvidia-smi || { echo "ERROR: No GPU available"; exit 1; }
 
 # ── Setup Vulkan ─────────────────────────────────────────────────────────────
 # Isaac Sim's PhysX discovers GPUs through Vulkan (not CUDA directly).
-# The host installs libnvidia-vulkan-producer.so and nvidia_icd.json via UserData.
-# These are bind-mounted into the container at /host-nvidia-libs and /host-vulkan-icd.
+# The host UserData upgrades nvidia-container-toolkit to >= 1.12.0 which
+# automatically mounts Vulkan/graphics libs when NVIDIA_DRIVER_CAPABILITIES=all.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR"
 
-# Copy the host's nvidia_icd.json (which points to libnvidia-vulkan-producer.so)
-NVIDIA_ICD=/usr/share/vulkan/icd.d/nvidia_icd.json
-mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d
-if [[ -f /host-vulkan-icd/nvidia_icd.json ]]; then
-    cp /host-vulkan-icd/nvidia_icd.json "$NVIDIA_ICD"
-    cp /host-vulkan-icd/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
-    echo "Copied host nvidia_icd.json:"
-    cat "$NVIDIA_ICD"
-else
-    echo "WARNING: /host-vulkan-icd/nvidia_icd.json not found (host volume not mounted?)"
-    # Fallback: create ICD pointing to libnvidia-vulkan-producer.so
-    echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libnvidia-vulkan-producer.so","api_version":"1.3"}}' > "$NVIDIA_ICD"
-    cp "$NVIDIA_ICD" /etc/vulkan/icd.d/nvidia_icd.json
-fi
-
-# Add host NVIDIA libs to library search path
-if [[ -d /host-nvidia-libs ]]; then
-    export LD_LIBRARY_PATH="/host-nvidia-libs:${LD_LIBRARY_PATH:-}"
-    ldconfig /host-nvidia-libs 2>/dev/null || true
-    echo "Host NVIDIA libs:"
-    ls /host-nvidia-libs/libnvidia-vulkan* 2>/dev/null || echo "  (no libnvidia-vulkan-producer.so found)"
-else
-    echo "WARNING: /host-nvidia-libs not mounted — NVIDIA Vulkan may not work"
-fi
-
-# Ensure Mesa lavapipe is available as fallback
-if [[ ! -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]]; then
-    echo "Installing Mesa Vulkan drivers (lavapipe fallback)..."
-    apt-get update -qq 2>/dev/null
-    apt-get install -y -qq mesa-vulkan-drivers 2>/dev/null || true
-fi
-
-# Set Vulkan ICD — NVIDIA primary, lavapipe fallback
-export VK_ICD_FILENAMES="$NVIDIA_ICD:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
-
 # Diagnostic: show Vulkan state
-echo "VK_ICD_FILENAMES=$VK_ICD_FILENAMES"
-ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || true
+echo "=== Vulkan Diagnostics ==="
+echo "Vulkan ICD files:"
+ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || echo "  (none)"
+ls -la /etc/vulkan/icd.d/ 2>/dev/null || echo "  (none)"
+echo "NVIDIA libs in container:"
+ldconfig -p 2>/dev/null | grep -i "vulkan\|nvidia" | head -10 || true
 vulkaninfo --summary 2>&1 | head -20 || true
 
 # ── Isaac Sim EULA acceptance (prevents zenity dialog from blocking headless) ─
