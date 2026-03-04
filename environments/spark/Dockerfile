@@ -309,11 +309,18 @@ RUN git lfs install && \
 # unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
 RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
 
-# HumanoidTraining — educational units (exclude media/ directory to save ~451MB)
-RUN git clone --depth 1 --filter=blob:none --sparse \
-        https://github.com/datamentors/HumanoidTraining.git /workspace/HumanoidTraining && \
-    cd /workspace/HumanoidTraining && \
-    git sparse-checkout set --no-cone '/*' '!/media'
+# HumanoidTraining — educational units (PRIVATE repo, exclude media/ to save ~451MB)
+# Requires GITHUB_TOKEN; skipped gracefully if token is not available.
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git clone --depth 1 --filter=blob:none --sparse \
+            https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/HumanoidTraining.git /workspace/HumanoidTraining && \
+        cd /workspace/HumanoidTraining && \
+        git sparse-checkout set --no-cone '/*' '!/media' && \
+        git remote set-url origin https://github.com/datamentors/HumanoidTraining.git && \
+        echo "[ok] HumanoidTraining cloned"; \
+    else \
+        echo "[skip] HumanoidTraining — no GITHUB_TOKEN provided"; \
+    fi
 
 # JupyterLab — install into conda env so notebooks can use Isaac Sim + GR00T packages
 RUN uv pip install --system jupyterlab
