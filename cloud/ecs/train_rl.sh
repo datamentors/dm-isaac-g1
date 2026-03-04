@@ -117,6 +117,30 @@ if [[ ! -d "$WORKSPACE/unitree_model/G1" ]]; then
     echo "Model assets extracted to $WORKSPACE/unitree_model/"
 fi
 
+# ── Periodic Checkpoint Upload ─────────────────────────────────────────────────
+# Sync checkpoints to S3 every 10 minutes so we never lose progress if task is stopped
+TASK_CLEAN=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//')
+SYNC_INTERVAL=600  # 10 minutes
+
+checkpoint_sync_loop() {
+    while true; do
+        sleep "$SYNC_INTERVAL"
+        local ckpt_dir
+        ckpt_dir=$(find "$WORKSPACE/dm-isaac-g1/logs" -name "model_*.pt" -printf '%h\n' 2>/dev/null | sort -u | tail -1)
+        if [[ -n "$ckpt_dir" && -d "$ckpt_dir" ]]; then
+            aws s3 sync "$ckpt_dir/" "s3://${S3_BUCKET}/Models/RL/${TASK_CLEAN}/" \
+                --region "$AWS_REGION" \
+                --exclude "optimizer_*" --quiet 2>/dev/null
+            echo "[checkpoint-sync] $(date -u) — synced to s3://${S3_BUCKET}/Models/RL/${TASK_CLEAN}/"
+        fi
+    done
+}
+
+# Start background sync
+checkpoint_sync_loop &
+SYNC_PID=$!
+echo "Started periodic checkpoint sync (PID=$SYNC_PID, interval=${SYNC_INTERVAL}s)"
+
 # ── Run Training ──────────────────────────────────────────────────────────────
 echo "=== Starting RL Training ==="
 echo "Task: $TASK_ID"
@@ -136,11 +160,11 @@ python -u src/dm_isaac_g1/rl/scripts/train.py \
 
 TRAIN_EXIT=$?
 
-# ── Upload Results ────────────────────────────────────────────────────────────
-echo "=== Uploading checkpoints to S3 ==="
+# Stop background sync
+kill "$SYNC_PID" 2>/dev/null || true
 
-# Derive a clean name from task ID for S3 path
-TASK_CLEAN=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//')
+# ── Final Upload ──────────────────────────────────────────────────────────────
+echo "=== Final checkpoint upload to S3 ==="
 
 CHECKPOINT_DIR=$(find "$WORKSPACE/dm-isaac-g1/logs" -name "model_*.pt" -printf '%h\n' 2>/dev/null | sort -u | tail -1)
 

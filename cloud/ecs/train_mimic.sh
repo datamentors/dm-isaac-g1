@@ -142,6 +142,29 @@ if [[ ! -f "$TASK_DIR/${MOTION_NAME}.npz" ]]; then
     exit 1
 fi
 
+# ── Periodic Checkpoint Upload ─────────────────────────────────────────────────
+# Sync checkpoints to S3 every 10 minutes so we never lose progress if task is stopped
+SYNC_INTERVAL=600  # 10 minutes
+
+checkpoint_sync_loop() {
+    while true; do
+        sleep "$SYNC_INTERVAL"
+        local ckpt_dir
+        ckpt_dir=$(find "$WORKSPACE/dm-isaac-g1/logs" -name "model_*.pt" -printf '%h\n' 2>/dev/null | sort -u | tail -1)
+        if [[ -n "$ckpt_dir" && -d "$ckpt_dir" ]]; then
+            aws s3 sync "$ckpt_dir/" "s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/" \
+                --region "$AWS_REGION" \
+                --exclude "optimizer_*" --quiet 2>/dev/null
+            echo "[checkpoint-sync] $(date -u) — synced to s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/"
+        fi
+    done
+}
+
+# Start background sync
+checkpoint_sync_loop &
+SYNC_PID=$!
+echo "Started periodic checkpoint sync (PID=$SYNC_PID, interval=${SYNC_INTERVAL}s)"
+
 # ── Run Training ──────────────────────────────────────────────────────────────
 echo "=== Starting Training ==="
 echo "Task: $TASK_ID"
@@ -159,8 +182,11 @@ python -u src/dm_isaac_g1/mimic/scripts/train.py \
 
 TRAIN_EXIT=$?
 
-# ── Upload Results ────────────────────────────────────────────────────────────
-echo "=== Uploading checkpoints to S3 ==="
+# Stop background sync
+kill "$SYNC_PID" 2>/dev/null || true
+
+# ── Final Upload ──────────────────────────────────────────────────────────────
+echo "=== Final checkpoint upload to S3 ==="
 
 # Find the latest checkpoint directory
 CHECKPOINT_DIR=$(find "$WORKSPACE/dm-isaac-g1/logs" -path "*${MOTION_NAME}*" -name "model_*.pt" -printf '%h\n' 2>/dev/null | sort -u | tail -1)
@@ -171,10 +197,10 @@ fi
 
 if [[ -n "$CHECKPOINT_DIR" && -d "$CHECKPOINT_DIR" ]]; then
     echo "Uploading from: $CHECKPOINT_DIR"
-    aws s3 sync "$CHECKPOINT_DIR/" "s3://${S3_BUCKET}/checkpoints/mimic/${MOTION_NAME}/" \
+    aws s3 sync "$CHECKPOINT_DIR/" "s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/" \
         --region "$AWS_REGION" \
         --exclude "optimizer_*"
-    echo "Checkpoints uploaded to s3://${S3_BUCKET}/checkpoints/mimic/${MOTION_NAME}/"
+    echo "Checkpoints uploaded to s3://${S3_BUCKET}/Models/IL/Mimic-${MOTION_NAME}/"
 else
     echo "WARNING: No checkpoint directory found"
 fi
