@@ -447,10 +447,14 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
             echo "  Fix the issues and rebuild."
             echo "=========================================="
             echo ""
-            # Don't push — exit with failure
-            if ! $NO_TERMINATE; then
-                aws_cmd ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null 2>&1 || true
-            fi
+            echo "=========================================="
+            echo "  BUILD FAILED (exit code 1)"
+            echo "=========================================="
+            echo ""
+            echo "  Instance kept alive for cached rebuild."
+            echo "  To rebuild:    re-upload Dockerfile and run docker build"
+            echo "  To terminate:  environments/build/build.sh --cleanup-only"
+            echo "  To debug:      ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP"
             exit 1
         fi
         log "Build validation tests PASSED"
@@ -550,9 +554,14 @@ else
             echo "  Fix the issues and rebuild."
             echo "=========================================="
             echo ""
-            if ! $NO_TERMINATE; then
-                aws_cmd ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null 2>&1 || true
-            fi
+            echo "=========================================="
+            echo "  BUILD FAILED (exit code 1)"
+            echo "=========================================="
+            echo ""
+            echo "  Instance kept alive for cached rebuild."
+            echo "  To rebuild:    re-upload Dockerfile and run docker build"
+            echo "  To terminate:  environments/build/build.sh --cleanup-only"
+            echo "  To debug:      ssh $SSH_OPTS -i $SSH_KEY ubuntu@\${PUBLIC_IP:-unknown}"
             exit 1
         fi
         log "Build validation tests PASSED"
