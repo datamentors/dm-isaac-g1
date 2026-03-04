@@ -316,8 +316,9 @@ RUN if [ -n "$GITHUB_TOKEN" ]; then \
 # unitree_rl_lab — Unitree's official RL training framework (PUBLIC repo)
 # We clone the ORIGINAL upstream repo, then patch it with our custom reward
 # functions and task configs using dm_isaac_g1.rl.install_tasks.
+# The pip-installable package lives in source/unitree_rl_lab/ (not repo root).
 RUN git clone https://github.com/unitreerobotics/unitree_rl_lab.git /workspace/unitree_rl_lab && \
-    cd /workspace/unitree_rl_lab && uv pip install --system -e .
+    cd /workspace/unitree_rl_lab/source/unitree_rl_lab && uv pip install --system -e .
 
 # Patch unitree_rl_lab with dm-isaac-g1 custom tasks and reward functions.
 # This appends arm_leg_coordination + lateral_velocity_penalty to rewards.py
