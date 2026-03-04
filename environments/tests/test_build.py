@@ -279,7 +279,7 @@ def test_repo_wbc():
     return "OK"
 
 
-@test("Vulkan ICD manifest")
+@test("Vulkan ICD manifest", skip_on_arm64=True)
 def test_vulkan_icd():
     icd_path = "/usr/share/vulkan/icd.d/nvidia_icd.json"
     assert os.path.exists(icd_path), f"Vulkan ICD not found: {icd_path}"
