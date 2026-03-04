@@ -17,6 +17,8 @@ The ECR image (`isaac-g1-sim-ft-rl:latest`) is the same as `dm-workstation:lates
 | **RL** | RSL-RL, unitree_rl_lab, dm_isaac_g1, unitree_sim_isaaclab |
 | **Conda env** | `unitree_sim_env` (Python 3.11) |
 | **VNC** | Port 5901, password: `datament` |
+| **code-server** | Port 8080 (VS Code in browser) |
+| **JupyterLab** | Port 8888 (notebook interface) |
 
 **Source repos baked into the image** (at `/workspace/`):
 
@@ -31,6 +33,36 @@ The ECR image (`isaac-g1-sim-ft-rl:latest`) is the same as `dm-workstation:lates
 > **Important:** The baked-in repos may be behind `main`. Always run `git pull origin main` after entering the container to get the latest code.
 
 See [DOCKER_ENVIRONMENT_STATUS.md](../../docs/DOCKER_ENVIRONMENT_STATUS.md) for the full Dockerfile architecture and package list.
+
+## Retrieving Service Passwords
+
+code-server (VS Code) and JupyterLab are protected with a random password generated on each container start. Retrieve it with:
+
+**Workstation:**
+
+```bash
+docker logs dm-workstation 2>&1 | grep PASSWORD
+```
+
+**Spark:**
+
+```bash
+docker logs dm-spark-workstation 2>&1 | grep PASSWORD
+```
+
+**ECS containers:**
+
+```bash
+# Simple — uses CloudWatch to find the password
+./run.sh password
+
+# Or with a specific task ARN
+./run.sh password --task-arn <arn>
+```
+
+The password is generated once at container start and logged to CloudWatch. The `password` command searches CloudWatch Logs for it automatically.
+
+To use a fixed password instead, set `SERVICE_PASSWORD` in the ECS task environment.
 
 ## Prerequisites
 

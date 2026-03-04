@@ -707,6 +707,48 @@ cmd_logs() {
     }
 }
 
+# ── Password ──────────────────────────────────────────────────────────────────
+cmd_password() {
+    local arn="${TASK_ARN}"
+    if [[ -z "$arn" && -f "$SCRIPT_DIR/.last-task-arn" ]]; then
+        arn=$(cat "$SCRIPT_DIR/.last-task-arn")
+    fi
+    [[ -z "$arn" ]] && { err "No task ARN. Use --task-arn <arn> or run submit/shell first."; exit 1; }
+
+    local task_id
+    task_id=$(echo "$arn" | awk -F/ '{print $NF}')
+
+    log "Fetching service password for task: $task_id"
+
+    # Search CloudWatch for the PASSWORD line
+    local password_line
+    password_line=$(aws_cmd logs filter-log-events \
+        --log-group-name "/ecs/dm-isaac-g1" \
+        --filter-pattern "SERVICE PASSWORD" \
+        --start-time "$(date -d '24 hours ago' +%s000 2>/dev/null || date -v-24H +%s000)" \
+        --query "events[?contains(message, '${task_id}') || true].message" \
+        --output text 2>/dev/null | grep "SERVICE PASSWORD" | head -1)
+
+    if [[ -n "$password_line" ]]; then
+        echo ""
+        echo "$password_line"
+        echo ""
+        echo "Use this password for:"
+        echo "  code-server (VS Code): http://<instance-ip>:8080"
+        echo "  JupyterLab:            http://<instance-ip>:8888"
+    else
+        # Fallback: try getting all recent log events with PASSWORD
+        echo "Searching recent logs for password..."
+        aws_cmd logs filter-log-events \
+            --log-group-name "/ecs/dm-isaac-g1" \
+            --filter-pattern "SERVICE PASSWORD" \
+            --start-time "$(date -d '1 hour ago' +%s000 2>/dev/null || date -v-1H +%s000)" \
+            --query "events[*].message" \
+            --output text 2>/dev/null | grep "PASSWORD" || \
+            echo "Password not found in CloudWatch logs. The container may still be starting."
+    fi
+}
+
 # ── List ──────────────────────────────────────────────────────────────────────
 cmd_list() {
     log "=== Recent Tasks ==="
@@ -1169,6 +1211,7 @@ case "$COMMAND" in
     list)     cmd_list ;;
     stop)     cmd_stop ;;
     download) cmd_download ;;
+    password) cmd_password ;;
     help|*)
         echo "Usage: $0 <command> [options]"
         echo ""
@@ -1188,6 +1231,7 @@ case "$COMMAND" in
         echo "  exec      Get bash shell into a running container (ECS Exec)"
         echo "  ssh       SSH directly into the EC2 GPU instance"
         echo "  vnc       Start VNC/NoVNC server for GUI access (Isaac Sim, MuJoCo)"
+        echo "  password  Get the service password for code-server/JupyterLab"
         echo ""
         echo "Options:"
         echo "  --task <type>           Task type: mimic, rl (required for submit)"

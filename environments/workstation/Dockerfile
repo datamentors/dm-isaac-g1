@@ -1,264 +1,400 @@
-# Workstation Environment Dockerfile
-# Unified environment for GROOT inference and Isaac Sim/Lab simulation
+# ==============================
+# DM-ISAAC-G1 Workstation Dockerfile
+# Based on Unitree's official unitree_sim_isaaclab Dockerfile
+# https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/Dockerfile
 #
-# APPROACH: Following IsaacLab Docker deployment guide
-# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
+# TWO-IMAGE STRATEGY:
+#   Stage "base"  → dm-workstation-base:latest  (pushed to ECR, stable)
+#   Stage "groot" → dm-workstation:latest        (extends base, adds GR00T deps)
 #
-# Base: NVIDIA Isaac Sim 5.0.0 → Install IsaacLab via ./isaaclab.sh --install
+# Build base only:
+#   docker build --target base -t dm-workstation-base:latest .
+# Build full (base + groot):
+#   docker build --target groot -t dm-workstation:latest .
 #
-# IMPORTANT: NumPy < 2.0 Requirement
-# ==================================
-# Isaac Sim 5.1.0 uses NumPy 2.x which has bugs in the synthetic data pipeline
-# causing "Unable to write from unknown dtype" errors with cameras.
-#
-# We use Isaac Sim 5.0.0 which:
-# - Uses NumPy 1.x (stable)
-# - Has working camera/TiledCamera operations
-# - Is recommended by Unitree for G1 simulation
-#
-# Reference: https://github.com/unitreerobotics/unitree_sim_isaaclab/blob/main/doc/isaacsim5.0_install.md
+# CUDA Compatibility:
+#   Workstation driver: 590.48.01 (CUDA 13.1 max)
+#   CUDA toolkit in image: 12.8.0
+#   Builder base: cuda:12.8.0-devel (has nvcc for compiling flash-attn + extensions)
+#   Runtime base: cuda:12.8.0-runtime (leaner, no nvcc needed at runtime)
+#   PyTorch build: cu128 — the correct index for PyTorch 2.7.x per
+#     https://pytorch.org/get-started/previous-versions/
+#   Isaac Sim 5.0.0: installed via pip from pypi.nvidia.com
+# ==============================
 
-ARG ISAAC_SIM_VERSION=5.0.0
-FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
+# ==============================
+# Stage 1: Builder
+# Heavy compilation happens here; artifacts copied to final stages.
+# Uses devel image (not runtime) so nvcc is available for building
+# flash-attn and other CUDA extension wheels.
+# ==============================
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS builder
 
-# Run as root for package installation
-USER root
-
-# Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV UV_SYSTEM_PYTHON=1
-ENV UV_LINK_MODE=copy
+ENV TZ=UTC
+ENV CONDA_DIR=/opt/conda
+ENV PATH=$CONDA_DIR/bin:$PATH
 
-# Isaac Sim environment variables (required for proper initialization)
-ENV ISAACSIM_PATH="/isaac-sim"
-ENV ISAACSIM_PYTHON_EXE="${ISAACSIM_PATH}/python.sh"
-ENV CARB_APP_PATH="${ISAACSIM_PATH}/kit"
-ENV EXP_PATH="${ISAACSIM_PATH}/apps"
-ENV ISAAC_PATH="${ISAACSIM_PATH}"
-
-# Fix apt permissions
-RUN mkdir -p /var/lib/apt/lists/partial && chmod 755 /var/lib/apt/lists
-
-# Install system dependencies (includes IsaacLab requirements)
+# Build dependencies (GCC 12 + GLU + Vulkan + cmake)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    git-lfs \
-    curl \
-    wget \
-    vim \
-    htop \
-    tmux \
-    cmake \
-    build-essential \
-    unzip \
-    xorg \
-    libxext6 \
-    libxrender1 \
-    libxtst6 \
-    libxi6 \
-    libglu1-mesa \
-    libglib2.0-0 \
-    ncurses-term \
-    dbus-x11 \
-    mesa-vulkan-drivers \
-    vulkan-tools \
+    gcc-12 g++-12 cmake build-essential unzip git git-lfs \
+    libglu1-mesa-dev vulkan-tools wget ca-certificates \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
     && rm -rf /var/lib/apt/lists/*
 
-# Vulkan configuration — NVIDIA ICD manifest for PhysX GPU discovery.
-# nvidia-container-toolkit mounts libGLX_nvidia.so.0 into the container when
-# NVIDIA_DRIVER_CAPABILITIES=all is set. The ICD manifest points to this lib.
+# Install Miniconda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p $CONDA_DIR && \
+    rm miniconda.sh && \
+    $CONDA_DIR/bin/conda clean -afy
+
+# Accept Conda TOS and create Python 3.11 environment
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    conda create -n unitree_sim_env python=3.11 -y && \
+    conda clean -afy
+
+SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
+
+# ABI-compatible libgcc/libstdc++ for compiled wheels
+RUN conda install -y -c conda-forge "libgcc-ng>=12" "libstdcxx-ng>=12" && \
+    apt-get update && apt-get install -y --no-install-recommends libvulkan1 vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch 2.7.0 cu128 — CUDA 12.8 is the correct index for PyTorch 2.7.x
+# per https://pytorch.org/get-started/previous-versions/
+# Workstation driver 590.48.01 supports CUDA 13.1, fully compatible with cu128.
+RUN pip install --upgrade pip uv && \
+    pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# Isaac Sim 5.0.0 via pip (Unitree-approved approach)
+# numpy pinned <2.0: Isaac Sim synthetic data pipeline requires numpy 1.x
+RUN pip install "isaacsim[all,extscache]==5.0.0" --extra-index-url https://pypi.nvidia.com && \
+    pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
+
+WORKDIR /home/code
+
+# IsaacLab v2.2.0 (compatible with Isaac Sim 5.0.0 per Unitree docs)
+RUN git clone https://github.com/isaac-sim/IsaacLab.git && \
+    cd IsaacLab && \
+    git checkout v2.2.0 && \
+    ./isaaclab.sh --install
+
+# CycloneDDS — required by unitree_sdk2_python
+RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x /cyclonedds && \
+    cd /cyclonedds && mkdir build install && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=../install && \
+    cmake --build . --target install -j$(nproc)
+
+ENV CYCLONEDDS_HOME=/cyclonedds/install
+
+# unitree_sdk2_python — robot SDK
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python && \
+    cd unitree_sdk2_python && pip install -e .
+
+# unitree_sim_isaaclab — USD assets, G1 task definitions, pink/pinocchio IK
+RUN git clone https://github.com/unitreerobotics/unitree_sim_isaaclab.git /home/code/unitree_sim_isaaclab && \
+    cd /home/code/unitree_sim_isaaclab && pip install -r requirements.txt
+
+# pink + pinocchio — IK libraries for G1 manipulation scenes
+# Installed in builder so both base and groot inherit them.
+# No assimp conflict in this conda env (DEVOPS-001 resolved).
+# Re-pin numpy <2.0 after pinocchio deps pull numpy 2.x.
+RUN pip install pin-pink meshcat && \
+    pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
+
+# flatdict — required by isaaclab.sim.simulation_context (isaaclab dep, not auto-installed).
+# Without this, Isaac Sim crashes during extension startup with:
+#   ModuleNotFoundError: No module named 'flatdict'
+# flatdict 4.1.0 is functionally compatible with isaaclab's pinned 4.0.1 requirement.
+RUN pip install flatdict
+
+# MuJoCo 3.2.6 — required for closed-loop eval with deformable objects (flexcomp towel/cloth).
+# MuJoCo Menagerie — standardized MJCF robot models (G1, Go1, etc.) used by eval scenes.
+RUN pip install mujoco==3.2.6 && \
+    git clone https://github.com/google-deepmind/mujoco_menagerie.git /home/code/mujoco_menagerie
+
+# ==============================
+# Stage 2: base — stable image pushed to ECR
+# Isaac Sim + IsaacLab + unitree stack, NO GR00T
+# ==============================
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+ENV CONDA_DIR=/opt/conda
+ENV PATH=$CONDA_DIR/bin:$PATH
+ENV OMNI_KIT_ALLOW_ROOT=1
+ENV ACCEPT_EULA=Y
+# Correct env var that isaacsim pip package checks to skip interactive EULA
+ENV OMNI_KIT_ACCEPT_EULA=Y
+
+# Vulkan configuration for GPU rendering.
+# Isaac Sim's PhysX discovers GPUs through Vulkan. We install the NVIDIA GL/Vulkan
+# driver libraries directly so the image is self-contained (no reliance on
+# nvidia-container-toolkit version or host lib mounts for Vulkan).
+# libnvidia-gl-550 provides: libGLX_nvidia.so.0, libnvidia-vulkan-producer.so,
+# libnvidia-glvkspirv, and the correct nvidia_icd.json.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
-# NVIDIA Vulkan ICD manifest — PhysX discovers GPUs through Vulkan, not CUDA directly.
-RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
-    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
-    > /usr/share/vulkan/icd.d/nvidia_icd.json && \
-    cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
+# Runtime system dependencies + NVIDIA Vulkan/GL driver libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglu1-mesa git git-lfs curl wget \
+    zenity unzip vim htop tmux \
+    xorg libxext6 libxrender1 libxtst6 libxi6 \
+    libglib2.0-0 libvulkan1 vulkan-tools \
+    mesa-vulkan-drivers \
+    libnvidia-gl-550 \
+    ncurses-term dbus-x11 \
+    xfce4 xfce4-terminal xfce4-taskmanager \
+    adwaita-icon-theme \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install TurboVNC for remote visualization
-RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb -O /tmp/turbovnc.deb && \
+# Google Chrome — required for AWS SSO authentication in the browser
+# Installed via official Google apt repo for latest stable release.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
+        https://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Desktop shortcuts for VNC session
+RUN mkdir -p /root/Desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=Google Chrome\nExec=google-chrome --no-sandbox --disable-gpu\nIcon=google-chrome\nTerminal=false\n' > /root/Desktop/chrome.desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nTerminal=false\n' > /root/Desktop/terminal.desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=JupyterLab\nExec=google-chrome --no-sandbox http://localhost:8888\nIcon=text-html\nTerminal=false\n' > /root/Desktop/jupyterlab.desktop && \
+    printf '[Desktop Entry]\nType=Application\nName=VS Code\nExec=google-chrome --no-sandbox http://localhost:8080\nIcon=text-editor\nTerminal=false\n' > /root/Desktop/vscode.desktop && \
+    chmod +x /root/Desktop/*.desktop
+
+# TurboVNC — remote visualization for Isaac Sim
+RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_amd64.deb \
+        -O /tmp/turbovnc.deb && \
     dpkg -i /tmp/turbovnc.deb || apt-get install -f -y && \
     rm /tmp/turbovnc.deb
 ENV PATH="/opt/TurboVNC/bin:${PATH}"
 
-# Install Google Chrome and XFCE terminal for VNC desktop
-RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O /tmp/chrome.deb && \
-    apt-get update && apt-get install -y --no-install-recommends /tmp/chrome.deb xfce4-terminal && \
-    rm /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
+# VNC: set password (max 8 chars) and use XFCE4 as the desktop session.
+# TVNC_WM=xfce maps to /usr/share/xsessions/xfce.desktop → startxfce4.
+ENV TVNC_WM=xfce
+RUN mkdir -p ~/.vnc && \
+    printf "datament\ndatament\nn\n" | /opt/TurboVNC/bin/vncpasswd
 
-# Desktop shortcuts for VNC
-RUN mkdir -p /root/Desktop && \
-    printf '[Desktop Entry]\nType=Application\nName=Google Chrome\nExec=google-chrome --no-sandbox --disable-gpu\nIcon=google-chrome\nTerminal=false\n' > /root/Desktop/chrome.desktop && \
-    printf '[Desktop Entry]\nType=Application\nName=Terminal\nExec=xfce4-terminal\nIcon=utilities-terminal\nTerminal=false\n' > /root/Desktop/terminal.desktop && \
-    chmod +x /root/Desktop/*.desktop
+# code-server — VS Code in the browser (port 8080)
+# Enables code editing and terminal access without VNC.
+# Access via SSH tunnel: ssh -L 8080:localhost:8080 ... then open http://localhost:8080
+RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+    mkdir -p /root/.config/code-server && \
+    printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
+        > /root/.config/code-server/config.yaml
+EXPOSE 8080
 
-# Install AWS CLI v2 for ECR image push
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
-    unzip -q /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+# JupyterLab — notebook interface (port 8888)
+# Installed via pip into system Python; will be re-installed in groot stage's conda env.
+RUN pip install jupyterlab && \
+    mkdir -p /root/.jupyter && \
+    printf '{\n  "ServerApp": {\n    "ip": "0.0.0.0",\n    "port": 8888,\n    "token": "datamentors",\n    "open_browser": false,\n    "allow_root": true\n  }\n}\n' \
+        > /root/.jupyter/jupyter_server_config.json
+EXPOSE 8888
 
-# Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Copy all artifacts from builder
+COPY --from=builder /home/code/IsaacLab            /home/code/IsaacLab
+COPY --from=builder /home/code/unitree_sdk2_python  /home/code/unitree_sdk2_python
+COPY --from=builder /home/code/unitree_sim_isaaclab /home/code/unitree_sim_isaaclab
+COPY --from=builder /home/code/mujoco_menagerie     /home/code/mujoco_menagerie
+COPY --from=builder /cyclonedds                     /cyclonedds
+COPY --from=builder /opt/conda                      /opt/conda
 
-# ==========================================
-# CycloneDDS (required for unitree_sdk2py)
-# ==========================================
-WORKDIR /opt
-RUN git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x && \
-    cd cyclonedds && \
-    mkdir -p build install && \
-    cd build && \
-    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/cyclonedds/install && \
-    cmake --build . --target install -j$(nproc)
-ENV CYCLONEDDS_HOME=/opt/cyclonedds/install
+ENV CYCLONEDDS_HOME=/cyclonedds/install
 ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 
-# Install CycloneDDS Python bindings
-RUN /isaac-sim/python.sh -m pip install cyclonedds
+# PROJECT_ROOT — required by unitree_sim_isaaclab scene configs to locate USD assets.
+# Without this, scenes crash with:
+#   FileNotFoundError: USD file not found at path 'None/assets/objects/PackingTable/PackingTable.usd'
+# The scene configs use: project_root = os.environ.get("PROJECT_ROOT")
+# At runtime /workspace/unitree_sim_isaaclab is mounted from host (contains the assets).
+# At image build time the same scenes are at /home/code/unitree_sim_isaaclab.
+# We set /workspace/... because the mount path is what's used at runtime.
+ENV PROJECT_ROOT=/workspace/unitree_sim_isaaclab
 
-# ==========================================
-# unitree_sdk2py
-# ==========================================
-RUN git clone https://github.com/unitreerobotics/unitree_sdk2_python.git /opt/unitree_sdk2_python
-WORKDIR /opt/unitree_sdk2_python
-RUN /isaac-sim/python.sh -m pip install . && \
-    SITE_PACKAGES=$(/isaac-sim/python.sh -c "import site; print(site.getsitepackages()[0])") && \
-    for dir in b2 g1 h1 comm; do \
-        if [ -d "unitree_sdk2py/$dir" ] && [ ! -d "$SITE_PACKAGES/unitree_sdk2py/$dir" ]; then \
-            cp -r "unitree_sdk2py/$dir" "$SITE_PACKAGES/unitree_sdk2py/"; \
-        fi; \
-    done
+# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T are baked in (cloned in groot stage)
+# and can also be overridden by bind mounts on the workstation.
+# unitree_sim_isaaclab path covers the G1 scene configs and USD references.
+# unitree_rl_lab added for RL training framework access.
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/unitree_rl_lab:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_rl:/home/code/IsaacLab/source/isaaclab_assets:/home/code/IsaacLab/source/isaaclab_contrib:/home/code/unitree_sim_isaaclab:${PYTHONPATH}"
 
-# ==========================================
-# IsaacLab Installation (following official Docker approach)
-# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
-# ==========================================
-WORKDIR /workspace
+RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> ~/.bashrc && \
+    echo 'conda activate unitree_sim_env' >> ~/.bashrc && \
+    echo 'export OMNI_KIT_ALLOW_ROOT=1' >> ~/.bashrc && \
+    echo 'export ACCEPT_EULA=Y' >> ~/.bashrc && \
+    echo 'export OMNI_KIT_ACCEPT_EULA=Y' >> ~/.bashrc && \
+    echo 'export CYCLONEDDS_HOME=/cyclonedds/install' >> ~/.bashrc && \
+    echo 'export LD_LIBRARY_PATH=/cyclonedds/install/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
-# Clone IsaacLab v2.2.0 (compatible with Isaac Sim 5.0.0 per Unitree docs)
-RUN git clone https://github.com/isaac-sim/IsaacLab.git /workspace/IsaacLab && \
-    cd /workspace/IsaacLab && \
-    git checkout v2.2.0
+EXPOSE 47995-48012
+EXPOSE 49000-49007
+EXPOSE 6006
+EXPOSE 5555
+EXPOSE 5901
+EXPOSE 8888
 
-# Create symlink to Isaac Sim (required by isaaclab.sh)
-RUN ln -sf /isaac-sim /workspace/IsaacLab/_isaac_sim
+WORKDIR /home/code
+CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]
 
-# Install IsaacLab dependencies via official script
-# This properly installs: warp, pink, pinocchio, and all other dependencies
-WORKDIR /workspace/IsaacLab
-RUN chmod +x isaaclab.sh && \
-    ./isaaclab.sh --install && \
-    # Ensure all isaaclab dependencies are installed (isaaclab.sh may miss some)
-    /isaac-sim/python.sh -m pip install -e /workspace/IsaacLab/source/isaaclab
-
-# ==========================================
-# Additional dependencies for dm-isaac-g1
-# ==========================================
-WORKDIR /workspace
-
-# Copy environment config
-COPY pyproject.toml /workspace/env/
-
-# Install dm-isaac-g1 dependencies with UV
-WORKDIR /workspace/env
-RUN uv pip install --python /isaac-sim/kit/python/bin/python3 -r pyproject.toml
-
-
-# ==========================================
-# MuJoCo 3.x (custom scene evaluation)
-# ==========================================
-# Required for:
-#   - Custom G1 scenes with deformable objects (flexcomp towels, sponges)
-#   - GR00T-WholeBodyControl loco-manipulation eval
-#   - Standalone policy validation without Isaac Sim
+# ==============================
+# Stage 3: groot — extends base with GR00T inference + fine-tuning deps
+# This is the image used for inference and fine-tuning with GROOT.
 #
-# MuJoCo 3.0+ added flexcomp deformable bodies with the elasticity.shell
-# plugin, enabling cloth/towel simulation for tasks like fold_towel.
+# LIBRARY MANAGEMENT RULES — MANDATORY:
+#   1. ALL Python packages MUST be installed via:  uv pip install --system <pkg>
+#      Never use bare `pip install` or `conda install` for Python packages.
+#   2. conda install is ONLY permitted for non-Python system libraries
+#      (e.g. conda-forge ffmpeg for shared .so files). Add a comment explaining why.
+#   3. NO library version change may be made without explicit written approval.
+#      If a version change is needed, open a PR and get it reviewed first.
+#   4. All new dependencies MUST be added to requirements-groot.txt with exact
+#      pinned versions before being added to this Dockerfile.
+#   5. The Dockerfile is the single source of truth. Any package installed on the
+#      workstation manually must be reflected here before the next Docker build.
 #
-# The G1 MJCF model comes from MuJoCo Menagerie (google-deepmind/mujoco_menagerie).
-# It is the standard, well-tested 29-DOF model used across the community.
-RUN pip install mujoco==3.2.6 opencv-python-headless>=4.8.0
+# GR00T extra deps (on top of what Isaac Sim + IsaacLab already provide):
+#   - albumentations, av, diffusers, dm-tree, lmdb, msgpack, msgpack-numpy
+#   - peft, termcolor, tyro, datasets, gymnasium, omegaconf, pyzmq
+#   - deepspeed, wandb, einops, click, pandas, scipy
+#   - transformers==4.51.3 (GR00T's exact pin — DO NOT change without approval)
+#   - flash-attn: required by Eagle3_VL backbone for fine-tuning on CUDA 12.8.
+#     Built via uv pip install --system with --no-build-isolation (needs nvcc).
+#   - torchcodec==0.4.0+cu128: AV1-capable video decoder for LeRobot v3.0 datasets.
+#     Must be installed AFTER conda-forge ffmpeg (for libavutil.so shared libs).
+# ==============================
+FROM base AS groot
 
-# Clone MuJoCo Menagerie (curated MJCF robot models including Unitree G1)
-RUN git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git \
-    /workspace/mujoco_menagerie
+SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
 
-# Set EGL rendering for headless MuJoCo (no display required)
-ENV MUJOCO_GL=egl
-ENV PYOPENGL_PLATFORM=egl
+# Install uv — the ONLY approved Python package manager for this image.
+# uv is installed via pip once to bootstrap itself, then all subsequent
+# package installs MUST use: uv pip install --system <package>
+RUN pip install uv
 
-# ==========================================
-# CRITICAL: Pin NumPy to < 2.0 for stability
-# ==========================================
-# This ensures compatibility with:
-# - Isaac Sim synthetic data pipeline
-# - GR00T fine-tuning requirements (numpy>=1.23.5,<2.0.0)
-# - pink/pinocchio IK libraries
-RUN /isaac-sim/python.sh -m pip install "numpy>=1.26.0,<2.0.0" --force-reinstall
+# Copy the groot requirements file
+COPY requirements-groot.txt /tmp/requirements-groot.txt
 
-# ==========================================
-# GROOT Fine-tuning Dependencies
-# ==========================================
-# torchcodec: Video decoding backend for GROOT data loading
-# wandb: Experiment tracking for fine-tuning runs
-# FFmpeg: Required by torchcodec for video decoding
-RUN apt-get update -qq && apt-get install -y -qq ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
-    && rm -rf /var/lib/apt/lists/*
-RUN uv pip install --system torchcodec wandb
+# Install GR00T extra deps via uv
+# The SHELL directive above already runs inside unitree_sim_env so
+# uv picks up the active python directly — no --python flag needed.
+# --system allows uv to install into the conda env's site-packages.
+RUN uv pip install --system -r /tmp/requirements-groot.txt
 
-# ==========================================
-# Clone workspace repos (fallback for environments without bind mounts)
-# On the workstation these are overridden by docker-compose bind mounts.
-# On ECS/standalone containers, these baked-in copies are used directly.
-# ==========================================
+# flash-attn: built from source against PyTorch 2.7.0 + CUDA 12.8.
+# The base runtime image does not include nvcc, so we install cuda-nvcc
+# just for the compilation step. --no-build-isolation ensures it uses the
+# already-installed torch. The nvcc install adds ~500MB to this layer but
+# enables efficient attention for Eagle3_VL during GR00T fine-tuning.
+# If flash-attn is absent the model falls back to eager attention (slower, more VRAM).
+RUN apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-12-8 \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system flash-attn --no-build-isolation
+
+# conda-forge FFmpeg: provides libavutil.so.5x shared libs required by torchcodec.
+# The system FFmpeg in ubuntu22.04 doesn't expose these versioned .so files.
+# NOTE: conda install is used here ONLY because this installs native shared libraries
+# (.so files), not Python packages. This is the ONLY permitted use of conda install
+# in this stage. Python packages must always use: uv pip install --system
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    conda install -n unitree_sim_env -c conda-forge ffmpeg -y
+
+# torchcodec: AV1-capable video decoder required for LeRobot v3.0 datasets
+# (HuggingFace Dex3 and other recent datasets use AV1 codec in MP4 containers).
+# Must be installed AFTER conda-forge ffmpeg to find the correct libavutil.so.
+# cu128 wheel is ABI-matched to PyTorch 2.7.0+cu128 (avoids symbol mismatch).
+# Version 0.4.0 is pinned — DO NOT upgrade without testing ABI compatibility.
+RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytorch.org/whl/cu128
+
+# ==============================
+# Clone workspace repos required at runtime
+# On the workstation, dm-isaac-g1, Isaac-GR00T, and unitree_sim_isaaclab
+# are bind-mounted from the host (see docker-compose.yml).
+# On ECS, there are NO bind mounts — these must be in the image.
+# We clone them here so the image works in both environments.
+# At runtime, bind mounts override these baked-in copies on the workstation.
+# On ECS, users run `git pull` inside the container for latest code.
+#
+# GITHUB_TOKEN: Required to clone private repo (dm-isaac-g1).
+# Passed as build arg; credentials are cleared after cloning.
+# The build instance is temporary and terminated after push.
+# ==============================
 WORKDIR /workspace
 
-# dm-isaac-g1 — main G1 training/inference project (PRIVATE repo)
 ARG GITHUB_TOKEN=""
+
+# dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
+# Installed as editable so `import dm_isaac_g1` works immediately.
 RUN if [ -n "$GITHUB_TOKEN" ]; then \
         git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
     else \
         git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
     fi && \
-    cd /workspace/dm-isaac-g1 && /isaac-sim/python.sh -m pip install -e . && \
-    cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
+    cd /workspace/dm-isaac-g1 && uv pip install --system -e . && \
+    git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
-# Isaac-GR00T — NVIDIA's GR00T framework
+# unitree_rl_lab — Unitree's official RL training framework (PUBLIC repo)
+# We clone the ORIGINAL upstream repo, then patch it with our custom reward
+# functions and task configs using dm_isaac_g1.rl.install_tasks.
+# The pip-installable package lives in source/unitree_rl_lab/ (not repo root).
+RUN git clone https://github.com/unitreerobotics/unitree_rl_lab.git /workspace/unitree_rl_lab && \
+    cd /workspace/unitree_rl_lab/source/unitree_rl_lab && uv pip install --system -e .
+
+# Patch unitree_rl_lab with dm-isaac-g1 custom tasks and reward functions.
+# This appends arm_leg_coordination + lateral_velocity_penalty to rewards.py
+# and copies task configs (MilitaryMarch, AGILE, FALCON, SoFTA, TWIST).
+RUN python -m dm_isaac_g1.rl.install_tasks \
+    --unitree-rl-lab /workspace/unitree_rl_lab \
+    --rewards-patch /workspace/dm-isaac-g1/environments/workstation/patches/rewards_custom.py \
+    --dm-tasks-dir /workspace/dm-isaac-g1/src/dm_isaac_g1/rl/tasks
+
+# Isaac-GR00T — NVIDIA's GR00T framework (inference + fine-tuning)
 RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
+
+# GR00T-WholeBodyControl (Dex1 branch) — WBC eval pipeline + decoupled_wbc package
+# NOTE: After cloning, our Dex1 patches must be applied (see docs/DOCKER_ENVIRONMENT_STATUS.md).
+RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBodyControl-dex1
+
+# video2robot — PromptHMR + GMR pipeline for converting human videos to robot motion
+RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
+
+# Patch: robot_viser.py AV1 codec fallback — use original_h264.mp4 when original.mp4 is AV1-encoded
+# Skipped if visualization/robot_viser.py doesn't exist (upstream repo restructured).
+COPY patches/robot_viser_av1_fallback.patch /tmp/
+RUN test -f video2robot/visualization/robot_viser.py \
+    && cd video2robot && git apply /tmp/robot_viser_av1_fallback.patch \
+    && echo "[ok] Patched robot_viser.py with AV1 fallback" \
+    || echo "[skip] robot_viser.py not found in upstream — patch not needed"
+
+# unitree_model — Unitree USD/URDF/MJCF models from HuggingFace
+RUN git lfs install && \
+    git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
 
 # unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
 RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
 
-# ==========================================
-# Environment Configuration
-# ==========================================
-# Set PYTHONPATH for all modules
-# Note: warp is bundled in Isaac Sim's extscache, not installed via pip
-ENV PYTHONPATH="/isaac-sim/extscache/omni.warp.core-1.7.1+lx64:/workspace/dm-isaac-g1/src:/workspace/dm-isaac-g1/scripts/eval:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
+# HumanoidTraining — educational units (exclude media/ directory to save ~451MB)
+RUN git clone --depth 1 --filter=blob:none --sparse \
+        https://github.com/datamentors/HumanoidTraining.git /workspace/HumanoidTraining && \
+    cd /workspace/HumanoidTraining && \
+    git sparse-checkout set --no-cone '/*' '!/media'
 
-# code-server — VS Code in the browser (port 8080)
-RUN curl -fsSL https://code-server.dev/install.sh | sh && \
-    mkdir -p /root/.config/code-server && \
-    printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
-        > /root/.config/code-server/config.yaml
+# JupyterLab — install into conda env so notebooks can use Isaac Sim + GR00T packages
+RUN uv pip install --system jupyterlab
 
-# Expose ports
-# Isaac Sim streaming
-EXPOSE 47995-48012
-# Isaac Sim services
-EXPOSE 49000-49007
-# TensorBoard
-EXPOSE 6006
-# GROOT ZMQ
-EXPOSE 5555
-# VNC
-EXPOSE 5901
-# code-server (VS Code)
-EXPOSE 8080
+# Entrypoint — generates random credentials for code-server + JupyterLab on each start.
+# Retrieve password with: docker logs <container> 2>&1 | grep PASSWORD
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 WORKDIR /workspace
-CMD ["/bin/bash"]
+CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]

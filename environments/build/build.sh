@@ -166,22 +166,23 @@ echo "  ECR repo: $ECR_REGISTRY/$ACTIVE_ECR_REPO"
 # ---------- Collect build context ----------
 if [ "$BUILD_PLATFORM" = "spark" ]; then
     log "Collecting build context from environments/spark/"
-    if [ ! -f "$SPARK_DIR/Dockerfile.spark" ]; then
-        echo "ERROR: Missing: $SPARK_DIR/Dockerfile.spark"
+    if [ ! -f "$SPARK_DIR/Dockerfile" ]; then
+        echo "ERROR: Missing: $SPARK_DIR/Dockerfile"
         exit 1
     fi
-    BUILD_FILES=("$SPARK_DIR/Dockerfile.spark")
+    BUILD_FILES=("$SPARK_DIR/Dockerfile" "$SPARK_DIR/entrypoint.sh")
 else
     log "Collecting build context from environments/workstation/"
-    for f in "$WORKSTATION_DIR/Dockerfile.unitree" "$WORKSTATION_DIR/requirements-groot.txt"; do
+    for f in "$WORKSTATION_DIR/Dockerfile" "$WORKSTATION_DIR/requirements-groot.txt"; do
         if [ ! -f "$f" ]; then
             echo "ERROR: Missing: $f"
             exit 1
         fi
     done
     BUILD_FILES=(
-        "$WORKSTATION_DIR/Dockerfile.unitree"
+        "$WORKSTATION_DIR/Dockerfile"
         "$WORKSTATION_DIR/requirements-groot.txt"
+        "$WORKSTATION_DIR/entrypoint.sh"
     )
     if [ -d "$WORKSTATION_DIR/patches" ]; then
         PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -type f | wc -l | tr -d ' ')
@@ -386,7 +387,7 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
         --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
         -t '$SPARK_TAG' \
         -t '$DATE_TAG' \
-        -f Dockerfile.spark \
+        -f Dockerfile \
         . 2>&1 | tee -a build.log
 
     echo '=== Build finished at \$(date) ===' | tee -a build.log
@@ -475,7 +476,7 @@ else
     echo '>>> Building base stage...' | tee -a build.log
     sudo docker build --target base \
         -t '$BASE_TAG' \
-        -f Dockerfile.unitree \
+        -f Dockerfile \
         . 2>&1 | tee -a build.log
     echo '>>> Base complete at \$(date)' | tee -a build.log
 
@@ -485,7 +486,7 @@ else
             --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
             -t '$GROOT_TAG' \
             -t '$DATE_TAG' \
-            -f Dockerfile.unitree \
+            -f Dockerfile \
             . 2>&1 | tee -a build.log
         echo '>>> Groot complete at \$(date)' | tee -a build.log
     fi
@@ -621,13 +622,13 @@ echo ""
 echo "  Update running container:"
 if [ "$BUILD_PLATFORM" = "spark" ]; then
     echo "    cd dm-isaac-g1/environments/spark"
-    echo "    docker compose -f docker-compose.spark.yml stop workstation"
-    echo "    docker compose -f docker-compose.spark.yml rm -f workstation"
-    echo "    docker compose -f docker-compose.spark.yml up -d workstation"
+    echo "    docker compose stop workstation"
+    echo "    docker compose rm -f workstation"
+    echo "    docker compose up -d workstation"
 else
     echo "    cd dm-isaac-g1/environments/workstation"
-    echo "    docker compose -f docker-compose.unitree.yml stop groot"
-    echo "    docker compose -f docker-compose.unitree.yml rm -f groot"
-    echo "    docker compose -f docker-compose.unitree.yml up -d groot"
+    echo "    docker compose stop groot"
+    echo "    docker compose rm -f groot"
+    echo "    docker compose up -d groot"
 fi
 echo ""

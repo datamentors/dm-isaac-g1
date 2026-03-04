@@ -49,14 +49,14 @@ if [ "$PLATFORM" = "spark" ]; then
     IMAGE="$ECR_REGISTRY/$ECR_REPO:latest"
     LOCAL_TAG="dm-spark-workstation:latest"
     COMPOSE_DIR="$SPARK_DIR"
-    COMPOSE_FILE="docker-compose.spark.yml"
+    COMPOSE_FILE="docker-compose.yml"
     SERVICE="workstation"
 else
     ECR_REPO="${AWS_ECR_REPO}"
     IMAGE="$ECR_REGISTRY/$ECR_REPO:latest"
     LOCAL_TAG="dm-workstation:latest"
     COMPOSE_DIR="$WORKSTATION_DIR"
-    COMPOSE_FILE="docker-compose.unitree.yml"
+    COMPOSE_FILE="docker-compose.yml"
     SERVICE="groot"
 fi
 

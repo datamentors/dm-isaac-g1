@@ -1,38 +1,86 @@
-# Spark Inference Environment Dockerfile
-# Based on working dm-groot-inference/Dockerfile.arm64
-# For DGX Spark (ARM64 Grace Hopper)
+# =============================================================================
+# DM Spark Workstation Dockerfile (ARM64 Grace Hopper)
+#
+# Full workstation environment for DGX Spark — replicates workstation
+# capabilities adapted for ARM64 architecture.
+#
+# Base: nvcr.io/nvidia/pytorch:25.04-py3 (NVIDIA's optimized PyTorch for
+#        Grace Hopper / GB10 GPU). Standard pip PyTorch wheels will NOT work
+#        on ARM64 — must use NVIDIA's pre-built container.
+#
+# What's included (vs inference-only Dockerfile):
+#   - GR00T framework (inference + fine-tuning)
+#   - MuJoCo 3.2.6 + Menagerie robot models
+#   - WBC pipeline (GR00T-WholeBodyControl-dex1)
+#   - Video2Robot (PromptHMR + GMR)
+#   - RSL-RL (reinforcement learning)
+#   - DeepSpeed, wandb, training utilities
+#   - dm-isaac-g1 Python package support
+#
+# What's NOT available on ARM64:
+#   - Isaac Sim (x86_64 only)
+#   - IsaacLab (depends on Isaac Sim)
+#
+# ARM64 notes:
+#   - flash-attn: included in NVIDIA base container (works on Grace Hopper)
+#   - torchcodec: no PyPI wheels — built from source during image build (v0.5 for PyTorch 2.7)
+#
+# Build:
+#   docker build -t dm-spark-workstation:latest .
+#
+# Size: ~28 GB
+# =============================================================================
 
 ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.04-py3
 FROM ${BASE_IMAGE}
 
-# Set environment variables
+# ---------- Environment ----------
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV HF_HOME=/workspace/.cache/huggingface
 ENV TORCH_HOME=/workspace/.cache/torch
 
-# Install system dependencies
+# ---------- System dependencies ----------
+# Includes MuJoCo rendering deps (EGL/OpenGL) and build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     git-lfs \
     curl \
     wget \
+    unzip \
     build-essential \
     cmake \
     ninja-build \
+    vim \
+    htop \
+    tmux \
+    rsync \
+    # MuJoCo + rendering
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libopenblas-dev \
+    libegl1-mesa-dev \
+    libgles2-mesa-dev \
+    # Video processing + FFmpeg dev headers (for building torchcodec from source)
+    ffmpeg \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavcodec-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /workspace
 
-# Download GR00T repository (using zip since git clone has issues in container)
+# ---------- GR00T Framework ----------
+# Download via zip (git clone has issues in some containers)
 RUN curl -L -o /tmp/groot.zip 'https://github.com/NVIDIA/Isaac-GR00T/archive/refs/heads/main.zip' && \
     unzip -o /tmp/groot.zip -d /workspace && \
     mv /workspace/Isaac-GR00T-main /workspace/gr00t && \
@@ -40,13 +88,13 @@ RUN curl -L -o /tmp/groot.zip 'https://github.com/NVIDIA/Isaac-GR00T/archive/ref
 
 WORKDIR /workspace/gr00t
 
-# Fix version constraints in pyproject.toml for NVIDIA container compatibility
+# Fix version constraints for NVIDIA container compatibility
 RUN sed -i 's/requires-python = "==3.10.*"/requires-python = ">=3.10"/g' pyproject.toml && \
     sed -i 's/torch==2.7.1/torch>=2.5.0/g' pyproject.toml && \
     sed -i 's/torchvision==0.22.1/torchvision>=0.20.0/g' pyproject.toml && \
     sed -i 's/transformers==4.51.3/transformers>=4.40.0,<5.0.0/g' pyproject.toml && \
-    sed -i 's/"torchcodec==0.4.0",/# "torchcodec==0.4.0",  # Not available on ARM64/g' pyproject.toml && \
-    sed -i 's/"flash-attn==2.7.4.post1",/# "flash-attn==2.7.4.post1",  # Build issues on ARM64/g' pyproject.toml
+    sed -i 's/"torchcodec==0.4.0",/# "torchcodec==0.4.0",  # Built from source below/g' pyproject.toml && \
+    sed -i 's/"flash-attn==2.7.4.post1",/# "flash-attn==2.7.4.post1",  # Already in NVIDIA base container/g' pyproject.toml
 
 # Fix NVIDIA container's constraint file
 RUN sed -i 's/dm-tree==0.1.9/dm-tree==0.1.8/g' /etc/pip/constraint.txt 2>/dev/null || true
@@ -58,15 +106,63 @@ RUN pip install --no-deps -e . && \
     peft termcolor tyro datasets gymnasium omegaconf pyzmq deepspeed wandb \
     transformers==4.51.3
 
-# Verify installation
-RUN python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')" && \
-    python -c "import gr00t; print('GR00T imported successfully')"
+# ---------- TorchCodec (from source for ARM64) ----------
+# No PyPI wheels for aarch64. Build v0.5 from source (compatible with PyTorch 2.7).
+# Required by GR00T's dataset loaders (lerobot_episode_loader, video_utils, experiment).
+RUN cd /tmp && \
+    git clone --depth 1 --branch v0.5.0 https://github.com/pytorch/torchcodec.git && \
+    cd torchcodec && \
+    ENABLE_CUDA=0 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 \
+    pip wheel . --no-build-isolation --no-binary=torchcodec -w /tmp/tc_wheel && \
+    pip install /tmp/tc_wheel/torchcodec*.whl && \
+    rm -rf /tmp/torchcodec /tmp/tc_wheel
 
-# Go back to main workspace
+# Verify GR00T + torchcodec
+RUN python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')" && \
+    python -c "import gr00t; print('GR00T imported successfully')" && \
+    python -c "import torchcodec; print(f'torchcodec {torchcodec.__version__}')"
+
+# ---------- MuJoCo + Menagerie ----------
+# MuJoCo 3.2.6 for closed-loop eval (flexcomp deformable objects)
+# Menagerie: standardized robot models (G1, Go1, etc.)
+RUN pip install mujoco==3.2.6 && \
+    git clone https://github.com/google-deepmind/mujoco_menagerie.git /workspace/mujoco_menagerie
+
+# ---------- Training & Eval Dependencies ----------
+# RSL-RL for reinforcement learning (MuJoCo backend)
+# Installed from GitHub source — no ARM64 wheels on PyPI.
+# pink + pinocchio for inverse kinematics (WBC eval)
+# scipy, pandas for data processing
+RUN pip install --ignore-requires-python \
+    "rsl-rl-lib @ git+https://github.com/leggedrobotics/rsl_rl.git" \
+    scipy \
+    pandas \
+    click \
+    einops \
+    rich \
+    tqdm \
+    python-dotenv \
+    pyyaml \
+    httpx \
+    paramiko \
+    prettytable \
+    tensorboard \
+    pyarrow \
+    huggingface-hub
+
+# IK libraries (pinocchio + pink) for WBC eval
+RUN pip install pin-pink meshcat 2>/dev/null || \
+    pip install pin meshcat 2>/dev/null || \
+    echo "WARNING: pinocchio/pink not available on ARM64 — WBC IK may need alternative"
+
+# ---------- Clone Workspace Repos ----------
 WORKDIR /workspace
 
-# dm-isaac-g1 — baked in as fallback (PRIVATE repo, can be overridden by bind mount at runtime)
 ARG GITHUB_TOKEN=""
+
+# dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
+# Installed as editable so `import dm_isaac_g1` works immediately.
+# On Spark, bind-mounted from host at runtime; baked in as fallback.
 RUN if [ -n "$GITHUB_TOKEN" ]; then \
         git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
     else \
@@ -75,29 +171,80 @@ RUN if [ -n "$GITHUB_TOKEN" ]; then \
     cd /workspace/dm-isaac-g1 && pip install --ignore-requires-python -e . && \
     cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
-# Create cache directories
-RUN mkdir -p /workspace/.cache/huggingface /workspace/.cache/torch
+# Isaac-GR00T — NVIDIA's GR00T framework (baked in as fallback)
+RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
 
-# Set PYTHONPATH for dm-isaac-g1
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:${PYTHONPATH}"
+# GR00T-WholeBodyControl (Dex1 branch) — WBC eval pipeline
+RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBodyControl-dex1
 
-# code-server — VS Code in the browser (port 8080)
+# Video2Robot — PromptHMR + GMR pipeline
+RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
+
+# unitree_model — URDF/MJCF models from HuggingFace
+RUN git lfs install && \
+    git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
+
+# unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
+RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
+
+# HumanoidTraining — educational units (exclude media/ directory to save ~451MB)
+RUN git clone --depth 1 --filter=blob:none --sparse \
+        https://github.com/datamentors/HumanoidTraining.git /workspace/HumanoidTraining && \
+    cd /workspace/HumanoidTraining && \
+    git sparse-checkout set --no-cone '/*' '!/media'
+
+# ---------- Environment Configuration ----------
+# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T baked in (can be overridden by bind mounts)
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/gr00t"
+
+# MuJoCo rendering via EGL (no display needed)
+ENV MUJOCO_GL=egl
+
+# Fix liblapack/gotoblas symbol error when CUDA is active
+# (torchcodec FFmpeg6 loader fails without this on Grace Hopper)
+ENV LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libopenblas.so.0
+
+# Create cache and data directories
+RUN mkdir -p \
+    /workspace/.cache/huggingface \
+    /workspace/.cache/torch \
+    /workspace/data \
+    /workspace/eval_videos
+
+# ---------- code-server (VS Code in browser) ----------
 RUN curl -fsSL https://code-server.dev/install.sh | sh && \
     mkdir -p /root/.config/code-server && \
     printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
         > /root/.config/code-server/config.yaml
 
-# Expose ports
+# ---------- JupyterLab (notebook interface) ----------
+RUN pip install jupyterlab && \
+    mkdir -p /root/.jupyter && \
+    printf '{\n  "ServerApp": {\n    "ip": "0.0.0.0",\n    "port": 8888,\n    "token": "datamentors",\n    "open_browser": false,\n    "allow_root": true\n  }\n}\n' \
+        > /root/.jupyter/jupyter_server_config.json
+
+# ---------- Ports ----------
 # 5555: GROOT ZMQ server
 # 8000: HTTP API
+# 6006: TensorBoard
 # 8080: code-server (VS Code)
+# 8888: JupyterLab
 EXPOSE 5555
 EXPOSE 8000
+EXPOSE 6006
 EXPOSE 8080
+EXPOSE 8888
 
-# Health check
+# ---------- Entrypoint ----------
+# Generates random credentials for code-server + JupyterLab on each start.
+# Retrieve password with: docker logs <container> 2>&1 | grep PASSWORD
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# ---------- Health check ----------
 HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
-    CMD python -c "import torch; print(torch.cuda.is_available())" || exit 1
+    CMD python -c "import torch; assert torch.cuda.is_available(); import mujoco; import gr00t" || exit 1
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

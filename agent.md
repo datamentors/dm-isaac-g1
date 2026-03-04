@@ -528,7 +528,7 @@ grep "video_backend" /workspace/Isaac-GR00T/gr00t/configs/data/data_config.py
 1. **uv is the ONLY approved Python package manager** — use `uv pip install --system` inside conda env. Never use bare `pip install` for Python packages.
 2. **conda install** is ONLY permitted for non-Python system libraries (e.g. `conda-forge ffmpeg` for `.so` files). Always add a comment explaining why conda is needed.
 3. **No version changes without explicit approval** — even "obvious" version downgrades (e.g. `transformers`) must be asked first. Version mismatches cascade across the entire stack.
-4. **Dockerfile is the source of truth** — every package installed on the workstation must be reflected in [Dockerfile.unitree](environments/workstation/Dockerfile.unitree) and [requirements-groot.txt](environments/workstation/requirements-groot.txt) before the next container rebuild.
+4. **Dockerfile is the source of truth** — every package installed on the workstation must be reflected in [Dockerfile](environments/workstation/Dockerfile) and [requirements-groot.txt](environments/workstation/requirements-groot.txt) before the next container rebuild.
 5. **Pin exact versions** — no `>=` ranges for critical packages. Ranges cause reproducibility failures when upstream changes.
 
 ### Critical Version Pins (DO NOT CHANGE WITHOUT APPROVAL)

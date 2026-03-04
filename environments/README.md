@@ -20,17 +20,26 @@ This folder contains environment configurations for different deployment targets
 
 ```
 environments/
-├── README.md                    # This file
-├── workstation/                 # Blackwell workstation (training + sim)
-│   ├── pyproject.toml          # UV project config
-│   ├── uv.lock                 # Locked dependencies (generated)
-│   ├── Dockerfile              # Container image
-│   └── setup.sh                # Environment setup script
-└── spark/                       # Spark inference server (ARM64)
-    ├── pyproject.toml          # UV project config
-    ├── uv.lock                 # Locked dependencies (generated)
-    ├── Dockerfile              # Container image (ARM64)
-    └── setup.sh                # Environment setup script
+├── README.md                          # This file
+├── build/
+│   ├── build.sh                       # Build + push to ECR (workstation or spark)
+│   └── update.sh                      # Pull latest ECR image + restart container
+├── tests/
+│   ├── test_build.py                  # CPU-only build validation (pre-push gate)
+│   ├── test_environment.py            # GPU environment tests (post-push)
+│   └── test_functional.py             # Functional tests (post-push)
+├── workstation/                       # Blackwell workstation (training + sim)
+│   ├── Dockerfile                     # Multi-stage: builder → base → groot
+│   ├── docker-compose.yml             # base + groot services
+│   ├── requirements-groot.txt         # GR00T stage pinned dependencies
+│   ├── patches/                       # Runtime patches for upstream repos
+│   ├── pyproject.toml                 # UV project config
+│   └── setup.sh                       # First-time environment setup
+└── spark/                             # DGX Spark (ARM64 Grace Hopper)
+    ├── Dockerfile                     # Single-stage ARM64 image
+    ├── docker-compose.yml             # workstation service
+    ├── pyproject.toml                 # UV project config
+    └── setup.sh                       # First-time environment setup
 ```
 
 ## Quick Start

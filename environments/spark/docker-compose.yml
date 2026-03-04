@@ -1,14 +1,20 @@
 version: '3.8'
 
-# Based on working dm-groot-inference/docker-compose.yml
+# DGX Spark — Full Workstation Environment
+# Replaces inference-only docker-compose.yml with full training/eval/sim capabilities.
+#
+# Usage:
+#   docker compose build workstation
+#   docker compose up -d workstation
+#   docker exec -it dm-spark-workstation bash
 
 services:
-  groot-server:
+  workstation:
     build:
       context: .
       dockerfile: Dockerfile
-    image: dm-spark-inference:latest
-    container_name: groot-inference
+    image: dm-spark-workstation:latest
+    container_name: dm-spark-workstation
     runtime: nvidia
     deploy:
       resources:
@@ -18,14 +24,23 @@ services:
               count: all
               capabilities: [gpu]
     ports:
-      - "5555:5555"
-      - "8000:8000"
+      - "5555:5555"   # GROOT ZMQ server
+      - "8000:8000"   # HTTP API
+      - "6006:6006"   # TensorBoard
+      - "8080:8080"   # code-server (VS Code)
+      - "8888:8888"   # JupyterLab
     volumes:
-      # Mount dm-isaac-g1 repo for live code editing
-      - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
-      # Mount checkpoints
+      # Live code repos (bind-mounted from host)
+      - /home/nvidia/dm-isaac-g1:/workspace/dm-isaac-g1
+      - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
+
+      # Data directories
       - /workspace/checkpoints:/workspace/checkpoints
-      # HuggingFace and torch caches
+      - /workspace/datasets:/workspace/datasets
+      - /workspace/datasets_inspire:/workspace/datasets_inspire
+      - /home/nvidia/HumanoidTraining:/workspace/HumanoidTraining
+
+      # Caches (Docker volumes for persistence across rebuilds)
       - huggingface-cache:/workspace/.cache/huggingface
       - torch-cache:/workspace/.cache/torch
     environment:
@@ -35,8 +50,13 @@ services:
       - GROOT_EMBODIMENT=${GROOT_EMBODIMENT:-UNITREE_G1}
       - NVIDIA_VISIBLE_DEVICES=all
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-    shm_size: '32gb'
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      - MUJOCO_GL=egl
+    shm_size: '64gb'
     restart: unless-stopped
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
     healthcheck:
       test: ["CMD", "python", "-c", "import torch; assert torch.cuda.is_available()"]
       interval: 30s

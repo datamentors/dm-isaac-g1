@@ -1,71 +1,113 @@
 version: "3.8"
 
-# DM-ISAAC-G1 Workstation Environment
-# Follows IsaacLab Docker deployment approach
-# https://isaac-sim.github.io/IsaacLab/main/source/deployment/docker.html
+# DM-ISAAC-G1 Workstation — Unitree-based Docker Environment
 #
-# IsaacLab v2.2.0 is built INTO the image (not mounted)
-# Uses Isaac Sim 5.0.0 with NumPy < 2.0 for stability
+# TWO-IMAGE STRATEGY:
+#   dm-workstation-base  — Isaac Sim + IsaacLab + unitree stack (no GR00T)
+#                          Pushed to ECR as the stable, cacheable base.
+#   dm-workstation       — Extends base, adds GR00T inference deps via uv.
+#                          Used for running GROOT inference on the workstation.
+#
+# Build commands:
+#   docker compose build base    # Base only (for ECR push)
+#   docker compose build groot   # Full image (extends base)
+#
+# ECR push (base):
+#   source ../../.env
+#   aws sso login --profile $AWS_PROFILE
+#   aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE | \
+#     docker login --username AWS --password-stdin $AWS_ECR_REGISTRY
+#   docker tag dm-workstation-base:latest $AWS_ECR_REGISTRY/$AWS_ECR_REPO:base-latest
+#   docker push $AWS_ECR_REGISTRY/$AWS_ECR_REPO:base-latest
+
+x-common-env: &common-env
+  NVIDIA_VISIBLE_DEVICES: all
+  NVIDIA_DRIVER_CAPABILITIES: all
+  ACCEPT_EULA: "Y"
+  OMNI_KIT_ALLOW_ROOT: "1"
+  OMNI_KIT_ACCEPT_EULA: "Y"
+  GROOT_SERVER_HOST: ${GROOT_SERVER_HOST:-192.168.1.237}
+  GROOT_SERVER_PORT: ${GROOT_SERVER_PORT:-5555}
+  HF_TOKEN: ${HF_TOKEN}
+  HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN}
+  WANDB_API_KEY: ${WANDB_API_KEY}
+  GR00T_STATS: /workspace/checkpoints/groot-g1-gripper-hospitality-7ds/processor/statistics.json
+
+x-common-volumes: &common-volumes
+  - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
+  - /workspace/datasets:/workspace/datasets
+  - /workspace/datasets_inspire:/workspace/datasets_inspire
+  - /workspace/checkpoints:/workspace/checkpoints
+  - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
+  - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
+  - /home/datamentors/HumanoidTraining:/workspace/HumanoidTraining
+  - /dev/dri:/dev/dri
+  # NOTE: /tmp/.X11-unix intentionally NOT mounted from host.
+  # Mounting it causes stale X lock files (/tmp/.X1-lock) to persist across
+  # container restarts, blocking vncserver from starting on :1.
+  # TurboVNC manages its own /tmp/.X11-unix inside the container.
+
+x-common-deploy: &common-deploy
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
 
 services:
-  dm-workstation:
+  # --------------------------------------------------------
+  # BASE image: Isaac Sim + IsaacLab + unitree stack
+  # Stable, pushed to ECR. No GR00T.
+  # --------------------------------------------------------
+  base:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        ISAAC_SIM_VERSION: "5.0.0"
-    image: dm-workstation:latest
-    container_name: dm-workstation
+      target: base
+    image: dm-workstation-base:latest
+    container_name: dm-workstation-base
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - DISPLAY=${DISPLAY:-:0}
-      - ACCEPT_EULA=Y
-      # GROOT server connection (DGX Spark)
-      - GROOT_SERVER_HOST=${GROOT_SERVER_HOST:-192.168.1.237}
-      - GROOT_SERVER_PORT=${GROOT_SERVER_PORT:-5555}
-      # HuggingFace
-      - HF_TOKEN=${HF_TOKEN}
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
-      # W&B
-      - WANDB_API_KEY=${WANDB_API_KEY}
-      # MuJoCo headless rendering
-      - MUJOCO_GL=egl
-      - PYOPENGL_PLATFORM=egl
-    volumes:
-      # Mount the dm-isaac-g1 repo (live code editing)
-      - /home/datamentors/dm-isaac-g1:/workspace/dm-isaac-g1
-      # Mount datasets and checkpoints (persistent storage)
-      - /workspace/datasets:/workspace/datasets
-      - /workspace/checkpoints:/workspace/checkpoints
-      # NOTE: IsaacLab v2.2.0 is built into the image, not mounted
-      # This ensures ./isaaclab.sh --install ran correctly during build
-      # Mount Isaac-GR00T (for client code)
-      - /workspace/Isaac-GR00T:/workspace/Isaac-GR00T
-      # Mount unitree_sim_isaaclab (from /home/datamentors)
-      - /home/datamentors/unitree_sim_isaaclab:/workspace/unitree_sim_isaaclab
-      # MuJoCo Menagerie (persistent — avoids re-cloning on rebuild)
-      - mujoco_menagerie:/workspace/mujoco_menagerie
-      # X11 for GUI
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      # GPU access
-      - /dev/dri:/dev/dri
+      <<: *common-env
+      DISPLAY: ${DISPLAY:-:1}
+    volumes: *common-volumes
     ports:
-      - "47995-48012:47995-48012"  # Isaac Sim streaming
-      - "6006:6006"                 # TensorBoard
-      - "5901:5901"                 # VNC
+      - "47995-48012:47995-48012"
+      - "6006:6006"
+      - "5901:5901"
+      - "8080:8080"
+      - "8888:8888"
     network_mode: host
     ipc: host
     stdin_open: true
     tty: true
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    deploy: *common-deploy
 
-volumes:
-  mujoco_menagerie:
+  # --------------------------------------------------------
+  # GROOT image: extends base, adds GR00T inference deps
+  # Used for running inference against the DGX Spark GROOT server.
+  # --------------------------------------------------------
+  groot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: groot
+    image: dm-workstation:latest
+    container_name: dm-workstation
+    runtime: nvidia
+    environment:
+      <<: *common-env
+      DISPLAY: ${DISPLAY:-:1}
+    volumes: *common-volumes
+    ports:
+      - "47995-48012:47995-48012"
+      - "6006:6006"
+      - "5901:5901"
+      - "8080:8080"
+      - "8888:8888"
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    deploy: *common-deploy
