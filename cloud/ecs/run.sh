@@ -724,7 +724,7 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && ${VNC_STARTUP_CMD} && echo 'VNC+XFCE started on :5901' && sleep 86400"],
+            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && ${VNC_STARTUP_CMD} && echo 'VNC+XFCE started on :5901' && echo '=== Pulling latest code ===' && cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null && pip install -e . -q 2>/dev/null && cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null && pip install -e . -q 2>/dev/null && echo '=== Repos updated, container ready ===' && sleep 86400"],
             "environment": [
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},

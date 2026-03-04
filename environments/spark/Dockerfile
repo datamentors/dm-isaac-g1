@@ -65,10 +65,14 @@ RUN python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.
 # Go back to main workspace
 WORKDIR /workspace
 
+# dm-isaac-g1 — baked in as fallback (can be overridden by bind mount at runtime)
+RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
+    cd /workspace/dm-isaac-g1 && pip install -e .
+
 # Create cache directories
 RUN mkdir -p /workspace/.cache/huggingface /workspace/.cache/torch
 
-# Set PYTHONPATH for dm-isaac-g1 (will be mounted)
+# Set PYTHONPATH for dm-isaac-g1
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:${PYTHONPATH}"
 
 # Expose ports

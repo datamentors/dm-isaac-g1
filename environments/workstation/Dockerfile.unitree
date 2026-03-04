@@ -184,9 +184,11 @@ ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 # We set /workspace/... because the mount path is what's used at runtime.
 ENV PROJECT_ROOT=/workspace/unitree_sim_isaaclab
 
-# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T are mounted at runtime
-# unitree_sim_isaaclab path covers the G1 scene configs and USD references
-ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_rl:/home/code/IsaacLab/source/isaaclab_assets:/home/code/IsaacLab/source/isaaclab_contrib:/home/code/unitree_sim_isaaclab:${PYTHONPATH}"
+# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T are baked in (cloned in groot stage)
+# and can also be overridden by bind mounts on the workstation.
+# unitree_sim_isaaclab path covers the G1 scene configs and USD references.
+# unitree_rl_lab added for RL training framework access.
+ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/unitree_rl_lab:/home/code/IsaacLab/source/isaaclab:/home/code/IsaacLab/source/isaaclab_tasks:/home/code/IsaacLab/source/isaaclab_rl:/home/code/IsaacLab/source/isaaclab_assets:/home/code/IsaacLab/source/isaaclab_contrib:/home/code/unitree_sim_isaaclab:${PYTHONPATH}"
 
 RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> ~/.bashrc && \
     echo 'conda activate unitree_sim_env' >> ~/.bashrc && \
@@ -277,11 +279,27 @@ RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytor
 
 # ==============================
 # Clone workspace repos required at runtime
-# These repos are NOT bind-mounted — they live inside the image.
-# The dm-isaac-g1, Isaac-GR00T, and unitree_sim_isaaclab repos are
-# bind-mounted from the host at runtime (see docker-compose.unitree.yml).
+# On the workstation, dm-isaac-g1, Isaac-GR00T, and unitree_sim_isaaclab
+# are bind-mounted from the host (see docker-compose.unitree.yml).
+# On ECS, there are NO bind mounts — these must be in the image.
+# We clone them here so the image works in both environments.
+# At runtime, bind mounts override these baked-in copies on the workstation.
+# On ECS, users run `git pull` inside the container for latest code.
 # ==============================
 WORKDIR /workspace
+
+# dm-isaac-g1 — our main G1 training/inference project
+# Installed as editable so `import dm_isaac_g1` works immediately.
+RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
+    cd /workspace/dm-isaac-g1 && uv pip install --system -e .
+
+# unitree_rl_lab — Unitree's RL training framework (RSL-RL based)
+# Required for: RL training scripts, deploy config export, sim2sim pipeline
+RUN git clone https://github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab && \
+    cd /workspace/unitree_rl_lab && uv pip install --system -e .
+
+# Isaac-GR00T — NVIDIA's GR00T framework (inference + fine-tuning)
+RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
 
 # GR00T-WholeBodyControl (Dex1 branch) — WBC eval pipeline + decoupled_wbc package
 # NOTE: After cloning, our Dex1 patches must be applied (see docs/DOCKER_ENVIRONMENT_STATUS.md).
@@ -298,5 +316,8 @@ RUN cd video2robot && git apply /tmp/robot_viser_av1_fallback.patch
 RUN git lfs install && \
     git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
 
-WORKDIR /home/code
+# unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
+RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
+
+WORKDIR /workspace
 CMD ["conda", "run", "--no-capture-output", "-n", "unitree_sim_env", "/bin/bash"]

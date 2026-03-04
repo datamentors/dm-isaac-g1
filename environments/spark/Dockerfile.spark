@@ -158,6 +158,15 @@ RUN pip install pin-pink meshcat 2>/dev/null || \
 # ---------- Clone Workspace Repos ----------
 WORKDIR /workspace
 
+# dm-isaac-g1 — our main G1 training/inference project
+# Installed as editable so `import dm_isaac_g1` works immediately.
+# On Spark, bind-mounted from host at runtime; baked in as fallback.
+RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
+    cd /workspace/dm-isaac-g1 && pip install -e .
+
+# Isaac-GR00T — NVIDIA's GR00T framework (baked in as fallback)
+RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
+
 # GR00T-WholeBodyControl (Dex1 branch) — WBC eval pipeline
 RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBodyControl-dex1
 
@@ -168,12 +177,19 @@ RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
 RUN git lfs install && \
     git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
 
+# unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
+RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
+
 # ---------- Environment Configuration ----------
-# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T mounted at runtime
+# PYTHONPATH: dm-isaac-g1 and Isaac-GR00T baked in (can be overridden by bind mounts)
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:/workspace/Isaac-GR00T:/workspace/gr00t"
 
 # MuJoCo rendering via EGL (no display needed)
 ENV MUJOCO_GL=egl
+
+# Fix liblapack/gotoblas symbol error when CUDA is active
+# (torchcodec FFmpeg6 loader fails without this on Grace Hopper)
+ENV LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libopenblas.so.0
 
 # Create cache and data directories
 RUN mkdir -p \

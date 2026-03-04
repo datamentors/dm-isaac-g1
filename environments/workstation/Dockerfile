@@ -198,6 +198,23 @@ RUN apt-get update -qq && apt-get install -y -qq ffmpeg libavcodec-dev libavform
 RUN uv pip install --system torchcodec wandb
 
 # ==========================================
+# Clone workspace repos (fallback for environments without bind mounts)
+# On the workstation these are overridden by docker-compose bind mounts.
+# On ECS/standalone containers, these baked-in copies are used directly.
+# ==========================================
+WORKDIR /workspace
+
+# dm-isaac-g1 — main G1 training/inference project
+RUN git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1 && \
+    cd /workspace/dm-isaac-g1 && /isaac-sim/python.sh -m pip install -e .
+
+# Isaac-GR00T — NVIDIA's GR00T framework
+RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T
+
+# unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
+RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
+
+# ==========================================
 # Environment Configuration
 # ==========================================
 # Set PYTHONPATH for all modules

@@ -10,13 +10,25 @@ The ECR image (`isaac-g1-sim-ft-rl:latest`) is the same as `dm-workstation:lates
 |-----------|---------|
 | **Base** | NVIDIA CUDA 12.8 + Ubuntu 22.04 |
 | **Isaac Sim** | 5.0.0 (pip) + IsaacLab v2.2.0 |
-| **MuJoCo** | 3.2.6 + Menagerie robot models |
+| **MuJoCo** | 3.2.6 + Menagerie robot models + unitree_mujoco |
 | **PyTorch** | 2.7.0+cu128 with flash-attn, DeepSpeed |
 | **GR00T** | Isaac-GR00T + WBC + video2robot |
 | **Desktop** | XFCE4 + TurboVNC 3.1.2 + Chrome |
-| **RL** | RSL-RL, unitree_rl_lab, dm_isaac_g1 |
+| **RL** | RSL-RL, unitree_rl_lab, dm_isaac_g1, unitree_sim_isaaclab |
 | **Conda env** | `unitree_sim_env` (Python 3.11) |
 | **VNC** | Port 5901, password: `datament` |
+
+**Source repos baked into the image** (at `/workspace/`):
+
+| Repo | Path | Notes |
+|------|------|-------|
+| dm-isaac-g1 | `/workspace/dm-isaac-g1` | Installed as editable (`pip install -e .`) |
+| unitree_rl_lab | `/workspace/unitree_rl_lab` | Installed as editable |
+| Isaac-GR00T | `/workspace/Isaac-GR00T` | GROOT framework |
+| unitree_sim_isaaclab | `/home/code/unitree_sim_isaaclab` | USD assets + scene configs |
+| unitree_mujoco | `/workspace/unitree_mujoco` | G1 MuJoCo scene XML |
+
+> **Important:** The baked-in repos may be behind `main`. Always run `git pull origin main` after entering the container to get the latest code.
 
 See [DOCKER_ENVIRONMENT_STATUS.md](../../docs/DOCKER_ENVIRONMENT_STATUS.md) for the full Dockerfile architecture and package list.
 
@@ -129,6 +141,7 @@ python -c "import torch; print(torch.cuda.get_device_name())"
 
 Train a locomotion policy with Isaac Lab. Runs headless (no VNC needed).
 
+**Option A: Interactive (inside container)**
 ```bash
 ./run.sh shell
 # Wait for RUNNING, then:
@@ -138,11 +151,13 @@ Train a locomotion policy with Isaac Lab. Runs headless (no VNC needed).
 conda activate unitree_sim_env
 cd /workspace/dm-isaac-g1
 
-# Pull latest code
+# Pull latest code (repos are baked in but may be behind main)
 git pull origin main
-
-# Install as editable
 pip install -e .
+
+# Also update unitree_rl_lab
+cd /workspace/unitree_rl_lab && git pull origin main && pip install -e .
+cd /workspace/dm-isaac-g1
 
 # Train (headless, 4096 envs)
 python -u src/dm_isaac_g1/rl/scripts/train.py \
@@ -152,9 +167,9 @@ python -u src/dm_isaac_g1/rl/scripts/train.py \
     --headless
 ```
 
-Or submit as a batch job (auto-terminates when done):
+**Option B: Batch job (auto-terminates when done)**
 ```bash
-# Custom: edit train_mimic.sh or create a new training script, upload to S3
+./run.sh submit --task rl --task-id DM-G1-29dof-MilitaryMarch --max-iterations 30000
 ```
 
 ---
