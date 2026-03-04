@@ -1,0 +1,30 @@
+--- a/video2robot/visualization/robot_viser.py
++++ b/video2robot/visualization/robot_viser.py
+@@ -760,10 +760,12 @@
+
+     results_pkl = project_dir / "results.pkl"
+     video_path = project_dir / "original.mp4"
++    video_path_h264 = project_dir / "original_h264.mp4"
+     if not results_pkl.exists():
+         raise SystemExit(f"results.pkl not found: {results_pkl}")
+-    if not video_path.exists():
+-        raise SystemExit(f"original.mp4 not found: {video_path}")
++    if not video_path.exists() and not video_path_h264.exists():
++        raise SystemExit(f"No video found: tried {video_path} and {video_path_h264}")
++    if not video_path.exists():
++        video_path = video_path_h264
+
+     print(f"[RobotViser] Project: {project_dir}")
+     print(f"[RobotViser] results: {results_pkl}")
+@@ -778,6 +780,11 @@
+
+     print("[RobotViser] Loading video frames...")
+     frames, video_fps = _load_video_frames(video_path, max_frames=args.total)
++    # Fallback to H264 version if original (possibly AV1) yielded no frames
++    if not frames and video_path.name == "original.mp4" and video_path_h264.exists():
++        print(f"[RobotViser] original.mp4 unreadable (AV1?), trying {video_path_h264.name}")
++        video_path = video_path_h264
++        frames, video_fps = _load_video_frames(video_path, max_frames=args.total)
+     if args.subsample > 1:
+         frames = frames[:: args.subsample]
+     frames = [_maybe_resize_rgb(f, img_maxsize=int(args.img_maxsize)) for f in frames]

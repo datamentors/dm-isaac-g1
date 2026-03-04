@@ -73,7 +73,7 @@ done
 # Platform-specific configuration
 if [ "$BUILD_PLATFORM" = "spark" ]; then
     INSTANCE_TYPE="c7g.4xlarge"    # 16 vCPU ARM64 Graviton3, 32 GB
-    VOLUME_SIZE=100                # Spark image is smaller (~28 GB)
+    VOLUME_SIZE=150                # Spark image ~40 GB (Isaac Sim + IsaacLab + VNC)
     TAG_NAME="dm-docker-build-spark"
     AMI_FILTER="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"
     ACTIVE_ECR_REPO="$ECR_REPO_SPARK"
@@ -166,11 +166,22 @@ echo "  ECR repo: $ECR_REGISTRY/$ACTIVE_ECR_REPO"
 # ---------- Collect build context ----------
 if [ "$BUILD_PLATFORM" = "spark" ]; then
     log "Collecting build context from environments/spark/"
-    if [ ! -f "$SPARK_DIR/Dockerfile" ]; then
-        echo "ERROR: Missing: $SPARK_DIR/Dockerfile"
-        exit 1
+    for f in "$SPARK_DIR/Dockerfile" "$SPARK_DIR/requirements-groot-spark.txt"; do
+        if [ ! -f "$f" ]; then
+            echo "ERROR: Missing: $f"
+            exit 1
+        fi
+    done
+    BUILD_FILES=(
+        "$SPARK_DIR/Dockerfile"
+        "$SPARK_DIR/requirements-groot-spark.txt"
+        "$SPARK_DIR/entrypoint.sh"
+    )
+    if [ -d "$SPARK_DIR/patches" ]; then
+        PATCH_COUNT=$(find "$SPARK_DIR/patches" -type f | wc -l | tr -d ' ')
+        echo "  Found $PATCH_COUNT patch/helper file(s)"
+        BUILD_FILES+=("$SPARK_DIR/patches")
     fi
-    BUILD_FILES=("$SPARK_DIR/Dockerfile" "$SPARK_DIR/entrypoint.sh")
 else
     log "Collecting build context from environments/workstation/"
     for f in "$WORKSTATION_DIR/Dockerfile" "$WORKSTATION_DIR/requirements-groot.txt"; do
@@ -383,7 +394,8 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
 
     echo '=== Spark build started at \$(date) ===' | tee build.log
 
-    sudo docker build \
+    echo '>>> Building groot stage...' | tee -a build.log
+    sudo docker build --target groot \
         --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
         -t '$SPARK_TAG' \
         -t '$DATE_TAG' \
@@ -403,16 +415,18 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
 
         echo '=== Running build validation tests at \$(date) ===' | tee -a build.log
 
-        # Run test_build.py inside the built image (no GPU needed)
+        # Run test_build.py inside the built image (uses conda env like workstation)
         sudo docker run --rm \
             -v ~/build/test_build.py:/tmp/test_build.py:ro \
             '$SPARK_TAG' \
+            conda run --no-capture-output -n unitree_sim_env \
             python /tmp/test_build.py --json 2>&1 | tee test-results.json | tee -a build.log
 
         # Also run human-readable output
         sudo docker run --rm \
             -v ~/build/test_build.py:/tmp/test_build.py:ro \
             '$SPARK_TAG' \
+            conda run --no-capture-output -n unitree_sim_env \
             python /tmp/test_build.py 2>&1 | tee test-results.txt | tee -a build.log
 
         # Upload test results to S3

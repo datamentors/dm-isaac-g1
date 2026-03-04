@@ -192,10 +192,10 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh && \
         > /root/.config/code-server/config.yaml
 EXPOSE 8080
 
-# JupyterLab — notebook interface (port 8888)
-# Installed via pip into system Python; will be re-installed in groot stage's conda env.
-RUN pip install jupyterlab && \
-    mkdir -p /root/.jupyter && \
+# JupyterLab config — port 8888
+# JupyterLab itself is installed in the groot stage (conda env has pip).
+# Config is created here so it exists for both base and groot stages.
+RUN mkdir -p /root/.jupyter && \
     printf '{\n  "ServerApp": {\n    "ip": "0.0.0.0",\n    "port": 8888,\n    "token": "datamentors",\n    "open_browser": false,\n    "allow_root": true\n  }\n}\n' \
         > /root/.jupyter/jupyter_server_config.json
 EXPOSE 8888

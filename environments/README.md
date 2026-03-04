@@ -7,7 +7,7 @@ This folder contains environment configurations for different deployment targets
 | Environment | Target | Architecture | Purpose |
 |------------|--------|--------------|---------|
 | **workstation** | Blackwell (192.168.1.205) | x86_64 + NVIDIA GPU | Training + Simulation |
-| **spark** | Spark (192.168.1.237) | ARM64 (Jetson/Orin) | Inference only |
+| **spark** | Spark (192.168.1.237) | ARM64 (DGX Spark) | Training + Simulation (Isaac Sim 5.1.0 + IsaacLab 2.3.0) |
 
 ## Design Principles
 
@@ -36,8 +36,11 @@ environments/
 │   ├── pyproject.toml                 # UV project config
 │   └── setup.sh                       # First-time environment setup
 └── spark/                             # DGX Spark (ARM64 Grace Hopper)
-    ├── Dockerfile                     # Single-stage ARM64 image
+    ├── Dockerfile                     # Multi-stage: builder → groot (Isaac Sim 5.1.0)
     ├── docker-compose.yml             # workstation service
+    ├── requirements-groot-spark.txt   # GR00T stage pinned deps (ARM64 adapted)
+    ├── patches/                       # Runtime patches for upstream repos
+    ├── entrypoint.sh                  # Random password generation + conda activation
     ├── pyproject.toml                 # UV project config
     └── setup.sh                       # First-time environment setup
 ```

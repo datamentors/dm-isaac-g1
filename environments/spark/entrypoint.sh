@@ -11,6 +11,12 @@
 #   docker logs <container> 2>&1 | grep PASSWORD
 # =============================================================================
 
+# Activate conda environment so python3/pip resolve to the unitree_sim_env
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate unitree_sim_env 2>/dev/null || true
+fi
+
 # Generate random password (16 chars, alphanumeric)
 SERVICE_PASSWORD="${SERVICE_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 

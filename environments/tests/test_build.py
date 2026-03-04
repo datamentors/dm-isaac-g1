@@ -197,13 +197,13 @@ def test_rsl_rl():
 
 # ── Isaac Sim (x86_64 only) ─────────────────────────────────────────────────
 
-@test("Isaac Sim import", skip_on_arm64=True)
+@test("Isaac Sim import")
 def test_isaacsim():
     import isaacsim
     return "OK"
 
 
-@test("IsaacLab import", skip_on_arm64=True)
+@test("IsaacLab import")
 def test_isaaclab():
     # IsaacLab depends on toml at import time
     import toml

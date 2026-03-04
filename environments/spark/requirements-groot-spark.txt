@@ -1,0 +1,66 @@
+# GR00T + IK extra dependencies (ARM64 / DGX Spark)
+# ==============================
+# Adapted from workstation requirements-groot.txt for aarch64.
+# Packages needed by Isaac-GR00T and unitree_sim_isaaclab on top of what
+# Isaac Sim 5.1.0 + IsaacLab v2.3.0 already install in the conda env.
+#
+# NOT included (already provided or intentionally skipped):
+#   torch, torchvision  — already installed (2.9.0 cu130)
+#   pyzmq               — already installed via unitree_sim_isaaclab requirements
+#
+# ARM64 removals vs workstation:
+#   decord==0.6.0   — no aarch64 wheel; GR00T uses torchcodec instead
+#   hidapi==0.15.0  — USB HID for physical joysticks; not needed on Spark
+#
+# torchcodec: installed separately in Dockerfile (built from source for aarch64)
+# flash-attn: installed separately in Dockerfile (prebuilt wheel or source build)
+
+# -----------------------------------------------
+# GR00T inference dependencies
+# -----------------------------------------------
+meshcat
+albumentations==1.4.18
+av==15.0.0
+diffusers==0.35.1
+dm-tree==0.1.8
+lmdb==1.7.5
+msgpack==1.1.0
+msgpack-numpy==0.4.8
+pandas==2.2.3
+peft==0.17.1
+termcolor==3.2.0
+# transformers: pinned to exactly 4.51.3 — GR00T N1.6 pyproject.toml pins this version.
+# DO NOT upgrade without explicit approval and testing.
+transformers==4.51.3
+tokenizers==0.21.1
+tyro==0.9.17
+click==8.1.8
+datasets==3.6.0
+einops==0.8.1
+gymnasium==1.2.2
+matplotlib==3.10.1
+omegaconf==2.3.0
+scipy==1.15.3
+wandb==0.23.0
+deepspeed==0.17.6
+
+# -----------------------------------------------
+# MuJoCo evaluation dependencies
+# -----------------------------------------------
+opencv-python-headless>=4.8.0
+
+# -----------------------------------------------
+# SSH / remote operations
+# -----------------------------------------------
+paramiko==4.0.0
+bcrypt==5.0.0
+PyNaCl==1.6.2
+invoke==2.2.1
+argcomplete==3.6.3
+
+# -----------------------------------------------
+# RL + training utilities
+# -----------------------------------------------
+prettytable==3.17.0
+# decord==0.6.0  — removed: no aarch64 wheel
+# hidapi==0.15.0 — removed: no aarch64 wheel
