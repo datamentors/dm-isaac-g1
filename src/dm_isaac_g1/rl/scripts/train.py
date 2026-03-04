@@ -70,8 +70,10 @@ def main():
         agent_cfg.logger = "wandb"
         agent_cfg.wandb_project = args_cli.log_project_name
 
+    # Use task name as WandB run name for identifiable runs
+    run_name = f"{args_cli.task}_seed{args_cli.seed}"
     log_root = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    log_dir = os.path.join(log_root, f"seed_{args_cli.seed}")
+    log_dir = os.path.join(log_root, run_name)
     os.makedirs(log_dir, exist_ok=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
