@@ -131,12 +131,20 @@ ENV ACCEPT_EULA=Y
 # Correct env var that isaacsim pip package checks to skip interactive EULA
 ENV OMNI_KIT_ACCEPT_EULA=Y
 
+# Vulkan configuration for ECS GPU instances.
+# AWS ECS GPU AMI NVIDIA driver is compute-only (no Vulkan support in kernel module).
+# Mesa lavapipe (CPU Vulkan 1.3) provides software rendering for Isaac Sim headless mode.
+# CUDA compute still uses the NVIDIA GPU normally.
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+ENV XDG_RUNTIME_DIR=/tmp/xdg
+
 # Runtime system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa git git-lfs curl wget \
     zenity unzip vim htop tmux \
     xorg libxext6 libxrender1 libxtst6 libxi6 \
     libglib2.0-0 libvulkan1 vulkan-tools \
+    mesa-vulkan-drivers \
     ncurses-term dbus-x11 \
     xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
@@ -339,8 +347,21 @@ RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBo
 RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
 
 # Patch: robot_viser.py AV1 codec fallback — use original_h264.mp4 when original.mp4 is AV1-encoded
-COPY patches/robot_viser_av1_fallback.patch /tmp/
-RUN cd video2robot && git apply /tmp/robot_viser_av1_fallback.patch
+# Applied inline via Python to avoid SCP transfer corruption of .patch files.
+RUN python -c "\
+import pathlib, re; \
+p = pathlib.Path('video2robot/visualization/robot_viser.py'); \
+t = p.read_text(); \
+# Hunk 1: add h264 fallback path + update existence check \
+t = t.replace( \
+    'video_path = project_dir / \"original.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists():\n        raise SystemExit(f\"original.mp4 not found: {video_path}\")', \
+    'video_path = project_dir / \"original.mp4\"\n    video_path_h264 = project_dir / \"original_h264.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists() and not video_path_h264.exists():\n        raise SystemExit(f\"No video found: tried {video_path} and {video_path_h264}\")\n    if not video_path.exists():\n        video_path = video_path_h264'); \
+# Hunk 2: add runtime AV1 fallback after loading frames \
+t = t.replace( \
+    'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:', \
+    'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    # Fallback to H264 version if original (possibly AV1) yielded no frames\n    if not frames and video_path.name == \"original.mp4\" and video_path_h264.exists():\n        print(f\"[RobotViser] original.mp4 unreadable (AV1?), trying {video_path_h264.name}\")\n        video_path = video_path_h264\n        frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:'); \
+p.write_text(t); \
+print('Patched robot_viser.py with AV1 fallback')"
 
 # unitree_model — Unitree USD/URDF/MJCF models from HuggingFace
 RUN git lfs install && \
