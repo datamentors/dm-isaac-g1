@@ -355,16 +355,17 @@ RUN git clone https://github.com/NVlabs/GR00T-WholeBodyControl.git GR00T-WholeBo
 RUN git clone https://github.com/AIM-Intelligence/video2robot.git video2robot
 
 # Patch: robot_viser.py AV1 codec fallback — use original_h264.mp4 when original.mp4 is AV1-encoded
-# Applied inline via Python to avoid SCP transfer corruption of .patch files.
+# Skipped if visualization/robot_viser.py doesn't exist (upstream repo restructured).
 RUN python -c "\
-import pathlib, re; \
+import pathlib; \
 p = pathlib.Path('video2robot/visualization/robot_viser.py'); \
+if not p.exists(): \
+    print('[skip] video2robot/visualization/robot_viser.py not found — patch not needed'); \
+    exit(0); \
 t = p.read_text(); \
-# Hunk 1: add h264 fallback path + update existence check \
 t = t.replace( \
     'video_path = project_dir / \"original.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists():\n        raise SystemExit(f\"original.mp4 not found: {video_path}\")', \
     'video_path = project_dir / \"original.mp4\"\n    video_path_h264 = project_dir / \"original_h264.mp4\"\n    if not results_pkl.exists():\n        raise SystemExit(f\"results.pkl not found: {results_pkl}\")\n    if not video_path.exists() and not video_path_h264.exists():\n        raise SystemExit(f\"No video found: tried {video_path} and {video_path_h264}\")\n    if not video_path.exists():\n        video_path = video_path_h264'); \
-# Hunk 2: add runtime AV1 fallback after loading frames \
 t = t.replace( \
     'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:', \
     'frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    # Fallback to H264 version if original (possibly AV1) yielded no frames\n    if not frames and video_path.name == \"original.mp4\" and video_path_h264.exists():\n        print(f\"[RobotViser] original.mp4 unreadable (AV1?), trying {video_path_h264.name}\")\n        video_path = video_path_h264\n        frames, video_fps = _load_video_frames(video_path, max_frames=args.total)\n    if args.subsample > 1:'); \
