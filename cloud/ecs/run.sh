@@ -21,6 +21,8 @@
 # Examples:
 #   ./run.sh submit --task mimic --motion cr7_06_tiktok_uefa
 #   ./run.sh submit --task mimic --motion cr7_06_tiktok_uefa --max-iterations 50000
+#   ./run.sh submit --task rl --task-id DM-G1-29dof-FALCON
+#   ./run.sh submit --task rl --task-id DM-G1-29dof-SoFTA --max-iterations 30000
 #   ./run.sh shell                          # launch interactive GPU container
 #   ./run.sh exec --task-arn <arn>           # get bash shell into running container
 #   ./run.sh status
@@ -56,7 +58,7 @@ EXEC_ROLE_ARN="${EXEC_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/dm-isaac-g1-ecs-
 TASK_TYPE=""
 MOTION_NAME=""
 TASK_ID=""
-MAX_ITERATIONS=30000
+MAX_ITERATIONS=""
 TASK_ARN=""
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -95,9 +97,10 @@ upload_data() {
         log "Uploaded: s3://${S3_BUCKET}/tasks/mimic/${motion}/"
     fi
 
-    # Upload the training script
+    # Upload training scripts
     aws_cmd s3 cp "$SCRIPT_DIR/train_mimic.sh" "s3://${S3_BUCKET}/scripts/train_mimic.sh"
-    log "Uploaded training script"
+    aws_cmd s3 cp "$SCRIPT_DIR/train_rl.sh" "s3://${S3_BUCKET}/scripts/train_rl.sh"
+    log "Uploaded training scripts"
 }
 
 # ── Register Task Definition ─────────────────────────────────────────────────
@@ -108,7 +111,15 @@ register_task_def() {
     local task_id="$4"
     local family="dm-${task}-${motion}"
 
-    log "Registering task definition: $family (task_id=$task_id)" >&2
+    # Select training script based on task type
+    local train_script="train_mimic.sh"
+    local wandb_project="dm-isaac-g1"
+    if [[ "$task" == "rl" ]]; then
+        train_script="train_rl.sh"
+        wandb_project="dm-isaac-g1-rl"
+    fi
+
+    log "Registering task definition: $family (task_id=$task_id, script=$train_script)" >&2
 
     local tmpfile
     tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
@@ -137,10 +148,10 @@ register_task_def() {
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
                 {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},
                 {"name": "WANDB_API_KEY", "value": "${WANDB_API_KEY:-}"},
-                {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-dm-isaac-g1}"},
+                {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-${wandb_project}}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "/opt/training/scripts/train_mimic.sh"],
+            "command": ["bash", "/opt/training/scripts/${train_script}"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -202,23 +213,43 @@ EOF
 
 # ── Submit Task ───────────────────────────────────────────────────────────────
 cmd_submit() {
-    [[ -z "$TASK_TYPE" ]] && { err "Must specify --task (e.g., mimic)"; exit 1; }
-    [[ -z "$MOTION_NAME" ]] && { err "Must specify --motion (e.g., cr7_06_tiktok_uefa)"; exit 1; }
+    [[ -z "$TASK_TYPE" ]] && { err "Must specify --task (e.g., mimic, rl)"; exit 1; }
 
-    # Auto-detect task ID from the task's __init__.py (gym.register id)
-    if [[ -z "$TASK_ID" ]]; then
-        local init_py="$REPO_ROOT/src/dm_isaac_g1/mimic/tasks/${MOTION_NAME}/__init__.py"
-        if [[ -f "$init_py" ]]; then
-            TASK_ID=$(sed -n 's/.*id="\([^"]*\)".*/\1/p' "$init_py" | head -1)
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        # RL tasks: require --task-id, derive motion name from it
+        [[ -z "$TASK_ID" ]] && { err "RL tasks require --task-id (e.g., DM-G1-29dof-FALCON)"; exit 1; }
+        # Use task ID as the "motion" identifier for ECS family naming
+        if [[ -z "$MOTION_NAME" ]]; then
+            MOTION_NAME=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//' | tr '[:upper:]' '[:lower:]')
+        fi
+    else
+        # Mimic tasks: require --motion
+        [[ -z "$MOTION_NAME" ]] && { err "Must specify --motion (e.g., cr7_06_tiktok_uefa)"; exit 1; }
+
+        # Auto-detect task ID from the task's __init__.py (gym.register id)
+        if [[ -z "$TASK_ID" ]]; then
+            local init_py="$REPO_ROOT/src/dm_isaac_g1/mimic/tasks/${MOTION_NAME}/__init__.py"
+            if [[ -f "$init_py" ]]; then
+                TASK_ID=$(sed -n 's/.*id="\([^"]*\)".*/\1/p' "$init_py" | head -1)
+            fi
+        fi
+        if [[ -z "$TASK_ID" ]]; then
+            TASK_ID="DM-G1-29dof-Mimic-${MOTION_NAME}"
+            warn "Could not auto-detect task ID, using: $TASK_ID"
         fi
     fi
-    if [[ -z "$TASK_ID" ]]; then
-        TASK_ID="DM-G1-29dof-Mimic-${MOTION_NAME}"
-        warn "Could not auto-detect task ID, using: $TASK_ID"
+
+    # Default iterations: 50000 for RL, 30000 for mimic
+    if [[ -z "$MAX_ITERATIONS" ]]; then
+        if [[ "$TASK_TYPE" == "rl" ]]; then
+            MAX_ITERATIONS=50000
+        else
+            MAX_ITERATIONS=30000
+        fi
     fi
 
     log "=== Submitting ECS Training Job ==="
-    log "Task: $TASK_TYPE, Motion: $MOTION_NAME, Task ID: $TASK_ID, Iterations: $MAX_ITERATIONS"
+    log "Task: $TASK_TYPE, Name: $MOTION_NAME, Task ID: $TASK_ID, Iterations: $MAX_ITERATIONS"
 
     # Upload data
     upload_data "$TASK_TYPE" "$MOTION_NAME"
@@ -237,7 +268,7 @@ cmd_submit() {
         --count 1 \
         --enable-execute-command \
         --started-by "run.sh" \
-        --tags "key=Motion,value=$MOTION_NAME" "key=Task,value=$TASK_TYPE" \
+        --tags "key=TaskId,value=$TASK_ID" "key=Task,value=$TASK_TYPE" \
         --query "tasks[0].taskArn" --output text)
 
     log ""
@@ -251,10 +282,16 @@ cmd_submit() {
     log "  $0 status"
     log "  $0 logs --task-arn $task_arn"
     log ""
-    log "When training completes, checkpoints will be in:"
-    log "  s3://${S3_BUCKET}/checkpoints/mimic/${MOTION_NAME}/"
-    log "Download with:"
-    log "  $0 download --motion $MOTION_NAME"
+    if [[ "$TASK_TYPE" == "rl" ]]; then
+        local task_clean=$(echo "$TASK_ID" | sed 's/DM-G1-29dof-//')
+        log "When training completes, checkpoints will be in:"
+        log "  s3://${S3_BUCKET}/Models/RL/${task_clean}/"
+    else
+        log "When training completes, checkpoints will be in:"
+        log "  s3://${S3_BUCKET}/checkpoints/mimic/${MOTION_NAME}/"
+        log "Download with:"
+        log "  $0 download --motion $MOTION_NAME"
+    fi
 
     # Save for convenience
     echo "$task_arn" > "$SCRIPT_DIR/.last-task-arn"
@@ -644,13 +681,17 @@ case "$COMMAND" in
         echo "  vnc       Start VNC/NoVNC server for GUI access (Isaac Sim, MuJoCo)"
         echo ""
         echo "Options:"
-        echo "  --task <type>           Task type: mimic (required for submit)"
-        echo "  --motion <name>         Motion name, e.g. cr7_06_tiktok_uefa (required)"
-        echo "  --max-iterations <n>    Max training iterations (default: 30000)"
+        echo "  --task <type>           Task type: mimic, rl (required for submit)"
+        echo "  --motion <name>         Motion name, e.g. cr7_06_tiktok_uefa (required for mimic)"
+        echo "  --task-id <id>          Gymnasium task ID (required for rl, e.g. DM-G1-29dof-FALCON)"
+        echo "  --max-iterations <n>    Max training iterations (default: 30000 mimic, 50000 rl)"
         echo "  --task-arn <arn>        Task ARN for logs/stop/exec"
         echo ""
         echo "Examples:"
         echo "  $0 submit --task mimic --motion cr7_06_tiktok_uefa"
+        echo "  $0 submit --task rl --task-id DM-G1-29dof-FALCON"
+        echo "  $0 submit --task rl --task-id DM-G1-29dof-SoFTA --max-iterations 30000"
+        echo "  $0 submit --task rl --task-id DM-G1-29dof-TWIST"
         echo "  $0 shell                                   # interactive GPU container"
         echo "  $0 exec --task-arn <arn>                   # bash into container"
         echo "  $0 ssh                                     # SSH into EC2 instance"
