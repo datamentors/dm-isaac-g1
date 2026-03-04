@@ -83,7 +83,7 @@ aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 # mounts Vulkan/graphics libs (libnvidia-vulkan-producer.so, nvidia_icd.json, etc.)
 # into containers when NVIDIA_DRIVER_CAPABILITIES=all. No manual bind-mounts needed.
 # This command just creates required dirs and logs Vulkan state for debugging.
-VULKAN_SETUP_CMD='mkdir -p /tmp/xdg 2>/dev/null; echo === Vulkan diagnostics ===; ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || true; ls -la /etc/vulkan/icd.d/ 2>/dev/null || true; ldconfig -p 2>/dev/null | grep -i vulkan || true; ldconfig -p 2>/dev/null | grep -i nvidia | head -5 || true'
+VULKAN_SETUP_CMD='mkdir -p /tmp/xdg /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>/dev/null; echo === Vulkan diagnostics ===; ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || true; ldconfig -p 2>/dev/null | grep -i vulkan || true; ldconfig -p 2>/dev/null | grep -i nvidia | head -5 || true'
 
 # VNC + XFCE4 desktop startup command (shared across all containers)
 # Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
