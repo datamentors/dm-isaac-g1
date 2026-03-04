@@ -81,11 +81,19 @@ RUN mkdir -p /workspace/.cache/huggingface /workspace/.cache/torch
 # Set PYTHONPATH for dm-isaac-g1
 ENV PYTHONPATH="/workspace/dm-isaac-g1/src:${PYTHONPATH}"
 
+# code-server — VS Code in the browser (port 8080)
+RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+    mkdir -p /root/.config/code-server && \
+    printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
+        > /root/.config/code-server/config.yaml
+
 # Expose ports
 # 5555: GROOT ZMQ server
 # 8000: HTTP API
+# 8080: code-server (VS Code)
 EXPOSE 5555
 EXPOSE 8000
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \

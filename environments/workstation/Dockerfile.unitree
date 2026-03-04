@@ -164,6 +164,15 @@ ENV TVNC_WM=xfce
 RUN mkdir -p ~/.vnc && \
     printf "datament\ndatament\nn\n" | /opt/TurboVNC/bin/vncpasswd
 
+# code-server — VS Code in the browser (port 8080)
+# Enables code editing and terminal access without VNC.
+# Access via SSH tunnel: ssh -L 8080:localhost:8080 ... then open http://localhost:8080
+RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+    mkdir -p /root/.config/code-server && \
+    printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
+        > /root/.config/code-server/config.yaml
+EXPOSE 8080
+
 # Copy all artifacts from builder
 COPY --from=builder /home/code/IsaacLab            /home/code/IsaacLab
 COPY --from=builder /home/code/unitree_sdk2_python  /home/code/unitree_sdk2_python
@@ -286,7 +295,7 @@ RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytor
 # At runtime, bind mounts override these baked-in copies on the workstation.
 # On ECS, users run `git pull` inside the container for latest code.
 #
-# GITHUB_TOKEN: Required to clone private repos (dm-isaac-g1, unitree_rl_lab).
+# GITHUB_TOKEN: Required to clone private repo (dm-isaac-g1).
 # Passed as build arg; credentials are cleared after cloning.
 # The build instance is temporary and terminated after push.
 # ==============================
@@ -301,20 +310,22 @@ RUN if [ -n "$GITHUB_TOKEN" ]; then \
     else \
         git clone https://github.com/datamentors/dm-isaac-g1.git /workspace/dm-isaac-g1; \
     fi && \
-    cd /workspace/dm-isaac-g1 && uv pip install --system -e .
+    cd /workspace/dm-isaac-g1 && uv pip install --system -e . && \
+    git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git
 
-# unitree_rl_lab — Unitree's RL training framework (PRIVATE repo)
-# Required for: RL training scripts, deploy config export, sim2sim pipeline
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab; \
-    else \
-        git clone https://github.com/datamentors/unitree_rl_lab.git /workspace/unitree_rl_lab; \
-    fi && \
+# unitree_rl_lab — Unitree's official RL training framework (PUBLIC repo)
+# We clone the ORIGINAL upstream repo, then patch it with our custom reward
+# functions and task configs using dm_isaac_g1.rl.install_tasks.
+RUN git clone https://github.com/unitreerobotics/unitree_rl_lab.git /workspace/unitree_rl_lab && \
     cd /workspace/unitree_rl_lab && uv pip install --system -e .
 
-# Clean git credentials from cloned repos (remove token from .git/config remote URLs)
-RUN cd /workspace/dm-isaac-g1 && git remote set-url origin https://github.com/datamentors/dm-isaac-g1.git && \
-    cd /workspace/unitree_rl_lab && git remote set-url origin https://github.com/datamentors/unitree_rl_lab.git
+# Patch unitree_rl_lab with dm-isaac-g1 custom tasks and reward functions.
+# This appends arm_leg_coordination + lateral_velocity_penalty to rewards.py
+# and copies task configs (MilitaryMarch, AGILE, FALCON, SoFTA, TWIST).
+RUN python -m dm_isaac_g1.rl.install_tasks \
+    --unitree-rl-lab /workspace/unitree_rl_lab \
+    --rewards-patch /workspace/dm-isaac-g1/environments/workstation/patches/rewards_custom.py \
+    --dm-tasks-dir /workspace/dm-isaac-g1/src/dm_isaac_g1/rl/tasks
 
 # Isaac-GR00T — NVIDIA's GR00T framework (inference + fine-tuning)
 RUN git clone https://github.com/NVIDIA/Isaac-GR00T.git /workspace/Isaac-GR00T

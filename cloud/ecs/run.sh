@@ -78,10 +78,19 @@ err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR:${NC} $*" >&2; }
 
 aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 
+# Vulkan ICD setup command (shared across all containers)
+# Creates NVIDIA Vulkan ICD JSON so Isaac Sim can initialize GPU rendering.
+# Required because ECS containers don't include the ICD file by default.
+# Tries libnvidia-vulkan-producer.so first (installed by launch template v3),
+# falls back to libGLX_nvidia.so.0 if producer lib is not available.
+NVIDIA_ICD_PRODUCER_B64='eyJmaWxlX2Zvcm1hdF92ZXJzaW9uIjoiMS4wLjAiLCJJQ0QiOnsibGlicmFyeV9wYXRoIjoibGlibnZpZGlhLXZ1bGthbi1wcm9kdWNlci5zbyIsImFwaV92ZXJzaW9uIjoiMS4zIn19'
+NVIDIA_ICD_GLX_B64='eyJmaWxlX2Zvcm1hdF92ZXJzaW9uIjoiMS4wLjAiLCJJQ0QiOnsibGlicmFyeV9wYXRoIjoibGliR0xYX252aWRpYS5zby4wIiwiYXBpX3ZlcnNpb24iOiIxLjMifX0K'
+VULKAN_SETUP_CMD="mkdir -p /etc/vulkan/icd.d /usr/share/vulkan/icd.d 2>/dev/null; if ldconfig -p 2>/dev/null | grep -q libnvidia-vulkan-producer; then echo ${NVIDIA_ICD_PRODUCER_B64} | base64 -d > /etc/vulkan/icd.d/nvidia_icd.json; else echo ${NVIDIA_ICD_GLX_B64} | base64 -d > /etc/vulkan/icd.d/nvidia_icd.json; fi; cp /etc/vulkan/icd.d/nvidia_icd.json /usr/share/vulkan/icd.d/"
+
 # VNC + XFCE4 desktop startup command (shared across all containers)
 # Starts TurboVNC on :1 (port 5901), then launches XFCE4 desktop in background.
 # Uses -noxstartup to bypass TurboVNC's session detection (which fails to find xfce.desktop).
-VNC_STARTUP_CMD='rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null; /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 -noxstartup 2>/dev/null; export DISPLAY=:1; nohup dbus-launch startxfce4 &>/dev/null &'
+VNC_STARTUP_CMD='rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null; /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 -noxstartup 2>/dev/null; export DISPLAY=:1; (nohup dbus-launch startxfce4 &>/dev/null &)'
 
 # ── Upload Training Data ─────────────────────────────────────────────────────
 upload_data() {
@@ -157,6 +166,7 @@ register_task_def() {
             "memory": 28000,
             "cpu": 6144,
             "environment": [
+                {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "MOTION_NAME", "value": "${motion}"},
                 {"name": "TASK_ID", "value": "${task_id}"},
                 {"name": "MAX_ITERATIONS", "value": "${max_iter}"},
@@ -167,7 +177,7 @@ register_task_def() {
                 {"name": "WANDB_PROJECT", "value": "${WANDB_PROJECT:-${wandb_project}}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/${train_script}"],
+            "command": ["bash", "-c", "${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/${train_script}"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -184,7 +194,10 @@ register_task_def() {
             },
             "linuxParameters": {
                 "initProcessEnabled": true,
-                "sharedMemorySize": 8192
+                "sharedMemorySize": 8192,
+                "devices": [
+                    {"hostPath": "/dev/dri", "containerPath": "/dev/dri", "permissions": ["read", "write", "mknod"]}
+                ]
             }
         },
         {
@@ -362,6 +375,7 @@ cmd_replay() {
             "memory": 28000,
             "cpu": 6144,
             "environment": [
+                {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
                 {"name": "TASK_ID", "value": "${TASK_ID}"},
                 {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
@@ -373,7 +387,7 @@ cmd_replay() {
                 {"name": "HF_REPO", "value": "${HF_REPO:-}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; bash /opt/training/scripts/replay.sh"],
+            "command": ["bash", "-c", "${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; bash /opt/training/scripts/replay.sh"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -390,7 +404,10 @@ cmd_replay() {
             },
             "linuxParameters": {
                 "initProcessEnabled": true,
-                "sharedMemorySize": 8192
+                "sharedMemorySize": 8192,
+                "devices": [
+                    {"hostPath": "/dev/dri", "containerPath": "/dev/dri", "permissions": ["read", "write", "mknod"]}
+                ]
             }
         },
         {
@@ -508,6 +525,7 @@ cmd_sim2sim() {
             "memory": 28000,
             "cpu": 6144,
             "environment": [
+                {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "TASK_TYPE", "value": "${TASK_TYPE}"},
                 {"name": "TASK_ID", "value": "${TASK_ID}"},
                 {"name": "MOTION_NAME", "value": "${MOTION_NAME}"},
@@ -517,7 +535,7 @@ cmd_sim2sim() {
                 {"name": "HEADLESS", "value": "${HEADLESS}"},
                 {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
             ],
-            "command": ["bash", "-c", "${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/sim2sim.sh"],
+            "command": ["bash", "-c", "${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; bash /opt/training/scripts/sim2sim.sh"],
             "dependsOn": [
                 {"containerName": "data-sync", "condition": "SUCCESS"}
             ],
@@ -534,7 +552,10 @@ cmd_sim2sim() {
             },
             "linuxParameters": {
                 "initProcessEnabled": true,
-                "sharedMemorySize": 8192
+                "sharedMemorySize": 8192,
+                "devices": [
+                    {"hostPath": "/dev/dri", "containerPath": "/dev/dri", "permissions": ["read", "write", "mknod"]}
+                ]
             }
         },
         {
@@ -724,8 +745,9 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi && ${VNC_STARTUP_CMD} && echo 'VNC+XFCE started on :5901' && echo '=== Pulling latest code ===' && cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null && pip install -e . -q 2>/dev/null && cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null && pip install -e . -q 2>/dev/null && echo '=== Repos updated, container ready ===' && sleep 86400"],
+            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; echo '=== Container ready ==='; sleep 86400"],
             "environment": [
+                {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
                 {"name": "AWS_REGION", "value": "${AWS_REGION}"},
                 {"name": "HF_TOKEN", "value": "${HF_TOKEN:-}"},
@@ -743,7 +765,10 @@ cmd_shell() {
             },
             "linuxParameters": {
                 "initProcessEnabled": true,
-                "sharedMemorySize": 8192
+                "sharedMemorySize": 8192,
+                "devices": [
+                    {"hostPath": "/dev/dri", "containerPath": "/dev/dri", "permissions": ["read", "write", "mknod"]}
+                ]
             }
         }
     ]
@@ -915,7 +940,7 @@ cmd_vnc() {
         --task "$arn" \
         --container "$container" \
         --interactive \
-        --command "bash -c '${VNC_STARTUP_CMD}; sleep 3; echo VNC+XFCE started on display :1'"
+        --command "bash -c '${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; sleep 3; echo VNC+XFCE started on display :1'"
 
     log ""
     log "=== VNC Ready ==="

@@ -180,8 +180,8 @@ else
         "$WORKSTATION_DIR/requirements-groot.txt"
     )
     if [ -d "$WORKSTATION_DIR/patches" ]; then
-        PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -name '*.patch' | wc -l | tr -d ' ')
-        echo "  Found $PATCH_COUNT patch file(s)"
+        PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -type f | wc -l | tr -d ' ')
+        echo "  Found $PATCH_COUNT patch/helper file(s)"
         BUILD_FILES+=("$WORKSTATION_DIR/patches")
     fi
 fi
@@ -437,7 +437,7 @@ fi
 # ---------- Verify ----------
 log "ECR images"
 aws_cmd ecr describe-images --repository-name "$ACTIVE_ECR_REPO" \
-    --query 'sort_by(imageDetails, &imagePushedAt)[-3:].{tags:imageTags,pushed:imagePushedAt,sizeMB:to_string(div(imageSizeInBytes,`1048576`))}' \
+    --query 'sort_by(imageDetails, &imagePushedAt)[-3:].{tags:imageTags,pushed:imagePushedAt,sizeBytes:imageSizeInBytes}' \
     --output table
 
 # ---------- Terminate ----------

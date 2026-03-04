@@ -227,6 +227,12 @@ RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/u
 # Note: warp is bundled in Isaac Sim's extscache, not installed via pip
 ENV PYTHONPATH="/isaac-sim/extscache/omni.warp.core-1.7.1+lx64:/workspace/dm-isaac-g1/src:/workspace/dm-isaac-g1/scripts/eval:/workspace/Isaac-GR00T:/workspace/IsaacLab/source/isaaclab:/workspace/IsaacLab/source/isaaclab_tasks:/workspace/IsaacLab/source/isaaclab_rl:/workspace/IsaacLab/source/isaaclab_assets:/workspace/IsaacLab/source/isaaclab_contrib:/workspace/unitree_sim_isaaclab:${PYTHONPATH}"
 
+# code-server — VS Code in the browser (port 8080)
+RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+    mkdir -p /root/.config/code-server && \
+    printf 'bind-addr: 0.0.0.0:8080\nauth: password\npassword: datamentors\ncert: false\n' \
+        > /root/.config/code-server/config.yaml
+
 # Expose ports
 # Isaac Sim streaming
 EXPOSE 47995-48012
@@ -238,6 +244,8 @@ EXPOSE 6006
 EXPOSE 5555
 # VNC
 EXPOSE 5901
+# code-server (VS Code)
+EXPOSE 8080
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
