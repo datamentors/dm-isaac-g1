@@ -80,8 +80,8 @@ aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 
 # Vulkan diagnostic command (shared across all containers)
 # The host UserData upgrades nvidia-container-toolkit to >= 1.12.0 which automatically
-# mounts Vulkan/graphics libs (libnvidia-vulkan-producer.so, nvidia_icd.json, etc.)
-# into containers when NVIDIA_DRIVER_CAPABILITIES=all. No manual bind-mounts needed.
+# mounts libGLX_nvidia.so.0 into containers when NVIDIA_DRIVER_CAPABILITIES=all.
+# The Docker image bakes in the correct Vulkan ICD manifest pointing to libGLX_nvidia.so.0.
 # This command just creates required dirs and logs Vulkan state for debugging.
 VULKAN_SETUP_CMD='mkdir -p /tmp/xdg /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>/dev/null; echo === Vulkan diagnostics ===; ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || true; ldconfig -p 2>/dev/null | grep -i vulkan || true; ldconfig -p 2>/dev/null | grep -i nvidia | head -5 || true'
 
