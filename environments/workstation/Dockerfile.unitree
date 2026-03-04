@@ -133,10 +133,9 @@ ENV OMNI_KIT_ACCEPT_EULA=Y
 
 # Vulkan configuration for GPU rendering.
 # Isaac Sim's PhysX discovers GPUs through Vulkan, so NVIDIA Vulkan must be available.
-# On ECS, the host installs libnvidia-vulkan-producer.so via UserData and we bind-mount
-# it into the container at /host-nvidia-libs. The ICD manifest and LD_LIBRARY_PATH are
-# configured at runtime by the VULKAN_SETUP_CMD / replay.sh script.
-# Mesa lavapipe is installed as a CPU fallback.
+# nvidia-container-toolkit mounts libGLX_nvidia.so.0 into the container when
+# NVIDIA_DRIVER_CAPABILITIES=all is set. The ICD manifest points to this lib.
+# Mesa lavapipe (mesa-vulkan-drivers) is installed as a CPU fallback.
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # Runtime system dependencies
@@ -150,12 +149,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfce4 xfce4-terminal xfce4-taskmanager \
     && rm -rf /var/lib/apt/lists/*
 
-# NVIDIA Vulkan ICD manifest — default fallback pointing to libnvidia-vulkan-producer.so.
-# On ECS, the host's nvidia_icd.json (with versioned library path) is bind-mounted at
-# /host-vulkan-icd/ and copied into place at runtime by replay.sh / VULKAN_SETUP_CMD.
-# This default covers non-ECS environments where nvidia-container-toolkit may inject the lib.
+# NVIDIA Vulkan ICD manifest — points to libGLX_nvidia.so.0 which nvidia-container-toolkit
+# automatically mounts into the container. Works on both ECS and workstation.
 RUN mkdir -p /usr/share/vulkan/icd.d /etc/vulkan/icd.d && \
-    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libnvidia-vulkan-producer.so", "api_version": "1.3"}}' \
+    echo '{"file_format_version": "1.0.0", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3"}}' \
     > /usr/share/vulkan/icd.d/nvidia_icd.json && \
     cp /usr/share/vulkan/icd.d/nvidia_icd.json /etc/vulkan/icd.d/nvidia_icd.json
 
