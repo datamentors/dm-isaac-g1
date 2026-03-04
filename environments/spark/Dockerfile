@@ -212,7 +212,7 @@ COPY --from=builder /cyclonedds                     /cyclonedds
 COPY --from=builder /opt/conda                      /opt/conda
 
 ENV CYCLONEDDS_HOME=/cyclonedds/install
-ENV LD_LIBRARY_PATH="${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${CONDA_DIR}/envs/unitree_sim_env/lib:${CYCLONEDDS_HOME}/lib:${LD_LIBRARY_PATH}"
 
 # PROJECT_ROOT — required by unitree_sim_isaaclab scene configs to locate USD assets.
 ENV PROJECT_ROOT=/workspace/unitree_sim_isaaclab
