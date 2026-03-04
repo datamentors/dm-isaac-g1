@@ -313,8 +313,9 @@ if [ -f /var/cache/ecs/ecs-agent.tar ]; then
     docker load -i /var/cache/ecs/ecs-agent.tar
 fi
 
-# Start ECS agent
-systemctl start ecs
+# Start ECS agent (--no-block avoids deadlock: UserData runs in cloud-final,
+# and the ecs.service unit has After=cloud-final.service)
+systemctl start ecs --no-block
 
 echo "nvidia-container-toolkit version: \$(nvidia-ctk --version 2>/dev/null || echo unknown)"
 echo "Docker status: \$(systemctl is-active docker)"
