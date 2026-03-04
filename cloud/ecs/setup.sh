@@ -286,8 +286,9 @@ modprobe nvidia-drm modeset=1 2>/dev/null || true
 # See: https://github.com/aws/amazon-ecs-agent/issues/2835
 echo "Upgrading nvidia-container-toolkit for Vulkan support..."
 
-# Stop ECS agent and Docker before upgrading
+# Stop ECS agent before upgrading (it runs as a Docker container)
 systemctl stop ecs 2>/dev/null || true
+sleep 2
 
 # Remove old nvidia-container packages
 yum remove -y libnvidia-container1 libnvidia-container-tools \
@@ -300,14 +301,24 @@ curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-contai
 # Install latest nvidia-container-toolkit
 yum install -y nvidia-container-toolkit
 
-# Configure Docker runtime with nvidia
+# Configure Docker runtime with nvidia (adds nvidia runtime to daemon.json)
 nvidia-ctk runtime configure --runtime=docker
 
-# Restart Docker and ECS agent
+# Restart Docker to pick up the new runtime
 systemctl restart docker
-systemctl start ecs 2>/dev/null || true
+sleep 5
+
+# Reload ECS agent Docker image (Docker restart clears loaded images)
+if [ -f /var/cache/ecs/ecs-agent.tar ]; then
+    docker load -i /var/cache/ecs/ecs-agent.tar
+fi
+
+# Start ECS agent
+systemctl start ecs
 
 echo "nvidia-container-toolkit version: \$(nvidia-ctk --version 2>/dev/null || echo unknown)"
+echo "Docker status: \$(systemctl is-active docker)"
+echo "ECS status: \$(systemctl is-active ecs)"
 
 # Install AWS CLI v2 for S3 operations inside tasks
 if ! command -v aws &>/dev/null; then
