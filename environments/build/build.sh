@@ -11,10 +11,11 @@
 #   2. SSH key:        ~/.ssh/id_ed25519  (will be imported as EC2 key pair)
 #
 # Usage:
-#   ./build.sh                    # Build workstation (x86_64, base + groot)
-#   ./build.sh --base             # Build workstation base stage only
-#   ./build.sh --groot            # Build workstation groot stage only
-#   ./build.sh --spark            # Build Spark image (ARM64 Graviton)
+#   ./build.sh                    # Build workstation (x86_64, base + groot) + test + push
+#   ./build.sh --base             # Build workstation base stage only (no tests)
+#   ./build.sh --groot            # Build workstation groot stage only + test + push
+#   ./build.sh --spark            # Build Spark image (ARM64 Graviton) + test + push
+#   ./build.sh --skip-test        # Build + push without running validation tests
 #   ./build.sh --cleanup-only     # Terminate any leftover build instances
 #   ./build.sh --no-terminate     # Keep instance alive after build
 #
@@ -29,6 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSTATION_DIR="$REPO_ROOT/environments/workstation"
 SPARK_DIR="$REPO_ROOT/environments/spark"
+TESTS_DIR="$REPO_ROOT/environments/tests"
 
 source "$REPO_ROOT/.env"
 
@@ -50,6 +52,7 @@ BUILD_TARGET="groot"  # default: base + groot (workstation)
 BUILD_PLATFORM="workstation"  # workstation or spark
 NO_TERMINATE=false
 CLEANUP_ONLY=false
+SKIP_TEST=false
 
 # ---------- Parse args ----------
 for arg in "$@"; do
@@ -59,6 +62,7 @@ for arg in "$@"; do
         --spark)         BUILD_PLATFORM="spark"; BUILD_TARGET="spark" ;;
         --no-terminate)  NO_TERMINATE=true ;;
         --cleanup-only)  CLEANUP_ONLY=true ;;
+        --skip-test)     SKIP_TEST=true ;;
         -h|--help)
             head -24 "$0" | tail -19
             exit 0 ;;
@@ -184,6 +188,12 @@ else
         echo "  Found $PATCH_COUNT patch/helper file(s)"
         BUILD_FILES+=("$WORKSTATION_DIR/patches")
     fi
+fi
+
+# Always include test script for build validation
+if [ -f "$TESTS_DIR/test_build.py" ]; then
+    BUILD_FILES+=("$TESTS_DIR/test_build.py")
+    echo "  Including test_build.py for validation"
 fi
 
 echo "  Build files:"
@@ -353,6 +363,10 @@ aws ecr get-login-password --region $REGION | \
     sudo docker login --username AWS --password-stdin $ECR_REGISTRY
 "
 
+# ---------- S3 bucket for test results ----------
+S3_TEST_BUCKET="dm-isaac-g1-training-${REGION}"
+S3_TEST_PREFIX="build-tests/$(date +%Y%m%d-%H%M%S)"
+
 # ---------- Build ----------
 if [ "$BUILD_PLATFORM" = "spark" ]; then
     # ── Spark ARM64 build ──
@@ -376,6 +390,64 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
         . 2>&1 | tee -a build.log
 
     echo '=== Build finished at \$(date) ===' | tee -a build.log
+    "
+
+    # ── Run build validation tests (CPU-only, no GPU on build instance) ──
+    if ! $SKIP_TEST; then
+        log "Running build validation tests on Spark image..."
+        TEST_EXIT=0
+        remote "
+        set -euo pipefail
+        cd ~/build
+
+        echo '=== Running build validation tests at \$(date) ===' | tee -a build.log
+
+        # Run test_build.py inside the built image (no GPU needed)
+        sudo docker run --rm \
+            -v ~/build/test_build.py:/tmp/test_build.py:ro \
+            '$SPARK_TAG' \
+            python /tmp/test_build.py --json 2>&1 | tee test-results.json | tee -a build.log
+
+        # Also run human-readable output
+        sudo docker run --rm \
+            -v ~/build/test_build.py:/tmp/test_build.py:ro \
+            '$SPARK_TAG' \
+            python /tmp/test_build.py 2>&1 | tee test-results.txt | tee -a build.log
+
+        # Upload test results to S3
+        aws s3 cp test-results.json 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/spark-test-results.json' --region '$REGION' 2>/dev/null || true
+        aws s3 cp test-results.txt 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/spark-test-results.txt' --region '$REGION' 2>/dev/null || true
+        aws s3 cp build.log 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/spark-build.log' --region '$REGION' 2>/dev/null || true
+
+        echo '=== Tests finished at \$(date) ===' | tee -a build.log
+        " || TEST_EXIT=$?
+
+        if [ $TEST_EXIT -ne 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "  BUILD VALIDATION FAILED (Spark)"
+            echo "=========================================="
+            echo "  Test results: s3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/"
+            echo "  NOT pushing to ECR."
+            echo "  Fix the issues and rebuild."
+            echo "=========================================="
+            echo ""
+            # Don't push — exit with failure
+            if ! $NO_TERMINATE; then
+                aws_cmd ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null 2>&1 || true
+            fi
+            exit 1
+        fi
+        log "Build validation tests PASSED"
+    else
+        log "Skipping tests (--skip-test)"
+    fi
+
+    # ── Push to ECR (only if tests passed) ──
+    log "Pushing Spark image to ECR..."
+    remote "
+    set -euo pipefail
+    cd ~/build
 
     echo '>>> Pushing latest...' | tee -a build.log
     sudo docker push '$SPARK_TAG' 2>&1 | tee -a build.log
@@ -419,6 +491,67 @@ else
     fi
 
     echo '=== Build finished at \$(date) ===' | tee -a build.log
+    "
+
+    # ── Run build validation tests (CPU-only, no GPU on build instance) ──
+    if ! $SKIP_TEST && [ "$BUILD_TARGET" = "groot" ]; then
+        log "Running build validation tests on workstation image..."
+        # Workstation image uses conda — must activate unitree_sim_env
+        TEST_EXIT=0
+        remote "
+        set -euo pipefail
+        cd ~/build
+
+        echo '=== Running build validation tests at \$(date) ===' | tee -a build.log
+
+        # Run test_build.py inside the built image
+        sudo docker run --rm \
+            -v ~/build/test_build.py:/tmp/test_build.py:ro \
+            '$GROOT_TAG' \
+            conda run --no-capture-output -n unitree_sim_env \
+            python /tmp/test_build.py --json 2>&1 | tee test-results.json | tee -a build.log
+
+        sudo docker run --rm \
+            -v ~/build/test_build.py:/tmp/test_build.py:ro \
+            '$GROOT_TAG' \
+            conda run --no-capture-output -n unitree_sim_env \
+            python /tmp/test_build.py 2>&1 | tee test-results.txt | tee -a build.log
+
+        # Upload test results to S3
+        aws s3 cp test-results.json 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/workstation-test-results.json' --region '$REGION' 2>/dev/null || true
+        aws s3 cp test-results.txt 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/workstation-test-results.txt' --region '$REGION' 2>/dev/null || true
+        aws s3 cp build.log 's3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/workstation-build.log' --region '$REGION' 2>/dev/null || true
+
+        echo '=== Tests finished at \$(date) ===' | tee -a build.log
+        " || TEST_EXIT=$?
+
+        if [ $TEST_EXIT -ne 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "  BUILD VALIDATION FAILED (Workstation)"
+            echo "=========================================="
+            echo "  Test results: s3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/"
+            echo "  NOT pushing to ECR."
+            echo "  Fix the issues and rebuild."
+            echo "=========================================="
+            echo ""
+            if ! $NO_TERMINATE; then
+                aws_cmd ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null 2>&1 || true
+            fi
+            exit 1
+        fi
+        log "Build validation tests PASSED"
+    elif [ "$BUILD_TARGET" = "base" ]; then
+        log "Skipping tests (base-only build — no GR00T deps to test)"
+    else
+        log "Skipping tests (--skip-test)"
+    fi
+
+    # ── Push to ECR (only if tests passed) ──
+    log "Pushing workstation image to ECR..."
+    remote "
+    set -euo pipefail
+    cd ~/build
 
     echo '>>> Pushing base-latest...' | tee -a build.log
     sudo docker push '$BASE_TAG' 2>&1 | tee -a build.log
@@ -454,7 +587,7 @@ fi
 # ---------- Summary ----------
 echo ""
 echo "=========================================="
-echo "  BUILD & PUSH COMPLETE ($BUILD_PLATFORM)"
+echo "  BUILD, TEST & PUSH COMPLETE ($BUILD_PLATFORM)"
 echo "=========================================="
 echo ""
 if [ "$BUILD_PLATFORM" = "spark" ]; then
@@ -478,6 +611,11 @@ else
     echo "    aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
     echo "    docker pull $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
     echo "    docker tag $ECR_REGISTRY/$ACTIVE_ECR_REPO:latest dm-workstation:latest"
+fi
+if ! $SKIP_TEST; then
+    echo ""
+    echo "  Test results:"
+    echo "    s3://${S3_TEST_BUCKET}/${S3_TEST_PREFIX}/"
 fi
 echo ""
 echo "  Update running container:"

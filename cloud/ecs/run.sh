@@ -118,12 +118,13 @@ upload_data() {
         log "Uploaded: s3://${S3_BUCKET}/tasks/mimic/${motion}/"
     fi
 
-    # Upload training/replay/sim2sim scripts
+    # Upload training/replay/sim2sim/test scripts
     aws_cmd s3 cp "$SCRIPT_DIR/train_mimic.sh" "s3://${S3_BUCKET}/scripts/train_mimic.sh"
     aws_cmd s3 cp "$SCRIPT_DIR/train_rl.sh" "s3://${S3_BUCKET}/scripts/train_rl.sh"
     aws_cmd s3 cp "$SCRIPT_DIR/replay.sh" "s3://${S3_BUCKET}/scripts/replay.sh"
     aws_cmd s3 cp "$SCRIPT_DIR/sim2sim.sh" "s3://${S3_BUCKET}/scripts/sim2sim.sh"
-    log "Uploaded training/replay/sim2sim scripts"
+    aws_cmd s3 cp "$SCRIPT_DIR/test.sh" "s3://${S3_BUCKET}/scripts/test.sh"
+    log "Uploaded training/replay/sim2sim/test scripts"
 }
 
 # ── Register Task Definition ─────────────────────────────────────────────────
@@ -732,6 +733,160 @@ cmd_stop() {
     log "Task stopped"
 }
 
+# ── Test (run GPU validation tests) ──────────────────────────────────────────
+cmd_test() {
+    log "=== Submitting GPU Validation Test ==="
+
+    # Upload test script to S3
+    aws_cmd s3 cp "$SCRIPT_DIR/test.sh" "s3://${S3_BUCKET}/scripts/test.sh"
+    log "Uploaded test.sh to S3"
+
+    local family="dm-image-test"
+
+    local tmpfile
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    cat > "$tmpfile" << TASKEOF
+{
+    "family": "${family}",
+    "taskRoleArn": "${TASK_ROLE_ARN}",
+    "executionRoleArn": "${EXEC_ROLE_ARN}",
+    "networkMode": "host",
+    "requiresCompatibilities": ["EC2"],
+    "containerDefinitions": [
+        {
+            "name": "test",
+            "image": "${ECR_IMAGE}",
+            "essential": true,
+            "resourceRequirements": [
+                {"type": "GPU", "value": "1"}
+            ],
+            "memory": 28000,
+            "cpu": 6144,
+            "environment": [
+                {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
+                {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
+                {"name": "XDG_RUNTIME_DIR", "value": "/tmp/xdg"},
+                {"name": "ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ACCEPT_EULA", "value": "Y"},
+                {"name": "OMNI_KIT_ALLOW_ROOT", "value": "1"},
+                {"name": "S3_BUCKET", "value": "${S3_BUCKET}"},
+                {"name": "AWS_REGION", "value": "${AWS_REGION}"},
+                {"name": "GITHUB_TOKEN", "value": "${GITHUB_TOKEN:-}"}
+            ],
+            "command": ["bash", "-c", "${VULKAN_SETUP_CMD}; bash /opt/training/scripts/test.sh"],
+            "dependsOn": [
+                {"containerName": "data-sync", "condition": "SUCCESS"}
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "test"
+                }
+            },
+            "linuxParameters": {
+                "initProcessEnabled": true,
+                "sharedMemorySize": 8192,
+                "devices": [
+                    {"hostPath": "/dev/dri", "containerPath": "/dev/dri", "permissions": ["read", "write", "mknod"]}
+                ]
+            }
+        },
+        {
+            "name": "data-sync",
+            "image": "amazon/aws-cli:latest",
+            "essential": false,
+            "memory": 512,
+            "cpu": 256,
+            "command": [
+                "s3", "sync",
+                "s3://${S3_BUCKET}/scripts/", "/opt/training/scripts/",
+                "--region", "${AWS_REGION}"
+            ],
+            "mountPoints": [
+                {"sourceVolume": "training-data", "containerPath": "/opt/training"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/dm-isaac-g1",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "data-sync"
+                }
+            }
+        }
+    ],
+    "volumes": [
+        {"name": "training-data", "host": {"sourcePath": "/opt/training"}}
+    ]
+}
+TASKEOF
+
+    local revision
+    revision=$(aws_cmd ecs register-task-definition \
+        --cli-input-json "file://${tmpfile}" \
+        --query "taskDefinition.revision" --output text)
+    rm -f "$tmpfile"
+    log "Registered: ${family}:${revision}"
+
+    # Run the task
+    local task_arn
+    task_arn=$(aws_cmd ecs run-task \
+        --cluster "$CLUSTER_NAME" \
+        --task-definition "${family}:${revision}" \
+        --capacity-provider-strategy "capacityProvider=$CAPACITY_PROVIDER_NAME,weight=1" \
+        --count 1 \
+        --enable-execute-command \
+        --started-by "run.sh-test" \
+        --tags "key=Type,value=test" \
+        --query "tasks[0].taskArn" --output text)
+
+    echo "$task_arn" > "$SCRIPT_DIR/.last-task-arn"
+
+    log ""
+    log "=== GPU Test Submitted ==="
+    log "Task ARN: $task_arn"
+    log ""
+    log "Waiting for test to complete..."
+
+    # Wait for task to complete (poll every 15s)
+    local status="PROVISIONING"
+    while [[ "$status" != "STOPPED" ]]; do
+        sleep 15
+        status=$(aws_cmd ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks "$task_arn" \
+            --query "tasks[0].lastStatus" --output text 2>/dev/null || echo "PENDING")
+        log "  Status: $status"
+    done
+
+    # Get container exit code
+    local exit_code
+    exit_code=$(aws_cmd ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks "$task_arn" \
+        --query "tasks[0].containers[?name=='test'].exitCode | [0]" --output text 2>/dev/null || echo "1")
+
+    log ""
+    if [[ "$exit_code" == "0" ]]; then
+        log "=== GPU TESTS PASSED ==="
+    else
+        log "=== GPU TESTS FAILED (exit code: $exit_code) ==="
+        log "Check logs: $0 logs --task-arn $task_arn"
+    fi
+
+    # Stream final logs
+    log ""
+    log "=== Test Logs ==="
+    aws_cmd logs get-log-events \
+        --log-group-name "/ecs/dm-isaac-g1" \
+        --log-stream-name "test/test/$(echo "$task_arn" | awk -F/ '{print $NF}')" \
+        --query "events[].message" --output text 2>/dev/null | tail -50 || \
+        log "  (Could not retrieve logs — check CloudWatch)"
+
+    exit "${exit_code:-1}"
+}
+
 # ── Shell (launch interactive container) ──────────────────────────────────────
 cmd_shell() {
     log "=== Launching Interactive GPU Container ==="
@@ -1005,6 +1160,7 @@ case "$COMMAND" in
     submit)   cmd_submit ;;
     replay)   cmd_replay ;;
     sim2sim)  cmd_sim2sim ;;
+    test)     cmd_test ;;
     shell)    cmd_shell ;;
     exec)     cmd_exec ;;
     ssh)      cmd_ssh ;;
@@ -1021,6 +1177,7 @@ case "$COMMAND" in
         echo "  submit    Upload data and run training on ECS"
         echo "  replay    Export policy + record replay video on ECS"
         echo "  sim2sim   Validate exported policy in MuJoCo (Isaac Lab -> MuJoCo)"
+        echo "  test      Run GPU validation tests on the Docker image (waits for result)"
         echo "  status    Show cluster and task status"
         echo "  logs      Stream training logs (CloudWatch)"
         echo "  list      List recent tasks"
