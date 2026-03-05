@@ -161,6 +161,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ncurses-term dbus-x11 \
     xfce4 xfce4-terminal xfce4-taskmanager \
     adwaita-icon-theme \
+    gvfs librsvg2-common \
     # FFmpeg dev headers (for torchcodec source build verification)
     ffmpeg libavdevice-dev libavfilter-dev libavformat-dev \
     libavcodec-dev libavutil-dev libswresample-dev libswscale-dev \
@@ -177,6 +178,12 @@ RUN mkdir -p /root/Desktop && \
     printf '[Desktop Entry]\nType=Application\nName=VS Code\nExec=chromium-browser --no-sandbox http://localhost:8080\nIcon=text-editor\nTerminal=false\n' > /root/Desktop/vscode.desktop && \
     chmod +x /root/Desktop/*.desktop
 
+# XFCE desktop icons config — enable file/folder icons from ~/Desktop/
+RUN mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml && \
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfce4-desktop" version="1.0">\n  <property name="desktop-icons" type="empty">\n    <property name="style" type="int" value="2"/>\n    <property name="file-icons" type="empty">\n      <property name="show-home" type="bool" value="true"/>\n      <property name="show-trash" type="bool" value="true"/>\n      <property name="show-filesystem" type="bool" value="false"/>\n      <property name="show-removable" type="bool" value="false"/>\n    </property>\n  </property>\n</channel>\n' > /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml && \
+    gtk-update-icon-cache -f /usr/share/icons/Adwaita 2>/dev/null || true && \
+    gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
 # TurboVNC 3.1.2 — remote visualization (ARM64 .deb)
 RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovnc_3.1.2_arm64.deb \
         -O /tmp/turbovnc.deb && \
@@ -184,10 +191,16 @@ RUN wget -q https://github.com/TurboVNC/turbovnc/releases/download/3.1.2/turbovn
     rm /tmp/turbovnc.deb
 ENV PATH="/opt/TurboVNC/bin:${PATH}"
 
-# VNC: set password and use XFCE4 as the desktop session
+# VNC: use XFCE4 as the desktop session.
+# VNC password is set at runtime by entrypoint.sh (from the service password).
 ENV TVNC_WM=xfce
-RUN mkdir -p ~/.vnc && \
-    printf "datament\ndatament\nn\n" | /opt/TurboVNC/bin/vncpasswd
+
+# noVNC — browser-based VNC access (no native VNC client needed)
+# Access via http://<host>:6080, connects to TurboVNC on :5901 via websockify.
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC && \
+    git clone --depth 1 https://github.com/novnc/websockify.git /opt/noVNC/utils/websockify && \
+    ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
+EXPOSE 6080
 
 # code-server — VS Code in the browser (port 8080)
 RUN curl -fsSL https://code-server.dev/install.sh | sh && \
@@ -345,8 +358,54 @@ RUN mkdir -p \
     /workspace/data \
     /workspace/eval_videos
 
+# video2robot web UI — auth wrapper that adds HTTP Basic Auth using the service password.
+# Started by entrypoint.sh on port 8000.
+RUN printf '#!/usr/bin/env python3\n\
+"""Wrapper that adds HTTP Basic Auth to the video2robot FastAPI app."""\n\
+import os, secrets, uvicorn\n\
+from starlette.middleware.authentication import AuthenticationMiddleware\n\
+from starlette.authentication import AuthenticationBackend, AuthCredentials, SimpleUser, AuthenticationError\n\
+from starlette.requests import HTTPConnection\n\
+from starlette.responses import Response\n\
+import base64\n\
+\n\
+class BasicAuthBackend(AuthenticationBackend):\n\
+    async def authenticate(self, conn: HTTPConnection):\n\
+        if "Authorization" not in conn.headers:\n\
+            return None\n\
+        auth = conn.headers["Authorization"]\n\
+        if not auth.startswith("Basic "):\n\
+            return None\n\
+        decoded = base64.b64decode(auth[6:]).decode("utf-8")\n\
+        username, _, password = decoded.partition(":")\n\
+        expected = os.environ.get("SERVICE_PASSWORD", "")\n\
+        if not secrets.compare_digest(password, expected):\n\
+            raise AuthenticationError("Invalid credentials")\n\
+        return AuthCredentials(["authenticated"]), SimpleUser(username)\n\
+\n\
+from starlette.middleware import Middleware\n\
+from starlette.middleware.base import BaseHTTPMiddleware\n\
+\n\
+class RequireAuthMiddleware(BaseHTTPMiddleware):\n\
+    async def dispatch(self, request, call_next):\n\
+        if request.url.path == "/health":\n\
+            return await call_next(request)\n\
+        if not request.user.is_authenticated:\n\
+            return Response("Unauthorized", status_code=401,\n\
+                          headers={"WWW-Authenticate": "Basic realm=video2robot"})\n\
+        return await call_next(request)\n\
+\n\
+import sys; sys.path.insert(0, "/workspace/video2robot")\n\
+from web.app import app\n\
+app.add_middleware(RequireAuthMiddleware)\n\
+app.add_middleware(AuthenticationMiddleware, backend=BasicAuthBackend())\n\
+\n\
+if __name__ == "__main__":\n\
+    uvicorn.run(app, host="0.0.0.0", port=8000)\n' > /usr/local/bin/video2robot-server.py && \
+    chmod +x /usr/local/bin/video2robot-server.py
+
 # ---------- Entrypoint ----------
-# Generates random credentials for code-server + JupyterLab on each start.
+# Generates random credentials for all web services on each start.
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

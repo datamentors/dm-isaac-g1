@@ -13,12 +13,14 @@ The ECR image (`isaac-g1-sim-ft-rl:latest`) is the same as `dm-workstation:lates
 | **MuJoCo** | 3.2.6 + Menagerie robot models + unitree_mujoco |
 | **PyTorch** | 2.7.0+cu128 with flash-attn, DeepSpeed |
 | **GR00T** | Isaac-GR00T + WBC + video2robot |
-| **Desktop** | XFCE4 + TurboVNC 3.1.2 + Chrome |
+| **Desktop** | XFCE4 + TurboVNC 3.1.2 + noVNC + Chrome |
 | **RL** | RSL-RL, unitree_rl_lab, dm_isaac_g1, unitree_sim_isaaclab |
 | **Conda env** | `unitree_sim_env` (Python 3.11) |
-| **VNC** | Port 5901, password: `datament` |
+| **VNC** | Port 5901, password: first 8 chars of service password |
+| **noVNC** | Port 6080 (VNC in browser, no client needed) |
 | **code-server** | Port 8080 (VS Code in browser) |
 | **JupyterLab** | Port 8888 (notebook interface) |
+| **video2robot** | Port 8000 (video-to-robot pipeline UI) |
 
 **Source repos baked into the image** (at `/workspace/`):
 
@@ -122,9 +124,11 @@ Once RUNNING, connect via:
 |---------|-----|------|
 | **code-server** (VS Code) | `http://<instance-ip>:8080` | Service password |
 | **JupyterLab** | `http://<instance-ip>:8888` | Service password |
-| **VNC** (XFCE desktop) | `<instance-ip>:5901` (VNC client) | `datament` |
+| **video2robot** (pipeline UI) | `http://<instance-ip>:8000` | Service password (HTTP Basic) |
+| **noVNC** (desktop in browser) | `http://<instance-ip>:6080` | VNC password (first 8 chars) |
+| **VNC** (native client) | `<instance-ip>:5901` | VNC password (first 8 chars) |
 
-All three services start automatically. The service password is shared between code-server and JupyterLab. Retrieve it anytime with `./run.sh password`.
+All services start automatically. One service password is shared across code-server, JupyterLab, and video2robot. VNC uses the first 8 characters of the service password (TurboVNC limit). Retrieve it anytime with `./run.sh password`.
 
 When done:
 
