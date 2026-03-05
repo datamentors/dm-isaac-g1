@@ -1377,6 +1377,57 @@ DreamZero (14B, world model + action model) → WBC (SONIC)
 | **LeVERB** | [arXiv:2506.13751](https://arxiv.org/abs/2506.13751) | VLA latent vocabulary → WBC | "Latent verbs" → RL controller |
 | **SwitchVLA** | [arXiv:2506.03574](https://arxiv.org/abs/2506.03574) | Contact-phase task switching | Behavior modulation |
 
+### 9.15 Long-Horizon Memory for Hospitality Tasks (MEM)
+
+A critical gap in our current VLA pipeline is the **absence of memory**. GR00T N1.6 and PI0 both generate actions from single observations — they cannot remember what they did 30 seconds ago, let alone track a 15-minute kitchen cleanup.
+
+**MEM (Multi-Scale Embodied Memory)**, from Physical Intelligence (Torne et al., 2026), solves this with a dual-memory architecture integrated into pi_0.6:
+
+1. **Short-horizon video memory** (seconds): An efficient video encoder modifies the standard ViT attention pattern to process multiple past frames without latency explosion. Enables: occlusion recovery, re-grasp adaptation, dynamic tracking. Stays under 300ms with 18 frames (54 seconds).
+
+2. **Long-horizon language memory** (minutes): A high-level policy maintains a compressed natural language summary of semantic events ("I placed a plate in the cabinet, wiped the counter, and moved to the sink"). Enables: recipe tracking, cleanup progress, multi-step planning across 15 minutes.
+
+**Key results:**
+- Solves 15-minute tasks (recipe setup, full kitchen cleanup, grilled cheese sandwich) that memoryless VLAs cannot
+- Enables **in-context adaptation**: +41% on chopstick grasping, +62% on fridge opening after failures
+- **No degradation** on standard manipulation tasks (unlike prior memory approaches)
+- Architecture-agnostic: the video encoder adds no new parameters, applicable to any ViT-based VLA
+
+**Integration with Ardia:** MEM directly addresses our hospitality use case. The language memory maps to our BT governance layer (tracking task progress), while the video memory maps to our closed-loop reasoning layer (Section 7). Full distillation: `PapersDistilled/MEM/MEM.md`.
+
+### 9.16 Emerging Robotics Software Platforms: DimOS and Roboflow
+
+Two additional systems inform our perception and navigation strategy:
+
+#### DimOS (Dimensional OS) — Agent-Native Robotics SDK
+
+[github.com/dimensionalOS/dimos](https://github.com/dimensionalOS/dimos) provides a Python-first alternative to ROS2 with native support for:
+- **VLM-driven perception**: Integrates Florence, Moondream, Qwen, and OpenAI VLMs as first-class modules
+- **Spatial memory**: Spatio-temporal RAG with object permanence tracking
+- **Agent architecture**: LLM/VLM agents as native modules subscribing to perception and control streams via Model Context Protocol (MCP)
+- **Navigation**: SLAM, dynamic obstacle avoidance, frontier exploration
+- **Hardware**: Unitree G1 (beta), Go2 (stable), drones, arms
+
+**Relevance to Ardia:**
+- DimOS's perception module patterns (VLM → spatial memory → agent reasoning) validate our Section 7 closed-loop architecture
+- The spatial memory system with object permanence is directly useful for hospitality (tracking where objects are)
+- The agent-native design (agents as modules, not bolted on) aligns with our Avenue B agentic orchestrator
+- **Not a replacement for our stack** — DimOS is alpha-stage and lacks SONIC-level motor control. But its perception and agent composition patterns are worth adopting
+
+#### Roboflow — Robotics Vision AI Platform
+
+[roboflow.com/industries/robotics](https://roboflow.com/industries/robotics) provides production-ready vision tooling:
+- **Edge deployment**: Minimizes latency for real-time CV monitoring (our Section 7 action-time reasoning)
+- **Object detection + tracking**: YOLO-based, directly applicable to our grasp failure detection
+- **Pose estimation**: Relevant for manipulation monitoring
+- **Customers**: Peer Robotics, Nexera Robotics, Standard Bots — production-validated
+
+**Relevance to Ardia:**
+- Roboflow could provide the **CV monitoring backbone** for our action-time reasoning layer (Section 7.2, Level 2)
+- Edge deployment on Jetson Orin aligns with our deployment target
+- Pre-trained models for object detection reduce our custom training burden
+- Consider as the perception tooling layer feeding into our BT governance
+
 ---
 
 ## 10. Recommended Repository Architecture
@@ -2119,8 +2170,25 @@ cp -r robotics-agent-skills/skills/* /mnt/skills/user/
 - [NVIDIA Cosmos Reason 2](https://huggingface.co/blog/nvidia/nvidia-cosmos-reason-2-brings-advanced-reasoning)
 - [Google RT-2](https://arxiv.org/abs/2307.15818)
 
+**MEM (Multi-Scale Embodied Memory):**
+- [MEM Research Page](https://pi.website/research/memory)
+- [MEM Paper (PDF)](https://www.pi.website/download/Mem.pdf)
+- Authors: Torne, Pertsch, Walke, Vedder, Nair, Ichter, Ren, Wang, Tang, Stachowicz, Dhabalia, Equi, Vuong, Springenberg, Levine, Finn, Driess (PI, Stanford, UC Berkeley, MIT)
+
+**DimOS (Dimensional OS):**
+- [DimOS GitHub](https://github.com/dimensionalOS/dimos)
+- Python-first robotics SDK with agent-native architecture, VLM perception, spatial memory, and navigation
+- Supports Unitree G1 (beta), Go2 (stable), drones, and arms
+- Relevant for: perception stack patterns, spatial memory, VLM-driven navigation, agent composition
+
+**Roboflow (Robotics Vision AI):**
+- [Roboflow Robotics](https://roboflow.com/industries/robotics)
+- Edge + cloud vision deployment for robotics (object detection, pose estimation, visual servoing)
+- Relevant for: perception pipeline tooling, object tracking during manipulation, CV monitoring at action-time
+
 **PapersDistilled:**
 - [PI0 Family Distillation](../PapersDistilled/PI0/PI0.md)
+- [MEM Distillation](../PapersDistilled/MEM/MEM.md)
 - [Paper Connections & Relationships](../PapersDistilled/PaperConnections.md)
 
 ### Appendix I: Real-Robot Sensor & Control Stack
