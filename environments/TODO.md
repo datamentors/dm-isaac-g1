@@ -73,3 +73,74 @@ Add [noVNC](https://novnc.com/) so users can access the XFCE desktop from a brow
 - ~5MB install footprint (minimal)
 - Works with the unified password from the VNC password TODO above
 - Can optionally add `--web /opt/noVNC` to serve the HTML client directly
+
+---
+
+## Desktop Icons: Show shortcuts on XFCE desktop
+
+**Priority**: Low (quality-of-life)
+**Affects**: workstation + spark Dockerfiles, entrypoint.sh / ECS task command
+
+Desktop shortcut `.desktop` files exist in `~/Desktop/` (Chrome, Terminal, JupyterLab, VS Code)
+but don't render as clickable icons on the XFCE desktop.
+
+> **Note**: `ding@rastersoft.com` is a GNOME Shell extension — it does **not** work with XFCE4.
+> `nautilus -q` also conflicts with xfdesktop. Use XFCE's native desktop icons instead.
+
+### Implementation
+
+1. **Install missing dependencies** in both Dockerfiles (groot stage):
+   ```dockerfile
+   RUN apt-get update && apt-get install -y --no-install-recommends \
+       gvfs librsvg2-common && rm -rf /var/lib/apt/lists/*
+   ```
+   - `gvfs`: required for `gio set` metadata (trusting .desktop files)
+   - `librsvg2-common`: SVG icon rendering for icon themes
+   - `xfdesktop4`, `dbus-x11`, `adwaita-icon-theme` should already be installed
+
+2. **Pre-seed xfdesktop config** (Dockerfile, after creating `~/Desktop/`):
+   ```bash
+   mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml
+   cat > /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml << 'EOF'
+   <?xml version="1.0" encoding="UTF-8"?>
+   <channel name="xfce4-desktop" version="1.0">
+     <property name="desktop-icons" type="empty">
+       <property name="style" type="int" value="2"/>
+       <property name="file-icons" type="empty">
+         <property name="show-home" type="bool" value="true"/>
+         <property name="show-trash" type="bool" value="true"/>
+         <property name="show-filesystem" type="bool" value="false"/>
+         <property name="show-removable" type="bool" value="false"/>
+       </property>
+     </property>
+   </channel>
+   EOF
+   ```
+   - `style=2` enables file/folder icons from `~/Desktop/`
+
+3. **Trust .desktop files at session startup** (entrypoint.sh or ECS task command):
+   ```bash
+   # Must run AFTER dbus + XFCE session starts (needs gvfsd-metadata)
+   sleep 3
+   for f in ~/Desktop/*.desktop; do
+       [ -f "$f" ] || continue
+       chmod +x "$f"
+       gio set -t string "$f" metadata::xfce-exe-checksum \
+           "$(sha256sum "$f" | awk '{print $1}')"
+   done
+   xfdesktop --reload
+   ```
+   - XFCE 4.18+ requires a SHA256 checksum for each .desktop file to be "trusted"
+   - Without this, icons show "This launcher is not trusted" warning
+
+4. **Update icon caches** (Dockerfile):
+   ```bash
+   gtk-update-icon-cache -f /usr/share/icons/Adwaita 2>/dev/null || true
+   gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+   ```
+
+### Considerations
+
+- The trust step (`gio set`) requires a running dbus session — cannot be done at Docker build time
+- If `.desktop` files are modified after trusting, they need to be re-trusted (checksum changes)
+- Alternative: downgrade to XFCE < 4.18 where trust is not required (not recommended)
