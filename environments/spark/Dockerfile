@@ -239,12 +239,16 @@ COPY requirements-groot-spark.txt /tmp/requirements-groot-spark.txt
 RUN uv pip install --system -r /tmp/requirements-groot-spark.txt
 
 # flash-attn: try prebuilt wheel first, fall back to source build if unavailable.
-# MAX_JOBS=2 limits compiler parallelism to avoid OOM on 32GB ARM64 instances.
-# The source build needs ~16GB RAM per parallel job; with MAX_JOBS=2 it stays under 32GB.
+# Build constraints for ARM64 32GB instances:
+#   MAX_JOBS=1: single compilation job to limit peak RAM
+#   NVCC_THREADS=1: single nvcc thread per job (nvcc --threads)
+#   TORCH_CUDA_ARCH_LIST="8.0;10.0": only SM 80 (A100 compat) + SM 100 (GB10 Blackwell)
+#   Without limiting arch list, flash-attn builds for sm_80/90/100/120 and OOMs.
 RUN uv pip install --system flash-attn --no-build-isolation 2>/dev/null \
     || (apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-13-0 \
         && rm -rf /var/lib/apt/lists/* \
-        && MAX_JOBS=2 uv pip install --system flash-attn --no-build-isolation)
+        && MAX_JOBS=1 NVCC_THREADS=1 TORCH_CUDA_ARCH_LIST="8.0;10.0" \
+           uv pip install --system flash-attn --no-build-isolation)
 
 # conda-forge FFmpeg: provides libavutil.so shared libs required by torchcodec.
 RUN conda install -n unitree_sim_env -c conda-forge "ffmpeg>=7,<8" -y && \
