@@ -243,12 +243,19 @@ RUN uv pip install --system -r /tmp/requirements-groot-spark.txt
 #   MAX_JOBS=1: single compilation job to limit peak RAM
 #   NVCC_THREADS=1: single nvcc thread per job (nvcc --threads)
 #   TORCH_CUDA_ARCH_LIST="8.0;10.0": only SM 80 (A100 compat) + SM 100 (GB10 Blackwell)
-#   Without limiting arch list, flash-attn builds for sm_80/90/100/120 and OOMs.
+#   Without limiting arch list, flash-attn builds for sm_80/90/100/120 which is 4x slower.
+#   ENV vars must be exported (not just command prefix) for uv to propagate them to the build.
+ENV TORCH_CUDA_ARCH_LIST="8.0;10.0"
+ENV MAX_JOBS=1
+ENV NVCC_THREADS=1
 RUN uv pip install --system flash-attn --no-build-isolation 2>/dev/null \
     || (apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-13-0 \
         && rm -rf /var/lib/apt/lists/* \
-        && MAX_JOBS=1 NVCC_THREADS=1 TORCH_CUDA_ARCH_LIST="8.0;10.0" \
-           uv pip install --system flash-attn --no-build-isolation)
+        && uv pip install --system flash-attn --no-build-isolation)
+# Reset build-time env vars so they don't affect runtime
+ENV TORCH_CUDA_ARCH_LIST=""
+ENV MAX_JOBS=""
+ENV NVCC_THREADS=""
 
 # conda-forge FFmpeg: provides libavutil.so shared libs required by torchcodec.
 RUN conda install -n unitree_sim_env -c conda-forge "ffmpeg>=7,<8" -y && \
