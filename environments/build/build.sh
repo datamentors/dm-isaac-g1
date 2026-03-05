@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Build dm-workstation or dm-spark Docker images on a temporary EC2 instance
-# and push to ECR.
+# Build dm-workstation or dm-spark Docker images on EC2 and push to ECR.
 #
-# Launches a temp build instance matching the target architecture, uploads the
-# build context, builds the image, pushes to ECR, and terminates.
+# Uses a persistent build instance per platform (stop/start, not terminate).
+# Reuses the stopped instance and its Docker layer cache across builds.
+# If no instance exists, creates one. If no local Docker cache exists,
+# pulls the latest image from ECR as a cache source (BuildKit --cache-from).
 #
 # Prerequisites:
 #   1. AWS SSO login:  aws sso login --profile elianomarques-dm
@@ -16,12 +17,13 @@
 #   ./build.sh --groot            # Build workstation groot stage only + test + push
 #   ./build.sh --spark            # Build Spark image (ARM64 Graviton) + test + push
 #   ./build.sh --skip-test        # Build + push without running validation tests
-#   ./build.sh --cleanup-only     # Terminate any leftover build instances
-#   ./build.sh --no-terminate     # Keep instance alive after build
+#   ./build.sh --cleanup-only     # Terminate build instances (reclaims EBS disk)
+#   ./build.sh --no-stop          # Keep instance running after build (default: stop)
 #
 # Cost:
 #   Workstation (c5.4xlarge x86_64): ~$1.50 for a 2-hour build
 #   Spark (c7g.4xlarge ARM64):       ~$1.20 for a 1-hour build
+#   Stopped EBS (150 GB gp3):        ~$12/month (preserves Docker cache)
 # =============================================================================
 set -euo pipefail
 
@@ -50,7 +52,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o Connect
 
 BUILD_TARGET="groot"  # default: base + groot (workstation)
 BUILD_PLATFORM="workstation"  # workstation or spark
-NO_TERMINATE=false
+NO_STOP=false
 CLEANUP_ONLY=false
 SKIP_TEST=false
 
@@ -60,11 +62,12 @@ for arg in "$@"; do
         --base)          BUILD_TARGET="base" ;;
         --groot)         BUILD_TARGET="groot" ;;
         --spark)         BUILD_PLATFORM="spark"; BUILD_TARGET="spark" ;;
-        --no-terminate)  NO_TERMINATE=true ;;
+        --no-stop)       NO_STOP=true ;;
+        --no-terminate)  NO_STOP=true ;;  # backwards compat
         --cleanup-only)  CLEANUP_ONLY=true ;;
         --skip-test)     SKIP_TEST=true ;;
         -h|--help)
-            head -24 "$0" | tail -19
+            head -26 "$0" | tail -21
             exit 0 ;;
         *) echo "Unknown arg: $arg"; exit 1 ;;
     esac
@@ -97,11 +100,13 @@ remote_script() {
     ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=180 $SSH_OPTS -i "$SSH_KEY" ubuntu@"$PUBLIC_IP" "bash -s" <<< "$1"
 }
 
-cleanup_instance() {
-    log "Looking for existing build instances ($TAG_NAME)..."
+terminate_instances() {
+    # Terminate all instances with the given tag (used by --cleanup-only)
+    local tag="$1"
+    log "Looking for build instances ($tag)..."
     local ids
     ids=$(aws_cmd ec2 describe-instances \
-        --filters "Name=tag:Name,Values=$TAG_NAME" \
+        --filters "Name=tag:Name,Values=$tag" \
                   "Name=instance-state-name,Values=running,pending,stopping,stopped" \
         --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || true)
     if [ -n "$ids" ] && [ "$ids" != "None" ]; then
@@ -114,6 +119,25 @@ cleanup_instance() {
     fi
 }
 
+find_existing_instance() {
+    # Find a running or stopped instance with our build tag.
+    # Returns: sets EXISTING_INSTANCE_ID and EXISTING_STATE, or empty if none found.
+    EXISTING_INSTANCE_ID=""
+    EXISTING_STATE=""
+
+    local info
+    info=$(aws_cmd ec2 describe-instances \
+        --filters "Name=tag:Name,Values=$TAG_NAME" \
+                  "Name=instance-state-name,Values=running,stopped" \
+        --query 'Reservations[].Instances[].[InstanceId,State.Name]' --output text 2>/dev/null || true)
+
+    if [ -n "$info" ] && [ "$info" != "None" ]; then
+        # Take the first one if multiple exist
+        EXISTING_INSTANCE_ID=$(echo "$info" | head -1 | awk '{print $1}')
+        EXISTING_STATE=$(echo "$info" | head -1 | awk '{print $2}')
+    fi
+}
+
 cleanup_on_exit() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
@@ -122,7 +146,8 @@ cleanup_on_exit() {
         echo "  BUILD FAILED (exit code $exit_code)"
         echo "=========================================="
         echo ""
-        echo "  Instance may still be running."
+        echo "  Instance kept alive for cached rebuild."
+        echo "  To stop:       aws ec2 stop-instances --instance-ids \${INSTANCE_ID:-unknown}"
         echo "  To terminate:  $0 --cleanup-only"
         echo "  To debug:      ssh $SSH_OPTS -i $SSH_KEY ubuntu@\${PUBLIC_IP:-unknown}"
     fi
@@ -130,9 +155,9 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 if $CLEANUP_ONLY; then
-    # Clean up both workstation and spark build instances
-    TAG_NAME="dm-docker-build" cleanup_instance
-    TAG_NAME="dm-docker-build-spark" cleanup_instance
+    # Terminate both workstation and spark build instances (reclaims EBS)
+    terminate_instances "dm-docker-build"
+    terminate_instances "dm-docker-build-spark"
     exit 0
 fi
 
@@ -213,10 +238,7 @@ for f in "${BUILD_FILES[@]}"; do
     echo "    $(basename "$f")"
 done
 
-# ---------- Clean up previous ----------
-cleanup_instance
-
-# ---------- SSH key pair ----------
+# ---------- Find or create build instance ----------
 log "Ensuring EC2 key pair"
 if ! aws_cmd ec2 describe-key-pairs --key-names "$KEY_NAME" > /dev/null 2>&1; then
     echo "  Importing $SSH_PUB..."
@@ -226,40 +248,7 @@ if ! aws_cmd ec2 describe-key-pairs --key-names "$KEY_NAME" > /dev/null 2>&1; th
 fi
 echo "  Key pair: $KEY_NAME"
 
-# ---------- AMI ----------
-log "Finding AMI ($AMI_FILTER)"
-AMI_ID=$(aws_cmd ec2 describe-images \
-    --owners 099720109477 \
-    --filters \
-        "Name=name,Values=$AMI_FILTER" \
-        "Name=state,Values=available" \
-    --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
-    --output text)
-
-if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
-    echo "ERROR: AMI not found for filter: $AMI_FILTER"
-    exit 1
-fi
-echo "  AMI: $AMI_ID"
-
-# ---------- Security group ----------
-log "Ensuring security group"
-SG_NAME="dm-docker-build-sg"
-SG_ID=$(aws_cmd ec2 describe-security-groups \
-    --filters "Name=group-name,Values=$SG_NAME" \
-    --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
-
-if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
-    SG_ID=$(aws_cmd ec2 create-security-group \
-        --group-name "$SG_NAME" \
-        --description "Docker image build - SSH only" \
-        --query 'GroupId' --output text)
-    aws_cmd ec2 authorize-security-group-ingress \
-        --group-id "$SG_ID" --protocol tcp --port 22 --cidr 0.0.0.0/0 > /dev/null
-fi
-echo "  SG: $SG_ID"
-
-# ---------- IAM instance profile ----------
+# IAM instance profile (needed for new instances)
 log "Ensuring IAM role with ECR access"
 ROLE_NAME="dm-docker-build-role"
 IAM_PROFILE_NAME="dm-docker-build-profile"
@@ -289,33 +278,89 @@ if ! aws_cmd iam get-instance-profile --instance-profile-name "$IAM_PROFILE_NAME
 fi
 echo "  IAM: $IAM_PROFILE_NAME"
 
-# ---------- Launch instance ----------
-log "Launching $INSTANCE_TYPE ($BUILD_PLATFORM)"
-INSTANCE_ID=$(aws_cmd ec2 run-instances \
-    --image-id "$AMI_ID" \
-    --instance-type "$INSTANCE_TYPE" \
-    --key-name "$KEY_NAME" \
-    --security-group-ids "$SG_ID" \
-    --iam-instance-profile "Name=$IAM_PROFILE_NAME" \
-    --block-device-mappings "[{
-        \"DeviceName\": \"/dev/sda1\",
-        \"Ebs\": {
-            \"VolumeSize\": $VOLUME_SIZE,
-            \"VolumeType\": \"gp3\",
-            \"DeleteOnTermination\": true
-        }
-    }]" \
-    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TAG_NAME}]" \
-    --query 'Instances[0].InstanceId' --output text)
+# Check for existing instance (stopped or running) to reuse
+INSTANCE_REUSED=false
+find_existing_instance
 
-echo "  Instance: $INSTANCE_ID"
-echo "  Waiting for running state..."
-aws_cmd ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+if [ -n "$EXISTING_INSTANCE_ID" ]; then
+    INSTANCE_ID="$EXISTING_INSTANCE_ID"
 
-PUBLIC_IP=$(aws_cmd ec2 describe-instances \
-    --instance-ids "$INSTANCE_ID" \
-    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
-echo "  IP: $PUBLIC_IP"
+    if [ "$EXISTING_STATE" = "stopped" ]; then
+        log "Starting stopped build instance: $INSTANCE_ID (Docker cache preserved)"
+        aws_cmd ec2 start-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null
+        aws_cmd ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+        INSTANCE_REUSED=true
+    elif [ "$EXISTING_STATE" = "running" ]; then
+        log "Reusing running build instance: $INSTANCE_ID"
+        INSTANCE_REUSED=true
+    fi
+
+    PUBLIC_IP=$(aws_cmd ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+    echo "  Instance: $INSTANCE_ID ($PUBLIC_IP)"
+else
+    # No existing instance — create a new one
+    log "No existing instance found. Creating new $INSTANCE_TYPE ($BUILD_PLATFORM)"
+
+    # AMI
+    AMI_ID=$(aws_cmd ec2 describe-images \
+        --owners 099720109477 \
+        --filters \
+            "Name=name,Values=$AMI_FILTER" \
+            "Name=state,Values=available" \
+        --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
+        --output text)
+
+    if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
+        echo "ERROR: AMI not found for filter: $AMI_FILTER"
+        exit 1
+    fi
+    echo "  AMI: $AMI_ID"
+
+    # Security group
+    SG_NAME="dm-docker-build-sg"
+    SG_ID=$(aws_cmd ec2 describe-security-groups \
+        --filters "Name=group-name,Values=$SG_NAME" \
+        --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+
+    if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+        SG_ID=$(aws_cmd ec2 create-security-group \
+            --group-name "$SG_NAME" \
+            --description "Docker image build - SSH only" \
+            --query 'GroupId' --output text)
+        aws_cmd ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" --protocol tcp --port 22 --cidr 0.0.0.0/0 > /dev/null
+    fi
+    echo "  SG: $SG_ID"
+
+    # EBS: DeleteOnTermination=false so disk persists across stop/start cycles
+    INSTANCE_ID=$(aws_cmd ec2 run-instances \
+        --image-id "$AMI_ID" \
+        --instance-type "$INSTANCE_TYPE" \
+        --key-name "$KEY_NAME" \
+        --security-group-ids "$SG_ID" \
+        --iam-instance-profile "Name=$IAM_PROFILE_NAME" \
+        --block-device-mappings "[{
+            \"DeviceName\": \"/dev/sda1\",
+            \"Ebs\": {
+                \"VolumeSize\": $VOLUME_SIZE,
+                \"VolumeType\": \"gp3\",
+                \"DeleteOnTermination\": false
+            }
+        }]" \
+        --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$TAG_NAME}]" \
+        --query 'Instances[0].InstanceId' --output text)
+
+    echo "  Instance: $INSTANCE_ID"
+    echo "  Waiting for running state..."
+    aws_cmd ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+
+    PUBLIC_IP=$(aws_cmd ec2 describe-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+    echo "  IP: $PUBLIC_IP"
+fi
 
 # ---------- Wait for SSH ----------
 log "Waiting for SSH"
@@ -327,17 +372,25 @@ for i in $(seq 1 30); do
     sleep 10
 done
 
-# ---------- Install Docker ----------
-log "Installing Docker + AWS CLI"
+# ---------- Install Docker (idempotent — skips if already present on reused instance) ----------
+log "Ensuring Docker + AWS CLI"
 remote_script '
 set -euo pipefail
-sudo apt-get update -qq
-sudo apt-get install -y -qq docker.io unzip > /dev/null 2>&1
-sudo systemctl enable docker && sudo systemctl start docker
-sudo usermod -aG docker ubuntu
+
+# Docker
+if ! command -v docker &> /dev/null; then
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq docker.io unzip > /dev/null 2>&1
+    sudo systemctl enable docker && sudo systemctl start docker
+    sudo usermod -aG docker ubuntu
+else
+    sudo systemctl start docker 2>/dev/null || true
+fi
 
 # AWS CLI v2 (awscli apt package not available on Noble ARM64)
 if ! command -v aws &> /dev/null; then
+    sudo apt-get update -qq 2>/dev/null || true
+    sudo apt-get install -y -qq unzip > /dev/null 2>&1
     ARCH=$(uname -m)
     if [ "$ARCH" = "aarch64" ]; then
         curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscli.zip
@@ -375,6 +428,28 @@ aws ecr get-login-password --region $REGION | \
     sudo docker login --username AWS --password-stdin $ECR_REGISTRY
 "
 
+# ---------- Pull ECR image as cache source (if no local Docker cache) ----------
+log "Checking Docker cache on build instance"
+if [ "$BUILD_PLATFORM" = "spark" ]; then
+    CACHE_IMAGE="$ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+else
+    CACHE_IMAGE="$ECR_REGISTRY/$ACTIVE_ECR_REPO:latest"
+    CACHE_IMAGE_BASE="$ECR_REGISTRY/$ACTIVE_ECR_REPO:base-latest"
+fi
+
+# Check if a local image already exists (from a previous build on this instance)
+HAS_LOCAL_CACHE=$(remote "sudo docker images -q '$CACHE_IMAGE' 2>/dev/null" || true)
+
+if [ -z "$HAS_LOCAL_CACHE" ]; then
+    log "No local Docker cache found. Pulling latest from ECR as cache source..."
+    if [ "$BUILD_PLATFORM" != "spark" ]; then
+        remote "sudo docker pull '$CACHE_IMAGE_BASE' 2>/dev/null || echo '  (no base-latest in ECR yet)'"
+    fi
+    remote "sudo docker pull '$CACHE_IMAGE' 2>/dev/null || echo '  (no latest in ECR yet — first build)'"
+else
+    log "Local Docker cache present — will use existing layers"
+fi
+
 # ---------- S3 bucket for test results ----------
 S3_TEST_BUCKET="dm-isaac-g1-training-${REGION}"
 S3_TEST_PREFIX="build-tests/$(date +%Y%m%d-%H%M%S)"
@@ -395,7 +470,9 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
     echo '=== Spark build started at \$(date) ===' | tee build.log
 
     echo '>>> Building groot stage...' | tee -a build.log
-    sudo docker build --target groot \
+    sudo DOCKER_BUILDKIT=1 docker build --target groot \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --cache-from '$SPARK_TAG' \
         --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
         -t '$SPARK_TAG' \
         -t '$DATE_TAG' \
@@ -492,7 +569,9 @@ else
     echo '=== Build started at \$(date) ===' | tee build.log
 
     echo '>>> Building base stage...' | tee -a build.log
-    sudo docker build --target base \
+    sudo DOCKER_BUILDKIT=1 docker build --target base \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --cache-from '$BASE_TAG' \
         -t '$BASE_TAG' \
         -f Dockerfile \
         . 2>&1 | tee -a build.log
@@ -500,7 +579,10 @@ else
 
     if [ '$BUILD_TARGET' = 'groot' ]; then
         echo '>>> Building groot stage...' | tee -a build.log
-        sudo docker build --target groot \
+        sudo DOCKER_BUILDKIT=1 docker build --target groot \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from '$BASE_TAG' \
+            --cache-from '$GROOT_TAG' \
             --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
             -t '$GROOT_TAG' \
             -t '$DATE_TAG' \
@@ -597,15 +679,16 @@ aws_cmd ecr describe-images --repository-name "$ACTIVE_ECR_REPO" \
     --query 'sort_by(imageDetails, &imagePushedAt)[-3:].{tags:imageTags,pushed:imagePushedAt,sizeBytes:imageSizeInBytes}' \
     --output table
 
-# ---------- Terminate ----------
-if $NO_TERMINATE; then
+# ---------- Stop instance (preserves EBS / Docker cache) ----------
+if $NO_STOP; then
     echo ""
-    log "Instance kept alive: $INSTANCE_ID ($PUBLIC_IP)"
+    log "Instance kept running: $INSTANCE_ID ($PUBLIC_IP)"
     echo "  SSH:       ssh $SSH_OPTS -i $SSH_KEY ubuntu@$PUBLIC_IP"
+    echo "  Stop:      aws --profile $PROFILE --region $REGION ec2 stop-instances --instance-ids $INSTANCE_ID"
     echo "  Terminate: $0 --cleanup-only"
 else
-    log "Terminating $INSTANCE_ID"
-    aws_cmd ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null
+    log "Stopping $INSTANCE_ID (EBS preserved for next build)"
+    aws_cmd ec2 stop-instances --instance-ids "$INSTANCE_ID" --output text > /dev/null
 fi
 
 # ---------- Summary ----------

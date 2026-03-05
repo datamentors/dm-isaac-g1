@@ -255,10 +255,11 @@ RUN uv pip install --system -r /tmp/requirements-groot-spark.txt
 # Build constraints for ARM64 32GB instances:
 #   MAX_JOBS=1: single compilation job to limit peak RAM
 #   NVCC_THREADS=1: single nvcc thread per job (nvcc --threads)
-#   TORCH_CUDA_ARCH_LIST="8.0;10.0": only SM 80 (A100 compat) + SM 100 (GB10 Blackwell)
-#   Without limiting arch list, flash-attn builds for sm_80/90/100/120 which is 4x slower.
-#   ENV vars must be exported (not just command prefix) for uv to propagate them to the build.
-ENV TORCH_CUDA_ARCH_LIST="8.0;10.0"
+#   FLASH_ATTN_CUDA_ARCHS: flash-attn's own arch selector (setup.py line 70).
+#     Default "80;90;100;120" = 4 arches. DGX Spark GB10 = SM 12.1 (Blackwell).
+#   TORCH_CUDA_ARCH_LIST: for PyTorch CUDA extensions (not used by flash-attn).
+ENV FLASH_ATTN_CUDA_ARCHS="120"
+ENV TORCH_CUDA_ARCH_LIST="12.1"
 ENV MAX_JOBS=1
 ENV NVCC_THREADS=1
 RUN uv pip install --system flash-attn --no-build-isolation 2>/dev/null \
@@ -266,6 +267,7 @@ RUN uv pip install --system flash-attn --no-build-isolation 2>/dev/null \
         && rm -rf /var/lib/apt/lists/* \
         && uv pip install --system flash-attn --no-build-isolation)
 # Reset build-time env vars so they don't affect runtime
+ENV FLASH_ATTN_CUDA_ARCHS=""
 ENV TORCH_CUDA_ARCH_LIST=""
 ENV MAX_JOBS=""
 ENV NVCC_THREADS=""
