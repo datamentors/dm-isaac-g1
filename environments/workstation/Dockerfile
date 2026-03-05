@@ -305,7 +305,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends cuda-nvcc-12-8 
 # in this stage. Python packages must always use: uv pip install --system
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
-    conda install -n unitree_sim_env -c conda-forge ffmpeg -y
+    conda install -n unitree_sim_env -c conda-forge "ffmpeg>=7,<8" -y
 
 # torchcodec: AV1-capable video decoder required for LeRobot v3.0 datasets
 # (HuggingFace Dex3 and other recent datasets use AV1 codec in MP4 containers).

@@ -245,7 +245,7 @@ RUN uv pip install --system flash-attn --no-build-isolation 2>/dev/null \
         && uv pip install --system flash-attn --no-build-isolation)
 
 # conda-forge FFmpeg: provides libavutil.so shared libs required by torchcodec.
-RUN conda install -n unitree_sim_env -c conda-forge ffmpeg -y && \
+RUN conda install -n unitree_sim_env -c conda-forge "ffmpeg>=7,<8" -y && \
     conda clean -afy
 
 # torchcodec: build from source for aarch64 (no PyPI wheels available)
