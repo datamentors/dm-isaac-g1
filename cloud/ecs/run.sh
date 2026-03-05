@@ -89,6 +89,10 @@ VULKAN_SETUP_CMD='mkdir -p /tmp/xdg /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>
 # Uses -noxstartup to bypass TurboVNC's session detection (which fails to find xfce.desktop).
 VNC_STARTUP_CMD='rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null; /opt/TurboVNC/bin/vncserver :1 -geometry 1920x1080 -depth 24 -noxstartup 2>/dev/null; export DISPLAY=:1; (nohup dbus-launch startxfce4 &>/dev/null &)'
 
+# Service startup command — generates random password, starts code-server + JupyterLab
+# Password is printed to stdout (captured by CloudWatch), retrievable via: ./run.sh password
+SERVICES_STARTUP_CMD='SVC_PASSWORD=${SERVICE_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}; if [ -f /root/.config/code-server/config.yaml ]; then sed -i "s/^password:.*/password: ${SVC_PASSWORD}/" /root/.config/code-server/config.yaml; fi; if [ -f /root/.jupyter/jupyter_server_config.json ]; then python3 -c "import json,pathlib; p=pathlib.Path(\"/root/.jupyter/jupyter_server_config.json\"); c=json.loads(p.read_text()); c[\"ServerApp\"][\"token\"]=\"${SVC_PASSWORD}\"; p.write_text(json.dumps(c,indent=2))"; fi; echo "============================================"; echo "  SERVICE PASSWORD: ${SVC_PASSWORD}"; echo "============================================"; echo "  code-server (VS Code): http://<host>:8080"; echo "  JupyterLab:            http://<host>:8888"; echo "  VNC:                   <host>:5901"; echo "============================================"; nohup code-server --bind-addr 0.0.0.0:8080 &>/tmp/code-server.log & nohup conda run --no-capture-output -n unitree_sim_env jupyter lab --ip=0.0.0.0 --port=8888 --allow-root --no-browser &>/tmp/jupyterlab.log &'
+
 # ── Upload Training Data ─────────────────────────────────────────────────────
 upload_data() {
     local task="$1"
@@ -954,7 +958,7 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; echo '=== Container ready ==='; sleep 86400"],
+            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; ${SERVICES_STARTUP_CMD}; echo '=== Container ready ==='; sleep 86400"],
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},

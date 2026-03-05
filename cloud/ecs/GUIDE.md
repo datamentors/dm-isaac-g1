@@ -9,7 +9,7 @@ The ECR image (`isaac-g1-sim-ft-rl:latest`) is the same as `dm-workstation:lates
 | Component | Details |
 |-----------|---------|
 | **Base** | NVIDIA CUDA 12.8 + Ubuntu 22.04 |
-| **Isaac Sim** | 5.0.0 (pip) + IsaacLab v2.2.0 |
+| **Isaac Sim** | 5.1.0 (pip) + IsaacLab v2.2.0 |
 | **MuJoCo** | 3.2.6 + Menagerie robot models + unitree_mujoco |
 | **PyTorch** | 2.7.0+cu128 with flash-attn, DeepSpeed |
 | **GR00T** | Isaac-GR00T + WBC + video2robot |
@@ -95,6 +95,43 @@ cd dm-isaac-g1/cloud/ecs
 ```
 
 Creates: ECS cluster, ASG (min=0, max=10), IAM roles, S3 bucket, security group, key pair. Takes ~2 minutes.
+
+---
+
+## Quick Start
+
+Launch an interactive GPU container and connect in 3 steps:
+
+```bash
+cd dm-isaac-g1/cloud/ecs
+
+# 1. Launch a container (auto-scales a g5.2xlarge GPU instance)
+./run.sh shell
+# Prints the Task ARN — wait 3-5 min for instance to provision
+
+# 2. Check status until RUNNING, note the instance IP
+./run.sh status
+
+# 3. Get the service password (generated on each container start)
+./run.sh password
+```
+
+Once RUNNING, connect via:
+
+| Service | URL | Auth |
+|---------|-----|------|
+| **code-server** (VS Code) | `http://<instance-ip>:8080` | Service password |
+| **JupyterLab** | `http://<instance-ip>:8888` | Service password |
+| **VNC** (XFCE desktop) | `<instance-ip>:5901` (VNC client) | `datament` |
+
+All three services start automatically. The service password is shared between code-server and JupyterLab. Retrieve it anytime with `./run.sh password`.
+
+When done:
+
+```bash
+./run.sh stop
+# Instance auto-terminates when no tasks remain (back to $0/hr)
+```
 
 ---
 
