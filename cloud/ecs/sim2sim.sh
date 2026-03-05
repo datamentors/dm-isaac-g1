@@ -175,14 +175,25 @@ mkdir -p "$OUTPUT_DIR"
 
 cd "$WORKSPACE/dm-isaac-g1"
 
-# Build sim2sim.py command
-SIM2SIM_CMD=(
-    python -u src/dm_isaac_g1/rl/scripts/sim2sim.py
-    --policy "$POLICY_FILE"
-    --deploy-yaml "$DEPLOY_DIR/params/deploy.yaml"
-    --output-dir "$OUTPUT_DIR"
-    --video-length "$VIDEO_LENGTH"
-)
+# Build sim2sim command (uses dm-g1 CLI if available, falls back to script)
+if command -v dm-g1 &>/dev/null; then
+    SIM2SIM_CMD=(
+        dm-g1 sim2sim "$POLICY_FILE"
+        -d "$DEPLOY_DIR/params/deploy.yaml"
+        -o "$OUTPUT_DIR"
+        --video-length "$VIDEO_LENGTH"
+        --debug-obs
+    )
+else
+    SIM2SIM_CMD=(
+        python -u src/dm_isaac_g1/rl/scripts/sim2sim.py
+        --policy "$POLICY_FILE"
+        --deploy-yaml "$DEPLOY_DIR/params/deploy.yaml"
+        --output-dir "$OUTPUT_DIR"
+        --video-length "$VIDEO_LENGTH"
+        --debug-obs
+    )
+fi
 
 if [[ -n "$SCENE_XML" ]]; then
     SIM2SIM_CMD+=(--scene "$SCENE_XML")
@@ -194,6 +205,7 @@ else
     # GUI mode: ensure DISPLAY is set for VNC
     export DISPLAY="${DISPLAY:-:1}"
     echo "Using DISPLAY=$DISPLAY (connect via VNC to interact)"
+    SIM2SIM_CMD+=(-i)
 fi
 
 echo "Command: ${SIM2SIM_CMD[*]}"

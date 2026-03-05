@@ -473,6 +473,115 @@ ECS manages this automatically. Stop all containers and the ASG scales back to 0
 
 ---
 
+### 9. Sim2Sim — MuJoCo Policy Validation
+
+Validate trained RL or mimic policies in MuJoCo before deploying to the real robot. Works on Mac (CPU), workstation (GPU), or ECS (GPU).
+
+**What it does:** Loads an ONNX or JIT policy exported by `play.py`, along with `deploy.yaml`, and runs it in MuJoCo with PD control. Observations are built data-driven from the deploy.yaml spec (including projected gravity, gait phase, and history stacking).
+
+**Prerequisites:**
+```bash
+pip install -e ".[sim2sim]"   # installs mujoco, onnxruntime, opencv
+git clone https://github.com/unitreerobotics/unitree_mujoco.git ~/unitree_mujoco
+```
+
+**From workstation or ECS (with display — interactive GUI):**
+```bash
+conda activate unitree_sim_env
+cd /workspace/dm-isaac-g1
+
+# Interactive with keyboard control (WASD/QE for velocity, 1/2/3 for FSM):
+dm-g1 sim2sim logs/rsl_rl/.../exported/policy.onnx -i
+
+# Non-interactive GUI with fixed velocity:
+dm-g1 sim2sim policy.onnx --cmd-vx 0.3 --cmd-wz 0.1
+```
+
+**Headless video recording (ECS, workstation, or Mac):**
+```bash
+# Record 10-second video:
+dm-g1 sim2sim logs/rsl_rl/.../exported/policy.onnx --headless --video
+
+# Custom duration and velocity:
+dm-g1 sim2sim policy.onnx --headless --video --video-length 15 --cmd-vx 0.3 --cmd-wz 0.2
+
+# With explicit deploy.yaml and scene:
+dm-g1 sim2sim policy.onnx -d params/deploy.yaml -s ~/unitree_mujoco/unitree_robots/g1/scene.xml --headless --video
+```
+
+**Mimic policies (motion replay):**
+```bash
+dm-g1 sim2sim policy.onnx --motion-file ronaldo_celebration.npz --headless --video
+```
+
+**From Mac (CPU, headless only):**
+```bash
+cd ~/dm-isaac-g1
+pip install -e ".[sim2sim]"
+dm-g1 sim2sim path/to/policy.onnx --headless --video --video-length 10
+```
+
+**Auto-detection:** If `--deploy-yaml` is omitted, sim2sim searches for `deploy.yaml` relative to the policy file (`../params/deploy.yaml`, `./deploy.yaml`). If `--scene` is omitted, it searches common paths (`/workspace/unitree_mujoco/`, `~/unitree_mujoco/`, etc.). If no deploy.yaml is found at all, it falls back to G1 29-DOF defaults.
+
+**Legacy script (also works):**
+```bash
+python src/dm_isaac_g1/rl/scripts/sim2sim.py \
+    --policy policy.onnx --deploy-yaml deploy.yaml --headless --video
+```
+
+**Keyboard controls (interactive mode, `-i`):**
+
+| Key | Action |
+|-----|--------|
+| W / Up | Forward velocity (+vx) |
+| S / Down | Backward velocity (-vx) |
+| A / Left | Strafe left (+vy) |
+| D / Right | Strafe right (-vy) |
+| Q | Turn left (+wz) |
+| E | Turn right (-wz) |
+| Space | Stop all movement |
+| R | Reset robot to initial pose |
+| 1 | FSM: Passive (damping only) |
+| 2 | FSM: Stand (interpolate to default) |
+| 3 | FSM: Walk (policy active) |
+
+**C++ SDK Sim2Sim (native Unitree deploy binary):**
+
+If building the C++ SDK deployment binary (for real robot or native sim2sim), install these system dependencies first:
+```bash
+sudo apt install -y libyaml-cpp-dev libboost-all-dev libeigen3-dev libspdlog-dev libfmt-dev
+```
+
+This is only needed for the C++ pipeline (`unitree_rl_lab/deploy/`), not for the Python `dm-g1 sim2sim` command above.
+
+---
+
+### 10. Imitation Learning — TeleOp Setup
+
+Set up Isaac Lab for teleoperation data collection (requires Isaac Sim).
+
+```bash
+# Create a fresh conda environment
+conda deactivate
+conda create -n newtonlab python=3.11 -y
+conda activate newtonlab
+
+# Install Isaac Sim 5.1.0
+pip install isaacsim==5.1.0 --extra-index-url https://pypi.nvidia.com
+
+# Install Isaac Lab (editable)
+cd /workspace
+git clone https://github.com/isaac-sim/IsaacLab.git
+cd IsaacLab
+pip install -e source/extensions/omni.isaac.lab
+pip install -e source/extensions/omni.isaac.lab_tasks
+
+# Install HID API for device input (spacemouse, etc.)
+pip install hidapi
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |

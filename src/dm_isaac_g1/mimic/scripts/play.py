@@ -48,6 +48,7 @@ import torch
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab.utils.dict import print_dict
 from rsl_rl.runners import OnPolicyRunner
+from unitree_rl_lab.utils.export_deploy_cfg import export_deploy_cfg
 
 import dm_isaac_g1.mimic.tasks  # noqa: F401
 
@@ -104,6 +105,10 @@ def main():
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_dir, filename="policy.pt")
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_dir, filename="policy.onnx")
     print(f"[INFO] Exported policy to {export_dir}/policy.onnx and policy.pt")
+
+    # Export deploy config (deploy.yaml) for sim2sim validation
+    export_deploy_cfg(env.unwrapped, log_dir)
+    print(f"[INFO] Exported deploy config to {log_dir}/params/deploy.yaml")
 
     if args_cli.export_only:
         print("[INFO] Export-only mode, skipping sim playback.")

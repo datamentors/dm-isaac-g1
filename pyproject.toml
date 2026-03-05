@@ -51,6 +51,12 @@ full = [
     "gymnasium>=0.29.0",
     "wandb>=0.16.0",
 ]
+sim2sim = [
+    "mujoco>=3.0.0",
+    "onnxruntime>=1.17.0",
+    "opencv-python-headless>=4.9.0",
+    "pyyaml>=6.0.1",
+]
 isaac = [
     # Isaac Lab dependencies - installed via Isaac Lab's installation script
     # "isaacsim>=4.0.0",

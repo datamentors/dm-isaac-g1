@@ -220,6 +220,79 @@ def benchmark(env: str, episodes: int, task: str):
 
 
 # =============================================================================
+# Sim2Sim Commands
+# =============================================================================
+
+
+@main.command()
+@click.argument("policy_path", type=click.Path(exists=True))
+@click.option("--deploy-yaml", "-d", type=click.Path(exists=True), default=None,
+              help="Path to deploy.yaml (auto-detected from policy dir if not set)")
+@click.option("--scene", "-s", type=click.Path(), default=None,
+              help="Path to MuJoCo scene XML (auto-detected)")
+@click.option("--headless", is_flag=True, help="Headless mode (EGL rendering, no GUI)")
+@click.option("--video", is_flag=True, help="Record video of the simulation")
+@click.option("--video-length", type=float, default=10.0, help="Video duration in seconds")
+@click.option("--video-fps", type=int, default=30, help="Video FPS")
+@click.option("--output-dir", "-o", type=click.Path(), default=None,
+              help="Output directory for videos")
+@click.option("--sim-duration", type=float, default=60.0,
+              help="Total simulation duration in seconds (GUI mode)")
+@click.option("--cmd-vx", type=float, default=0.5, help="Forward velocity (m/s)")
+@click.option("--cmd-vy", type=float, default=0.0, help="Lateral velocity (m/s)")
+@click.option("--cmd-wz", type=float, default=0.0, help="Yaw rate (rad/s)")
+@click.option("--interactive", "-i", is_flag=True,
+              help="Enable keyboard control (WASD/QE + FSM keys 1/2/3)")
+@click.option("--motion-file", type=click.Path(exists=True), default=None,
+              help="Motion CSV or NPZ file for mimic policies")
+@click.option("--debug-obs", is_flag=True, help="Print observation debug info")
+def sim2sim(policy_path, deploy_yaml, scene, headless, video, video_length,
+            video_fps, output_dir, sim_duration, cmd_vx, cmd_vy, cmd_wz,
+            interactive, motion_file, debug_obs):
+    """Validate a trained policy in MuJoCo (sim2sim).
+
+    Loads an ONNX or JIT policy exported by play.py and runs it in MuJoCo
+    with PD control. Works on Mac (CPU), workstation (GPU), or ECS.
+
+    \b
+    Examples:
+        dm-g1 sim2sim logs/rsl_rl/.../exported/policy.onnx
+        dm-g1 sim2sim policy.onnx -d deploy.yaml --video
+        dm-g1 sim2sim policy.onnx -i
+        dm-g1 sim2sim policy.onnx --headless --video --video-length 15
+        dm-g1 sim2sim policy.onnx --motion-file dance.npz --video
+
+    \b
+    Interactive keyboard controls:
+        W/S or Up/Down  - Forward/backward velocity
+        A/D or Left/Right - Strafe left/right
+        Q/E             - Turn left/right
+        Space           - Stop all movement
+        R               - Reset robot pose
+        1/2/3           - FSM: Passive/Stand/Walk
+    """
+    from dm_isaac_g1.sim2sim.runner import run
+
+    run(
+        policy_path=policy_path,
+        deploy_yaml=deploy_yaml,
+        scene=scene,
+        headless=headless,
+        video=video,
+        video_length=video_length,
+        video_fps=video_fps,
+        output_dir=output_dir,
+        sim_duration=sim_duration,
+        cmd_vx=cmd_vx,
+        cmd_vy=cmd_vy,
+        cmd_wz=cmd_wz,
+        interactive=interactive,
+        motion_file=motion_file,
+        debug_obs=debug_obs,
+    )
+
+
+# =============================================================================
 # Remote Commands
 # =============================================================================
 
