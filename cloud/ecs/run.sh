@@ -149,7 +149,7 @@ register_task_def() {
     log "Registering task definition: $family (task_id=$task_id, script=$train_script)" >&2
 
     local tmpfile
-    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
     cat > "$tmpfile" << EOF
 {
     "family": "${family}",
@@ -363,7 +363,7 @@ cmd_replay() {
     local family="dm-replay-${MOTION_NAME}"
 
     local tmpfile
-    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
     cat > "$tmpfile" << EOF
 {
     "family": "${family}",
@@ -518,7 +518,7 @@ cmd_sim2sim() {
 
     local family="dm-sim2sim-${MOTION_NAME}"
     local tmpfile
-    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
     cat > "$tmpfile" << EOF
 {
     "family": "${family}",
@@ -789,7 +789,7 @@ cmd_test() {
     local family="dm-image-test"
 
     local tmpfile
-    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
     cat > "$tmpfile" << TASKEOF
 {
     "family": "${family}",
@@ -940,7 +940,7 @@ cmd_shell() {
 
     # Register a long-running task definition (sleep for 24h)
     local tmpfile
-    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX.json)
+    tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
     cat > "$tmpfile" << TASKEOF
 {
     "family": "${family}",
