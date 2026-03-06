@@ -78,6 +78,10 @@ err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR:${NC} $*" >&2; }
 
 aws_cmd() { aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"; }
 
+# Escape a string for safe embedding inside a JSON string value.
+# Handles backslashes, double quotes, and newlines.
+json_escape() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read())[1:-1],end="")'; }
+
 # Vulkan diagnostic command (shared across all containers)
 # The Docker image includes libnvidia-gl-550 which provides all NVIDIA Vulkan/GL
 # driver libraries (libnvidia-vulkan-producer.so, libGLX_nvidia.so.0, nvidia_icd.json).
@@ -938,6 +942,11 @@ cmd_shell() {
 
     local family="dm-interactive-shell"
 
+    # Build the container command and JSON-escape it (SERVICES_STARTUP_CMD contains double quotes)
+    local shell_cmd="echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; ${SERVICES_STARTUP_CMD} echo '=== Container ready ==='; sleep 86400"
+    local shell_cmd_escaped
+    shell_cmd_escaped=$(json_escape "$shell_cmd")
+
     # Register a long-running task definition (sleep for 24h)
     local tmpfile
     tmpfile=$(mktemp /tmp/ecs-taskdef-XXXXXX)
@@ -958,7 +967,7 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; ${SERVICES_STARTUP_CMD} echo '=== Container ready ==='; sleep 86400"],
+            "command": ["bash", "-c", "${shell_cmd_escaped}"],
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},
