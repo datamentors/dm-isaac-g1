@@ -162,7 +162,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfce4 xfce4-terminal xfce4-taskmanager \
     adwaita-icon-theme \
     gvfs librsvg2-common \
-    # FFmpeg dev headers (for torchcodec source build verification)
+    # cmake + FFmpeg dev headers (cmake required for torchcodec source build)
+    cmake \
     ffmpeg libavdevice-dev libavfilter-dev libavformat-dev \
     libavcodec-dev libavutil-dev libswresample-dev libswscale-dev \
     pkg-config \
@@ -278,10 +279,20 @@ RUN conda install -n unitree_sim_env -c conda-forge "ffmpeg>=7,<8" -y && \
 
 # torchcodec: build from source for aarch64 (no PyPI wheels available)
 # v0.5.0 is compatible with PyTorch 2.9.x
-RUN cd /tmp && \
+# Build deps: pybind11 (cmake find_package), cuda-nvrtc-dev (Torch cmake needs libnvrtc).
+# cuda-nvrtc-dev-13-0 provides libnvrtc.so symlink + cmake FindCUDA compat.
+# Env vars must be exported so cmake subprocess inherits them from pip wheel.
+RUN uv pip install --system pybind11 && \
+    apt-get update && apt-get install -y --no-install-recommends cuda-nvrtc-dev-13-0 && \
+    rm -rf /var/lib/apt/lists/* && \
+    export CMAKE_PREFIX_PATH="$(python -c 'import pybind11; print(pybind11.get_cmake_dir())'):${CMAKE_PREFIX_PATH:-}" && \
+    export PKG_CONFIG_PATH="/opt/conda/envs/unitree_sim_env/lib/pkgconfig:${PKG_CONFIG_PATH:-}" && \
+    export ENABLE_CUDA=0 && \
+    export I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 && \
+    export TORCHCODEC_DISABLE_COMPILE_WARNING_AS_ERROR=ON && \
+    cd /tmp && \
     git clone --depth 1 --branch v0.5.0 https://github.com/pytorch/torchcodec.git && \
     cd torchcodec && \
-    ENABLE_CUDA=0 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 \
     pip wheel . --no-build-isolation --no-binary=torchcodec -w /tmp/tc_wheel && \
     pip install /tmp/tc_wheel/torchcodec*.whl && \
     rm -rf /tmp/torchcodec /tmp/tc_wheel

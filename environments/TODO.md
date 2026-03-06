@@ -1,35 +1,35 @@
 # Environments TODO
 
-All items below have been implemented. Keeping for reference.
+## Upgrade Workstation Isaac Sim 5.0.0 → 5.1.0
+
+The workstation Dockerfile uses `isaacsim==5.0.0`, while the Spark image and team's TeleOp
+setup both use `5.1.0`. Update the workstation builder stage:
+
+```dockerfile
+# Line ~74 in environments/workstation/Dockerfile
+RUN pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
+```
+
+Note: May require upgrading CUDA base image or torch version. Test IsaacLab compat after.
+
+## Add Sim2Sim C++ build dependencies
+
+The Sim2Sim pipeline requires these C++ dev libraries (currently installed manually via
+`apt install`). Add to the groot stage `apt-get install` in **both** Dockerfiles:
+
+```
+libyaml-cpp-dev libboost-all-dev libeigen3-dev libspdlog-dev libfmt-dev
+```
+
+Needed for building the Unitree sim2sim bridge (CycloneDDS, robot SDK bindings).
+
+Affects: `environments/workstation/Dockerfile` + `environments/spark/Dockerfile`
 
 ---
 
-## ~~VNC: Use service password instead of hardcoded password~~ DONE
+## Completed
 
-Implemented: VNC password is now set at runtime by `entrypoint.sh` using the first 8 chars
-of the randomly generated service password. Build-time hardcoded `datament` password removed
-from both Dockerfiles.
-
----
-
-## ~~noVNC: Browser-based VNC access~~ DONE
-
-Implemented: noVNC + websockify installed in both Dockerfiles. Started by `entrypoint.sh`
-on port 6080, proxying to TurboVNC on :5901. Port 6080 added to ECS security group.
-
----
-
-## ~~Desktop Icons: Show shortcuts on XFCE desktop~~ DONE
-
-Implemented: xfdesktop config pre-seeded with `style=2` (file icons mode), `gvfs` and
-`librsvg2-common` installed. Desktop icons trusted at session startup via SHA256 checksum
-(`gio set metadata::xfce-exe-checksum`).
-
-Note: `ding@rastersoft.com` is a GNOME Shell extension — does not work with XFCE4.
-
----
-
-## ~~video2robot UI: Password-protected web interface~~ DONE
-
-Implemented: Auth wrapper (`video2robot-server.py`) adds HTTP Basic Auth using the service
-password. Started by `entrypoint.sh` on port 8000. Port 8000 added to ECS security group.
+- ~~VNC password~~ — runtime service password (entrypoint.sh)
+- ~~noVNC~~ — browser VNC on port 6080
+- ~~Desktop icons~~ — xfdesktop style=2 + gvfs trust
+- ~~video2robot UI~~ — HTTP Basic Auth on port 8000

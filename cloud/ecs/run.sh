@@ -958,7 +958,7 @@ cmd_shell() {
             ],
             "memory": 28000,
             "cpu": 6144,
-            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; ${SERVICES_STARTUP_CMD}; echo '=== Container ready ==='; sleep 86400"],
+            "command": ["bash", "-c", "echo '=== Interactive container ready ===' && nvidia-smi; ${VULKAN_SETUP_CMD}; ${VNC_STARTUP_CMD}; echo 'VNC+XFCE started on :5901'; echo '=== Pulling latest code ==='; if [ -d /workspace/dm-isaac-g1 ]; then cd /workspace/dm-isaac-g1 && git pull origin main 2>/dev/null; pip install -e . -q 2>/dev/null; fi; if [ -d /workspace/unitree_rl_lab ]; then cd /workspace/unitree_rl_lab && git pull origin main 2>/dev/null; cd source/unitree_rl_lab && pip install -e . -q 2>/dev/null; python -m dm_isaac_g1.rl.install_tasks 2>/dev/null; fi; ${SERVICES_STARTUP_CMD} echo '=== Container ready ==='; sleep 86400"],
             "environment": [
                 {"name": "NVIDIA_DRIVER_CAPABILITIES", "value": "all"},
                 {"name": "VK_ICD_FILENAMES", "value": "/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"},

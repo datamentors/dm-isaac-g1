@@ -216,6 +216,32 @@ def test_flash_attn():
     return f"flash-attn {flash_attn.__version__}"
 
 
+# ── Sim2Sim ──────────────────────────────────────────────────────────────────
+
+@test("sim2sim module")
+def test_sim2sim():
+    from dm_isaac_g1.sim2sim import runner, deploy_config, policy_loader
+    return "OK"
+
+
+@test("onnxruntime")
+def test_onnxruntime():
+    import onnxruntime
+    return f"onnxruntime {onnxruntime.__version__}"
+
+
+@test("yaml (PyYAML)")
+def test_yaml():
+    import yaml
+    return f"PyYAML {yaml.__version__}"
+
+
+@test("opencv (cv2)")
+def test_cv2():
+    import cv2
+    return f"opencv {cv2.__version__}"
+
+
 # ── dm-isaac-g1 ──────────────────────────────────────────────────────────────
 
 @test("dm-isaac-g1 package")
