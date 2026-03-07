@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- CycloneDDS config for container-local DDS communication.
+     Both unitree_mujoco and g1_ctrl must use this config to communicate
+     over loopback (lo) interface within the same container.
+     Set ENV CYCLONEDDS_URI=file:///etc/cyclonedds.xml -->
+<CycloneDDS xmlns="https://cdds.io/config">
+    <Domain>
+        <General>
+            <Interfaces>
+                <NetworkInterface name="lo" multicast="true" />
+            </Interfaces>
+            <AllowMulticast>true</AllowMulticast>
+            <EnableMulticastLoopback>true</EnableMulticastLoopback>
+        </General>
+    </Domain>
+</CycloneDDS>

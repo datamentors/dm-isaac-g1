@@ -4,6 +4,7 @@
 #include "param.h"
 #include "FSM/BaseState.h"
 #include "isaaclab/devices/keyboard/keyboard.h"
+#include "JoystickInjector.h"
 #include "unitree_joystick_dsl.hpp"
 
 class FSMState : public BaseState
@@ -56,6 +57,8 @@ public:
     void pre_run()
     {
         lowstate->update();
+        JoystickInjector::Instance().start();
+        JoystickInjector::Instance().apply(lowstate->joystick);
         if(keyboard) keyboard->update();
     }
 

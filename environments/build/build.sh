@@ -82,7 +82,7 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
     ACTIVE_ECR_REPO="$ECR_REPO_SPARK"
 else
     INSTANCE_TYPE="c5.4xlarge"     # 16 vCPU x86_64, 32 GB
-    VOLUME_SIZE=150                # Workstation image is larger (~42 GB)
+    VOLUME_SIZE=250                # Workstation image needs ~80GB+ for full rebuild
     TAG_NAME="dm-docker-build"
     AMI_FILTER="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
     ACTIVE_ECR_REPO="$ECR_REPO"
@@ -207,6 +207,9 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
         echo "  Found $PATCH_COUNT patch/helper file(s)"
         BUILD_FILES+=("$SPARK_DIR/patches")
     fi
+    if [ -d "$SPARK_DIR/configs" ]; then
+        BUILD_FILES+=("$SPARK_DIR/configs")
+    fi
 else
     log "Collecting build context from environments/workstation/"
     for f in "$WORKSTATION_DIR/Dockerfile" "$WORKSTATION_DIR/requirements-groot.txt"; do
@@ -224,6 +227,9 @@ else
         PATCH_COUNT=$(find "$WORKSTATION_DIR/patches" -type f | wc -l | tr -d ' ')
         echo "  Found $PATCH_COUNT patch/helper file(s)"
         BUILD_FILES+=("$WORKSTATION_DIR/patches")
+    fi
+    if [ -d "$WORKSTATION_DIR/configs" ]; then
+        BUILD_FILES+=("$WORKSTATION_DIR/configs")
     fi
 fi
 

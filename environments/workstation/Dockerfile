@@ -390,8 +390,52 @@ RUN test -f video2robot/visualization/robot_viser.py \
 RUN git lfs install && \
     git clone https://huggingface.co/datasets/unitreerobotics/unitree_model unitree_model
 
-# unitree_mujoco — G1 MuJoCo scene XML (for sim2sim pipeline)
-RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco
+# ==============================
+# Sim2Sim C++ Deploy Pipeline
+# unitree_mujoco (MuJoCo simulator with DDS) + g1_ctrl (C++ controller)
+# communicating via CycloneDDS over loopback interface.
+# ==============================
+
+# C++ build dependencies for unitree_sdk2 and g1_ctrl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libyaml-cpp-dev libboost-all-dev libeigen3-dev \
+    libspdlog-dev libfmt-dev \
+    cmake build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# unitree_sdk2 (C++ SDK) — required by g1_ctrl for DDS robot communication
+RUN git clone https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2 && \
+    cd /tmp/unitree_sdk2 && mkdir build && cd build && \
+    cmake .. -DBUILD_EXAMPLES=OFF && \
+    make -j$(nproc) && make install && \
+    rm -rf /tmp/unitree_sdk2
+
+# ONNX Runtime C++ (x86_64) — headers + libs for policy inference in g1_ctrl
+RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz \
+        -O /tmp/onnxruntime.tgz && \
+    tar xzf /tmp/onnxruntime.tgz -C /tmp && \
+    cp -r /tmp/onnxruntime-linux-x64-1.22.0/include/* /usr/local/include/ && \
+    cp -r /tmp/onnxruntime-linux-x64-1.22.0/lib/* /usr/local/lib/ && \
+    ldconfig && \
+    rm -rf /tmp/onnxruntime*
+
+# unitree_mujoco — G1 MuJoCo simulator with DDS communication
+RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco && \
+    cd /workspace/unitree_mujoco/simulate && \
+    mkdir build && cd build && \
+    cmake .. && make -j$(nproc)
+
+# CycloneDDS loopback config — both unitree_mujoco and g1_ctrl must use lo interface
+# for DDS communication within a container (no physical network needed).
+COPY configs/cyclonedds.xml /etc/cyclonedds.xml
+ENV CYCLONEDDS_URI=file:///etc/cyclonedds.xml
+
+# Build g1_ctrl — C++ controller binary for sim2sim deployment
+# Uses system-installed unitree_sdk2 + ONNX Runtime from /usr/local
+RUN cd /workspace/dm-isaac-g1/unitree_rl_lab/deploy/robots/g1_29dof && \
+    mkdir -p build && cd build && \
+    cmake .. && make -j$(nproc) && \
+    echo "[ok] g1_ctrl built successfully"
 
 # HumanoidTraining — educational units (PRIVATE repo, exclude media/ to save ~451MB)
 # Requires GITHUB_TOKEN; skipped gracefully if token is not available.
