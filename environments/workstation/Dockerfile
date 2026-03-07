@@ -342,6 +342,7 @@ RUN uv pip install --system torchcodec==0.4.0 --index-url https://download.pytor
 WORKDIR /workspace
 
 ARG GITHUB_TOKEN=""
+ARG CACHEBUST=0
 
 # dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
 # Installed as editable so `import dm_isaac_g1` works immediately.

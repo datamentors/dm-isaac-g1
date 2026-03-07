@@ -305,6 +305,7 @@ RUN uv pip install --system pybind11 && \
 WORKDIR /workspace
 
 ARG GITHUB_TOKEN=""
+ARG CACHEBUST=0
 
 # dm-isaac-g1 — our main G1 training/inference project (PRIVATE repo)
 RUN if [ -n "$GITHUB_TOKEN" ]; then \

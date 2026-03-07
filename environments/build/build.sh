@@ -490,6 +490,7 @@ if [ "$BUILD_PLATFORM" = "spark" ]; then
     echo '>>> Building groot stage...' | tee -a build.log
     sudo DOCKER_BUILDKIT=1 docker build --target groot \
         --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --build-arg CACHEBUST=\$(date +%s) \
         --cache-from '$SPARK_TAG' \
         --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
         -t '$SPARK_TAG' \
@@ -599,6 +600,7 @@ else
         echo '>>> Building groot stage...' | tee -a build.log
         sudo DOCKER_BUILDKIT=1 docker build --target groot \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --build-arg CACHEBUST=\$(date +%s) \
             --cache-from '$BASE_TAG' \
             --cache-from '$GROOT_TAG' \
             --build-arg GITHUB_TOKEN='${GITHUB_TOKEN:-}' \
