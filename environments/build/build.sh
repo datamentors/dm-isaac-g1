@@ -393,6 +393,18 @@ else
     sudo systemctl start docker 2>/dev/null || true
 fi
 
+# Docker Buildx (required for DOCKER_BUILDKIT=1, not included in docker.io)
+if ! sudo docker buildx version &> /dev/null; then
+    ARCH=$(uname -m)
+    [ "$ARCH" = "x86_64" ] && BX_ARCH="amd64" || BX_ARCH="arm64"
+    BX_VER=$(curl -fsSL https://api.github.com/repos/docker/buildx/releases/latest | grep tag_name | cut -d\" -f4)
+    sudo mkdir -p /usr/lib/docker/cli-plugins
+    sudo curl -fsSL "https://github.com/docker/buildx/releases/download/${BX_VER}/buildx-${BX_VER}.linux-${BX_ARCH}" \
+        -o /usr/lib/docker/cli-plugins/docker-buildx
+    sudo chmod +x /usr/lib/docker/cli-plugins/docker-buildx
+    echo "Installed buildx ${BX_VER}"
+fi
+
 # AWS CLI v2 (awscli apt package not available on Noble ARM64)
 if ! command -v aws &> /dev/null; then
     sudo apt-get update -qq 2>/dev/null || true
