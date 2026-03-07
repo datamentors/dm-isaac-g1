@@ -351,22 +351,34 @@ RUN git lfs install && \
 # communicating via CycloneDDS over loopback interface.
 # ==============================
 
-# C++ build dependencies for unitree_sdk2 and g1_ctrl
+# C++ build dependencies for unitree_sdk2, unitree_mujoco and g1_ctrl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libyaml-cpp-dev libboost-all-dev libeigen3-dev \
-    libspdlog-dev libfmt-dev \
+    libspdlog-dev libfmt-dev libglfw3-dev \
     cmake build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# unitree_sdk2 (C++ SDK) — required by g1_ctrl for DDS robot communication
+# unitree_sdk2 (C++ SDK) — required by unitree_mujoco and g1_ctrl for DDS communication.
+# Must install to /opt/unitree_robotics (hardcoded in unitree_sdk2's cmake config).
 RUN git clone https://github.com/unitreerobotics/unitree_sdk2.git /tmp/unitree_sdk2 && \
     cd /tmp/unitree_sdk2 && mkdir build && cd build && \
-    cmake .. -DBUILD_EXAMPLES=OFF && \
+    cmake .. -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics && \
     make -j$(nproc) && make install && \
+    echo "/opt/unitree_robotics/lib" > /etc/ld.so.conf.d/unitree.conf && ldconfig && \
     rm -rf /tmp/unitree_sdk2
 
-# unitree_mujoco — G1 MuJoCo simulator with DDS communication
+# MuJoCo C++ release — required by unitree_mujoco simulator (headers + shared libs).
+# Downloaded to /opt/mujoco, then symlinked into unitree_mujoco/simulate/mujoco/.
+RUN wget -q https://github.com/google-deepmind/mujoco/releases/download/3.2.6/mujoco-3.2.6-linux-aarch64.tar.gz \
+        -O /tmp/mujoco.tar.gz && \
+    tar xzf /tmp/mujoco.tar.gz -C /opt && \
+    mv /opt/mujoco-3.2.6 /opt/mujoco && \
+    rm /tmp/mujoco.tar.gz
+
+# unitree_mujoco — G1 MuJoCo simulator with DDS communication.
+# Symlink MuJoCo release into simulate/ as required by its CMakeLists.txt.
 RUN git clone https://github.com/unitreerobotics/unitree_mujoco.git /workspace/unitree_mujoco && \
+    ln -s /opt/mujoco /workspace/unitree_mujoco/simulate/mujoco && \
     cd /workspace/unitree_mujoco/simulate && \
     mkdir build && cd build && \
     cmake .. && make -j$(nproc)
