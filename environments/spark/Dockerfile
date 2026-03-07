@@ -350,7 +350,9 @@ RUN git lfs install && \
 # Sim2Sim C++ Deploy Pipeline
 # unitree_mujoco (MuJoCo simulator with DDS) + g1_ctrl (C++ controller)
 # communicating via CycloneDDS over loopback interface.
+# Switch to plain bash shell for C++ build steps (conda wrapper breaks apt-get).
 # ==============================
+SHELL ["/bin/bash", "-c"]
 
 # C++ build dependencies for unitree_sdk2, unitree_mujoco and g1_ctrl
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -394,6 +396,9 @@ RUN cd /workspace/dm-isaac-g1/unitree_rl_lab/deploy/robots/g1_29dof && \
     mkdir -p build && cd build && \
     cmake .. && make -j$(nproc) && \
     echo "[ok] g1_ctrl built successfully"
+
+# Restore conda shell for remaining steps
+SHELL ["conda", "run", "-n", "unitree_sim_env", "/bin/bash", "-c"]
 
 # HumanoidTraining — educational units (PRIVATE repo, exclude media/ to save ~451MB)
 # Requires GITHUB_TOKEN; skipped gracefully if token is not available.
